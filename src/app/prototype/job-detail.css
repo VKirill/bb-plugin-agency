@@ -1,0 +1,15 @@
+/* Layout follows the space available inside BB, including its side panels. */
+.agency-task-layout { container: agency-task / inline-size; }
+.agency-task-grid { display: grid; grid-template-areas: "title" "sidebar" "content"; gap: 20px; }
+.agency-task-title { grid-area: title; min-width: 0; }
+.agency-task-content { grid-area: content; min-width: 0; }
+.agency-task-sidebar { grid-area: sidebar; min-width: 0; align-self: start; }
+.agency-task-sidebar-heading { display: none; }
+.agency-task-sidebar-content { display: none; }
+.agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: block; margin-top: 20px; }
+@container agency-task (min-width: 880px) {
+ .agency-task-grid { grid-template-areas: "title sidebar" "content sidebar"; grid-template-columns: minmax(0, 1fr) 288px; column-gap: 32px; align-items: start; }
+ .agency-task-sidebar-heading { display: block; }
+ .agency-task-sidebar-toggle { display: none; }
+ .agency-task-sidebar-content, .agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: block; margin-top: 20px; }
+}

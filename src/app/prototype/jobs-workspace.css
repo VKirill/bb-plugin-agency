@@ -1,0 +1,12 @@
+.agency-jobs-workspace { container: agency-jobs / inline-size; }
+.agency-jobs-grid { display: grid; grid-template-areas: "scope" "tasks"; gap: 16px; }
+.agency-jobs-main { grid-area: tasks; }
+.agency-jobs-nav { grid-area: scope; align-self: start; }
+.agency-jobs-nav-content { display: none; }
+.agency-jobs-nav[data-expanded="true"] .agency-jobs-nav-content { display: block; margin-top: 16px; }
+.agency-jobs-main [aria-label="Список задач по статусам"] { margin-inline: 0; }
+@container agency-jobs (min-width: 820px) {
+ .agency-jobs-grid { grid-template-areas: "tasks scope"; grid-template-columns: minmax(0, 1fr) 250px; gap: 24px; }
+ .agency-jobs-nav-toggle { display: none; }
+ .agency-jobs-nav-content, .agency-jobs-nav[data-expanded="true"] .agency-jobs-nav-content { display: block; margin-top: 0; }
+}

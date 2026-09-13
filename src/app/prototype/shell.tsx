@@ -1,3 +1,4 @@
+import { JobsWorkspace, type TaskScope } from "./jobs-workspace";
 import { useEffect, useState } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginNavPanelProps } from "@get-bb/plugin-sdk";
@@ -7,7 +8,7 @@ import { Button, Icon, Choice, Empty } from "./shared";
 import { JobsPage, JobDetail } from "./jobs";
 import { AgentsPage, AgentDetail, GroupsPage, GroupDetail } from "./people";
 import { AutomationsPage, AutomationDetail } from "./automation";
-import { HomePage, InboxPage, RunsPage, KnowledgePage, SettingsPage } from "./system";
+import { InboxPage, RunsPage, KnowledgePage, SettingsPage } from "./system";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
 
 export function AgencyPrototype({ subPath }: PluginNavPanelProps) {
@@ -19,18 +20,19 @@ export function AgencyPrototype({ subPath }: PluginNavPanelProps) {
  const [automations,setAutomations]=useState(()=>structuredClone(seedAutomations));
  const [hosts,setHosts]=useState<{id:string;name:string}[]>([]);
  const [message,setMessage]=useState("");const[resetOpen,setResetOpen]=useState(false);
- const [section="home",id]=subPath.split("/").filter(Boolean);
+ const [requestedSection="jobs",id]=subPath.split("/").filter(Boolean);
+ const section=requestedSection==="home"?"jobs":requestedSection;
+ const [taskScope,setTaskScope]=useState<TaskScope>({kind:"all"});
  const go=(s:string,item?:string)=>navigate.toPluginPanel("overview",{subPath:item?`${s}/${item}`:s});
  useEffect(()=>{let live=true;rpc.call("uiContext").then(r=>{if(live)setHosts(r.hosts);},()=>{if(live)setHosts([]);});return()=>{live=false;};},[rpc]);
- const reset=()=>{setJobs(structuredClone(seedJobs));setAgents(structuredClone(seedAgents));setDepartments(structuredClone(seedDepartments));setProjects(structuredClone(seedProjects));setAutomations(structuredClone(seedAutomations));setResetOpen(false);go("home");setMessage("Пример сброшен.");};
+ const reset=()=>{setJobs(structuredClone(seedJobs));setAgents(structuredClone(seedAgents));setDepartments(structuredClone(seedDepartments));setProjects(structuredClone(seedProjects));setAutomations(structuredClone(seedAutomations));setResetOpen(false);setTaskScope({kind:"all"});go("jobs");setMessage("Пример сброшен.");};
  const agent=agents.find(a=>a.id===id);const job=jobs.find(j=>j.id===id);const automation=automations.find(a=>a.id===id);
  const group=(section==="projects"?projects:departments).find(g=>g.id===id);
  const newAgent=()=>{const id=`agent-${Date.now()}`;setAgents([...agents,{...structuredClone(seedAgents[1]),id,name:"Новый сотрудник",role:"Укажите роль",skills:[],mcps:[]}]);go("agents",id);};
  const newGroup=(kind:"projects"|"departments")=>{const g={id:`group-${Date.now()}`,name:kind==="projects"?"Новый проект":"Новый отдел",description:"Опишите назначение",lead:"Мария",members:[],instructions:"",enabled:false};if(kind==="projects")setProjects([...projects,g]);else setDepartments([...departments,g]);go(kind,g.id);};
  const newAutomation=()=>{const a={...seedAutomations[0],id:`rule-${Date.now()}`,name:"Новая автоматизация",enabled:false};setAutomations([...automations,a]);go("automations",a.id);};
  let page;
- if(section==="home")page=<HomePage jobs={jobs} go={go}/>;
- else if(section==="jobs")page=id?(job?<JobDetail key={id} job={job} jobs={jobs} openJob={id=>go("jobs",id)} addJob={j=>setJobs([...jobs,j])} update={j=>setJobs(jobs.map(x=>x.id===j.id?j:x))} back={()=>go("jobs")} notice={setMessage} openRun={()=>go("runs","RUN-204")}/>:<Empty title="Задача не найдена" description="Вернитесь к списку задач."/>):<JobsPage jobs={jobs} setJobs={setJobs} open={id=>go("jobs",id)}/>;
+ if(section==="jobs")page=id?(job?<JobDetail key={id} job={job} jobs={jobs} openJob={id=>go("jobs",id)} addJob={j=>setJobs([...jobs,j])} update={j=>setJobs(jobs.map(x=>x.id===j.id?j:x))} back={()=>go("jobs")} notice={setMessage} openRun={()=>go("runs","RUN-204")}/>:<Empty title="Задача не найдена" description="Вернитесь к списку задач."/>):<JobsWorkspace jobs={jobs} setJobs={setJobs} open={id=>go("jobs",id)} agents={agents} projects={projects} departments={departments} scope={taskScope} setScope={setTaskScope} go={go}/>;
  else if(section==="agents")page=id?(agent?<AgentDetail key={id} agent={agent} update={a=>setAgents(agents.map(x=>x.id===a.id?a:x))} hosts={hosts} back={()=>go("agents")} notice={setMessage}/>:<Empty title="Сотрудник не найден" description="Выберите профиль из списка."/>):<AgentsPage agents={agents} open={id=>go("agents",id)} create={newAgent}/>;
  else if(section==="projects"||section==="departments")page=id?(group?<GroupDetail key={`${section}-${id}`} kind={section} group={group} update={g=>section==="projects"?setProjects(projects.map(x=>x.id===g.id?g:x)):setDepartments(departments.map(x=>x.id===g.id?g:x))} jobs={jobs} setJobs={setJobs} openJob={id=>go("jobs",id)} back={()=>go(section)} notice={setMessage} agents={agents} departments={departments} openAgent={id=>go("agents",id)} openDepartment={id=>go("departments",id)} people={section==="projects"?departments.map(d=>d.name):agents.map(a=>a.name)}/>:<Empty title="Запись не найдена" description="Вернитесь к списку."/>):<GroupsPage groups={section==="projects"?projects:departments} kind={section} open={id=>go(section,id)} create={()=>newGroup(section)}/>;
  else if(section==="automations")page=id?(automation?<AutomationDetail key={id} item={automation} update={a=>setAutomations(automations.map(x=>x.id===a.id?a:x))} back={()=>go("automations")} notice={setMessage}/>:<Empty title="Правило не найдено" description="Выберите автоматизацию из списка."/>):<AutomationsPage items={automations} open={id=>go("automations",id)} create={newAutomation} update={a=>setAutomations(automations.map(x=>x.id===a.id?a:x))}/>;

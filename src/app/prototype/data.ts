@@ -4,7 +4,7 @@ export const states = ["backlog", "queued", "running", "review", "blocked", "don
 export type State = typeof states[number];
 export const stateNames: Record<State, string> = { backlog: "Бэклог", queued: "К запуску", running: "В работе", review: "На проверке", blocked: "Ожидает решения", done: "Готово", canceled: "Отменено" };
 export const sections = [
-  ["home", "Обзор", "Target"], ["jobs", "Задачи", "ListTodo"],
+  ["jobs", "Задачи", "ListTodo"],
   ["agents", "Сотрудники", "Users"], ["departments", "Отделы", "Layers"],
   ["projects", "Проекты", "Folder"], ["automations", "Автоматизации", "Workflow"],
   ["inbox", "Входящие", "MessageSquare"], ["runs", "Запуски", "Terminal"],
