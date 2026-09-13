@@ -1,0 +1,23 @@
+.agency-inbox { container-type: inline-size; }
+.agency-inbox-row {
+ display: grid;
+ grid-template-columns: minmax(0, 1fr) auto auto;
+ align-items: center;
+ column-gap: 20px;
+ padding: 8px 10px;
+}
+.agency-inbox-item {
+ display: grid;
+ grid-template-columns: 20px minmax(0, 1fr);
+ align-items: center;
+ gap: 10px;
+ min-width: 0;
+ min-height: 40px;
+}
+.agency-inbox-state { display: flex; align-items: center; }
+@container (max-width: 620px) {
+ .agency-inbox-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 8px 4px; }
+ .agency-inbox-item { grid-column: 1 / -1; }
+ .agency-inbox-state { padding-left: 30px; }
+ .agency-inbox-action { min-height: 36px; }
+}
