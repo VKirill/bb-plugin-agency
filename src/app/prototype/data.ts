@@ -10,7 +10,9 @@ export const sections = [
   ["inbox", "Входящие", "MessageSquare"], ["runs", "Запуски", "Terminal"],
   ["knowledge", "Знания", "Info"], ["settings", "Настройки", "Settings"],
 ] as const;
-export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; parentId?: string; activity?: {id:string;kind:"comment"|"event";text:string;at:string}[]; }
+export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; }
+export interface TaskActivity {id:string;kind:"comment"|"event";text:string;at:string;author?:string;role?:string;providerId?:string;fileIds?:string[];}
+export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; parentId?: string; activity?: TaskActivity[]; files?:TaskFile[]; }
 export interface Agent { id: string; name: string; role: string; department: string; instructions: string; skills: string[]; mcps: string[]; selection: ExperimentalProviderModelPickerValue; permission: "auto" | "full" | "accept-edits"; hostId: string; concurrency: number; enabled: boolean; }
 export interface Group { id: string; name: string; description: string; lead: string; members: string[]; instructions: string; enabled: boolean; }
 export interface Automation { id: string; name: string; kind: string; topic: string; cron: string; timezone: string; project: string; department: string; prompt: string; enabled: boolean; }
