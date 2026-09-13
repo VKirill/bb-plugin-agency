@@ -1,3 +1,4 @@
+import type { CustomMcp } from "./mcp-config";
 import type { ExperimentalProviderModelPickerValue } from "@get-bb/plugin-sdk";
 
 export const states = ["backlog", "queued", "running", "review", "blocked", "done", "canceled"] as const;
@@ -13,7 +14,7 @@ export const sections = [
 export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; }
 export interface TaskActivity {id:string;kind:"comment"|"event";text:string;at:string;author?:string;role?:string;providerId?:string;fileIds?:string[];}
 export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; parentId?: string; activity?: TaskActivity[]; files?:TaskFile[]; }
-export interface Agent { id: string; name: string; role: string; department: string; instructions: string; skills: string[]; mcps: string[]; selection: ExperimentalProviderModelPickerValue; permission: "auto" | "full" | "accept-edits"; hostId: string; concurrency: number; enabled: boolean; }
+export interface Agent { id: string; name: string; role: string; department: string; instructions: string; skills: string[]; mcps: string[]; customMcps?: CustomMcp[]; selection: ExperimentalProviderModelPickerValue; permission: "auto" | "full" | "accept-edits"; hostId: string; concurrency: number; enabled: boolean; }
 export interface Group { acceptance?: string; id: string; name: string; description: string; lead: string; members: string[]; instructions: string; enabled: boolean; }
 export interface WebhookDraft { source:string; topic:string; auth:string; mode:string; status:string; overlap:string; }
 export interface Automation { webhook?: WebhookDraft; id: string; name: string; kind: string; topic: string; cron: string; timezone: string; project: string; department: string; prompt: string; enabled: boolean; }
