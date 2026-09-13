@@ -1,5 +1,6 @@
+import { DocumentMarkdown } from './document-properties';
 import { useEffect, useState } from 'react';
-import { Markdown, experimental_SourceCode as SourceCode } from '@get-bb/plugin-sdk/app';
+import { experimental_SourceCode as SourceCode } from '@get-bb/plugin-sdk/app';
 import { Button, Icon, TabBar, Textarea } from './shared';
 import type { TaskFile } from './data';
 
@@ -26,7 +27,7 @@ export function FileWorkspace({file,draft,onDraft,onSave,close,nativePanel=false
   <div className="agency-file-body min-w-0 overflow-auto p-4 sm:p-5">
    {file.kind==='image'?<img src={file.content} alt={file.name} className="mx-auto max-h-[65dvh] max-w-full object-contain"/>:
     mode==='Редактор'?<><label htmlFor={`file-editor-${file.id}`} className="sr-only">Исходный текст {file.name}</label><Textarea id={`file-editor-${file.id}`} value={draft} onChange={e=>onDraft(e.target.value)} spellCheck={false} className="min-h-[55dvh] w-full resize-y font-mono text-sm leading-6"/></>:
-    mode==='Чтение'&&markdown?<Markdown content={draft} className="min-w-0 break-words"/>:<SourceCode content={draft} path={file.name} overflow="scroll"/>}
+    mode==='Чтение'&&markdown?<DocumentMarkdown content={draft}/>:<SourceCode content={draft} path={file.name} overflow="scroll"/>}
   </div>
   <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{file.kind==='text'?'Правки и предыдущие версии хранятся в примере до перезагрузки.':'Вложение хранится в примере до перезагрузки.'}</p>
  </section>;
