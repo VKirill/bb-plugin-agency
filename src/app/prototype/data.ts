@@ -4,11 +4,11 @@ export const states = ["backlog", "queued", "running", "review", "blocked", "don
 export type State = typeof states[number];
 export const stateNames: Record<State, string> = { backlog: "Бэклог", queued: "К запуску", running: "В работе", review: "На проверке", blocked: "Ожидает решения", done: "Готово", canceled: "Отменено" };
 export const sections = [
-  ["home", "Обзор", "LayoutDashboard"], ["jobs", "Задачи", "ListTodo"],
+  ["home", "Обзор", "Target"], ["jobs", "Задачи", "ListTodo"],
   ["agents", "Сотрудники", "Users"], ["departments", "Отделы", "Layers"],
   ["projects", "Проекты", "Folder"], ["automations", "Автоматизации", "Workflow"],
-  ["inbox", "Входящие", "Inbox"], ["runs", "Запуски", "Activity"],
-  ["knowledge", "Знания", "BookOpen"], ["settings", "Настройки", "Settings"],
+  ["inbox", "Входящие", "MessageSquare"], ["runs", "Запуски", "Terminal"],
+  ["knowledge", "Знания", "Info"], ["settings", "Настройки", "Settings"],
 ] as const;
 export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; }
 export interface Agent { id: string; name: string; role: string; department: string; instructions: string; skills: string[]; mcps: string[]; selection: ExperimentalProviderModelPickerValue; permission: "auto" | "full" | "accept-edits"; hostId: string; concurrency: number; enabled: boolean; }
