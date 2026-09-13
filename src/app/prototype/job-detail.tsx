@@ -1,8 +1,9 @@
-import { documentTab, publishDocument, useDocumentVisible } from "./document-panel";
+import { rpcContract } from '../../shared/rpc-contract';
+import { documentSessionId, registerDocumentTarget, publishDocument, useDocumentVisible } from "./document-panel";
 import { Handoff } from "./handoff";
 import "./job-detail.css";
-import { useState, useEffect } from "react";
-import { Markdown, experimental_useAppPanel, experimental_ProviderIcon as ProviderIcon } from "@get-bb/plugin-sdk/app";
+import { useState, useEffect, useRef } from "react";
+import { Markdown, useBbNavigate, useRpc, experimental_ProviderIcon as ProviderIcon } from "@get-bb/plugin-sdk/app";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
 import { type Agent, type Job, type State, type TaskActivity, type TaskFile, states, stateNames } from "./data";
 import { exampleFiles, FileChip, FilePicker } from "./task-files";
@@ -17,7 +18,7 @@ const nextState: Partial<Record<State, string>> = {
  running:"Исполнитель готовит результат.",review:"Результат ожидает проверки.",blocked:"Нужно уточнить вводные перед продолжением.",done:"Результат принят.",canceled:"Работа отменена.",
 };
 export function JobDetail({agents,job,jobs,update,addJob,openJob,back,notice,openRun}:Props) {
- const appPanel=experimental_useAppPanel();const documentVisible=useDocumentVisible(job.id);
+ const navigate=useBbNavigate();const rpc=useRpc<typeof rpcContract>();const openSequence=useRef(0);const documentVisible=useDocumentVisible(job.id);
  const [detailsOpen,setDetailsOpen]=useState(false);
  const [comment,setComment]=useState("");const [filter,setFilter]=useState("all");
  const [editing,setEditing]=useState(false);const [title,setTitle]=useState(job.title);const [description,setDescription]=useState(job.description);
@@ -31,7 +32,17 @@ export function JobDetail({agents,job,jobs,update,addJob,openJob,back,notice,ope
  const currentFile=preview?(files.find(f=>f.id===preview.id)||preview):null;
  const draft=currentFile?(job.fileDrafts?.[currentFile.id]??currentFile.content):"";
  const [pendingPreview,setPendingPreview]=useState<{file:TaskFile|null}|null>(null);
- const selectFile=(file:TaskFile|null)=>{if(currentFile&&draft!==currentFile.content&&file?.id!==currentFile.id){setPendingPreview({file});return;}setPreview(file);if(file&&!appPanel.openFixedTab({surface:{kind:"current"},tab:documentTab,target:{jobId:job.id,fileId:file.id}}))notice("Не удалось открыть панель документа BB.");};
+ const openDocument=async(file:TaskFile)=>{
+  const sequence=++openSequence.current;
+  try{
+   const target=await rpc.call('prepareDocument',{sessionId:documentSessionId,jobId:job.id,fileId:file.id,name:file.name,content:file.content,kind:file.kind});
+   if(sequence!==openSequence.current)return;
+   registerDocumentTarget(target.path,job.id,file.id);
+   if(!navigate.experimental_openFilePreview({target:{kind:'host',...target},location:null}))notice('Не удалось открыть документ в панели BB.');
+  }catch{notice('Не удалось подготовить документ. Повторите открытие файла.');}
+ };
+ useEffect(()=>()=>{openSequence.current++;},[]);
+ const selectFile=(file:TaskFile|null)=>{if(currentFile&&draft!==currentFile.content&&file?.id!==currentFile.id){setPendingPreview({file});return;}setPreview(file);if(file)void openDocument(file);};
  const saveFile=()=>{
   if(!currentFile||draft===currentFile.content)return;
   const saved={...currentFile,content:draft,size:new TextEncoder().encode(draft).length,version:(currentFile.version||1)+1,previousVersions:[...(currentFile.previousVersions||[]),{version:currentFile.version||1,content:currentFile.content,at:new Date().toISOString()}]};
@@ -39,8 +50,9 @@ export function JobDetail({agents,job,jobs,update,addJob,openJob,back,notice,ope
   if(pendingFiles.some(f=>f.id===saved.id)){setPendingFiles(pendingFiles.map(f=>f.id===saved.id?saved:f));update({...job,fileDrafts});}
   else change({files:[...(job.files||[]).filter(f=>f.id!==saved.id),saved],fileDrafts,...(job.state==="done"?{state:"review" as const}:{})},`Вы сохранили ${saved.name}, версию ${saved.version}`);
   setPreview(saved);
+  void openDocument(saved);
  };
- const discardFile=()=>{if(currentFile){const fileDrafts={...job.fileDrafts};delete fileDrafts[currentFile.id];update({...job,fileDrafts});}const next=pendingPreview?.file||null;setPreview(next);if(next)appPanel.openFixedTab({surface:{kind:"current"},tab:documentTab,target:{jobId:job.id,fileId:next.id}});setPendingPreview(null);};
+ const discardFile=()=>{if(currentFile){const fileDrafts={...job.fileDrafts};delete fileDrafts[currentFile.id];update({...job,fileDrafts});}const next=pendingPreview?.file||null;setPreview(next);if(next)void openDocument(next);setPendingPreview(null);};
  const question=job.question||(job.id==="AG-105"?designQuestion:null);
  const answerQuestion=(answers:Answers)=>{if(!question||question.status!=="pending")return;change({question:{...question,status:"resolved",answers,draft:undefined},state:"queued"},`Вы ответили на вопросы ${job.agent}. Ответ сохранён в примере.`);};
  const initial:TaskActivity[]=hasExample?[
@@ -97,7 +109,7 @@ export function JobDetail({agents,job,jobs,update,addJob,openJob,back,notice,ope
   </div>
   <Dialog open={editing} onOpenChange={setEditing}><DialogContent><DialogHeader><DialogTitle>Редактировать задачу</DialogTitle><DialogDescription>Изменения сохранятся в примере до перезагрузки страницы.</DialogDescription></DialogHeader><TextField label="Название" value={title} onChange={setTitle}/><TextField label="Описание и критерии" value={description} onChange={setDescription} multiline/><DialogFooter><Button variant="outline" onClick={()=>setEditing(false)}>Отмена</Button><Button disabled={!title.trim()} onClick={()=>{change({title:title.trim(),description},"Вы обновили описание задачи");setEditing(false);}}>Сохранить</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={childForm} onOpenChange={setChildForm}><DialogContent><DialogHeader><DialogTitle>Новая подзадача</DialogTitle><DialogDescription>Будет связана с {job.id} и унаследует проект и исполнителя.</DialogDescription></DialogHeader><TextField label="Название подзадачи" value={childTitle} onChange={setChildTitle}/><DialogFooter><Button variant="outline" onClick={()=>setChildForm(false)}>Отмена</Button><Button disabled={!childTitle.trim()} onClick={createChild}>Создать подзадачу</Button></DialogFooter></DialogContent></Dialog>
-  <Dialog open={Boolean(pendingPreview)} onOpenChange={open=>{if(!open)setPendingPreview(null);}}><DialogContent><DialogHeader><DialogTitle>В файле есть несохранённые изменения</DialogTitle><DialogDescription>Сохраните правки или отбросьте их перед переходом.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={()=>setPendingPreview(null)}>Продолжить редактирование</Button><Button variant="outline" onClick={discardFile}>Отбросить правки</Button><Button onClick={()=>{const next=pendingPreview?.file||null;saveFile();setPreview(next);if(next)appPanel.openFixedTab({surface:{kind:"current"},tab:documentTab,target:{jobId:job.id,fileId:next.id}});setPendingPreview(null);}}>Сохранить и перейти</Button></DialogFooter></DialogContent></Dialog>
+  <Dialog open={Boolean(pendingPreview)} onOpenChange={open=>{if(!open)setPendingPreview(null);}}><DialogContent><DialogHeader><DialogTitle>В файле есть несохранённые изменения</DialogTitle><DialogDescription>Сохраните правки или отбросьте их перед переходом.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={()=>setPendingPreview(null)}>Продолжить редактирование</Button><Button variant="outline" onClick={discardFile}>Отбросить правки</Button><Button onClick={()=>{const next=pendingPreview?.file||null;saveFile();setPreview(next);if(next)void openDocument(next);setPendingPreview(null);}}>Сохранить и перейти</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={reviewing} onOpenChange={setReviewing}><DialogContent><DialogHeader><DialogTitle>Вернуть результат на доработку</DialogTitle><DialogDescription>Укажите, что требуется изменить в результате.</DialogDescription></DialogHeader><TextField label="Замечания" value={reason} onChange={setReason} multiline/><DialogFooter><Button variant="outline" onClick={()=>setReviewing(false)}>Отмена</Button><Button disabled={!reason.trim()} onClick={()=>{change({state:"running"},`Вы вернули Оффер.md, версию ${files.find(f=>f.id==="offer-v2")?.version||2}: ${reason.trim()}`);setReason("");setReviewing(false);}}>Вернуть на доработку</Button></DialogFooter></DialogContent></Dialog>
  </article>;
 }

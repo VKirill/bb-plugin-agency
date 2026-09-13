@@ -6,7 +6,10 @@ import { machineSchema, machineInventorySchema, cliPolicySchema } from "./machin
 
 import { telegramInfoSchema, telegramPreferenceSchema } from "./telegram-contract";
 
+import { documentInput } from './document-contract';
+
 export const rpcContract = defineRpcContract({
+  prepareDocument:{input:documentInput,output:z.object({hostId:z.string(),path:z.string()})},
   telegramInfo:{input:z.null(),output:telegramInfoSchema},
   telegramPreferences:{input:z.null(),output:telegramPreferenceSchema},
   configureTelegram:{input:telegramPreferenceSchema,output:z.object({saved:z.literal(true)})},

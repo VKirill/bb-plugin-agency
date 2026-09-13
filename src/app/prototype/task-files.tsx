@@ -1,3 +1,4 @@
+import { markdownShowcase } from './markdown-showcase';
 import { useRef } from "react";
 import { Button, Icon } from "./shared";
 import type { TaskFile } from "./data";
@@ -5,7 +6,7 @@ import type { TaskFile } from "./data";
 export const exampleFiles:TaskFile[] = [
  {id:"offer-v2",version:2,name:"Оффер.md",size:540,kind:"text",content:"# AI-фотосессия для вашего профиля\n\nПодберите образ и подготовьте фотографии для личной страницы.\n\n## Перед публикацией\nПроверить фактические условия услуги и согласовать формулировки.\n\n_Демонстрационный материал, версия 2._"},
  {id:"review-notes",name:"Проверка.md",size:310,kind:"text",content:"# Проверка оффера\n\n- Уточнить условия услуги перед публикацией.\n- Сопоставить обещания с актуальным описанием продукта.\n\n_Пример замечаний проверяющего._"},
- {"id": "markdown-demo", "version": 1, "name": "Возможности Markdown.md", "size": 829, "kind": "text", "content": "---\ntitle: Пример Markdown\nstatus: draft\nowner: Анна\nreview:\n  required: true\n---\n# Материалы запуска\n\nДемонстрация нативного отображения BB.\n\n## Структура папок\n\n```text\ncampaign/\n├── brief.md\n├── research/\n│   └── audience.md\n└── output/\n    └── offer.md\n```\n\n## Порядок работы\n\n```mermaid\nflowchart LR\n  A[Исследование] --> B[Текст]\n  B --> C[Проверка]\n  C --> D[Дизайн]\n```\n\n| Материал | Состояние |\n| --- | --- |\n| Бриф | Согласован |\n| Оффер | На проверке |\n\n- [x] Изучить аудиторию\n- [ ] Принять результат\n\nРасчёт: $$c = a + b$$.\n\n> Результат принимается в задаче.\n"},
+ {id:"markdown-demo",version:1,name:"Возможности Markdown.md",size:new TextEncoder().encode(markdownShowcase).length,kind:"text",content:markdownShowcase},
 ];
 export function FileChip({file,open}:{file:TaskFile;open:(f:TaskFile)=>void}) {
  return <button onClick={()=>open(file)} className="flex min-h-14 max-w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2 text-left shadow-sm transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Icon name="FileText" className="size-4"/></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.name}</span><span className="block text-xs text-muted-foreground">{Math.max(1,Math.round(file.size/1024))} КБ · Открыть</span></span></button>;

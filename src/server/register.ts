@@ -9,7 +9,17 @@ import { machineDirectory } from "./runtime/machines";
 
 import { telegramAdapter } from "./triggers/telegram";
 
+import { documentHostContract } from '../shared/document-contract';
+
 export function registerAgency(bb: BbPluginApi) {
+  const documents=bb.hosts.experimental_client({contract:documentHostContract});
+  const prepareDocument=async(input:Parameters<typeof documentHostContract.materialize.input.parse>[0])=>{
+    const parsed=documentHostContract.materialize.input.parse(input);
+    const {primaryHostId}=await bb.sdk.system.config();
+    if(!primaryHostId)throw new Error('Основная машина BB недоступна.');
+    const result=await documents.call('materialize',parsed,{hostId:primaryHostId});
+    return {hostId:primaryHostId,path:result.path};
+  };
   const telegram=telegramAdapter(bb);
   const machines=machineDirectory(bb);
   const inbox = createInbox(openDatabase(bb));
@@ -21,7 +31,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!receipt.duplicate) bb.realtime.publish("inbox-changed", null);
     return receipt;
   };
-  bb.rpc.register(rpcContract, { telegramInfo:telegram.inspect,telegramPreferences:telegram.preferences,configureTelegram:telegram.configure, machines:machines.list, machineInventory:({hostId})=>machines.inspect(hostId), setCliPolicy:machines.setPolicy, uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map(host => ({ id: host.id, name: host.name })) }), status, notify: input => notify(input, "rpc") });
+  bb.rpc.register(rpcContract, { prepareDocument, telegramInfo:telegram.inspect,telegramPreferences:telegram.preferences,configureTelegram:telegram.configure, machines:machines.list, machineInventory:({hostId})=>machines.inspect(hostId), setCliPolicy:machines.setPolicy, uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map(host => ({ id: host.id, name: host.name })) }), status, notify: input => notify(input, "rpc") });
   bb.cli.register({
     name: "agency", summary: "Каркас агентства: состояние и приём уведомлений",
     commands: [

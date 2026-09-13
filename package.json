@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-agency",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.11",
   "type": "module",
   "engines": {
     "bb": ">=0.43.1 <0.44",
@@ -13,6 +13,7 @@
       "icon": "Workflow"
     },
     "server": "./server.ts",
+    "host": "./host.ts",
     "app": "./app.tsx",
     "skills": [
       "skills"
