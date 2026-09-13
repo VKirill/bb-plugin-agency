@@ -11,13 +11,13 @@ export const sections = [
   ["inbox", "Входящие", "MessageSquare"], ["runs", "Запуски", "Terminal"],
   ["knowledge", "Знания", "Info"], ["settings", "Настройки", "Settings"],
 ] as const;
-export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; }
+export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; version?:number; previousVersions?:{version:number;content:string;at:string}[]; }
 export interface TaskActivity {id:string;kind:"comment"|"event";text:string;at:string;author?:string;role?:string;providerId?:string;fileIds?:string[];}
-export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; parentId?: string; activity?: TaskActivity[]; files?:TaskFile[]; }
+export interface Job { id: string; title: string; state: State; project: string; department: string; agent: string; priority: string; due: string; description: string; comments: string[]; parentId?: string; activity?: TaskActivity[]; files?:TaskFile[]; fileDrafts?:Record<string,string>; execution?:ExperimentalProviderModelPickerValue; question?:import("./question-contract").TaskQuestion; }
 export interface Agent { shell?:boolean; delegate?:boolean; id: string; name: string; role: string; department: string; instructions: string; skills: string[]; mcps: string[]; customMcps?: CustomMcp[]; selection: ExperimentalProviderModelPickerValue; permission: "auto" | "full" | "accept-edits"; hostId: string; concurrency: number; enabled: boolean; }
 export interface Group { returnLimit?:string; acceptance?: string; id: string; name: string; description: string; lead: string; members: string[]; instructions: string; enabled: boolean; }
 export interface WebhookDraft { source:string; topic:string; auth:string; mode:string; status:string; overlap:string; }
-export interface Automation { missed?:string; overlap?:string; tries?:string; webhook?: WebhookDraft; id: string; name: string; kind: string; topic: string; cron: string; timezone: string; project: string; department: string; prompt: string; enabled: boolean; }
+export interface Automation { actionKind?:string; missed?:string; overlap?:string; tries?:string; webhook?: WebhookDraft; id: string; name: string; kind: string; topic: string; cron: string; timezone: string; project: string; department: string; prompt: string; enabled: boolean; }
 export const skillOptions = ["copywriter", "ru-text", "ru-check", "ui-review", "app-architect", "social-insights", "text-insights", "google-search-console", "yandex-metrica", "video-to-reels", "browser-automation"];
 export const mcpOptions = ["Документы", "Браузер", "Google Search Console", "Яндекс Метрика", "Генерация изображений", "Telegram", "GitHub"];
 export const seedAgents: Agent[] = [

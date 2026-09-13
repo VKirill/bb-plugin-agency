@@ -5,7 +5,13 @@ import { createInbox } from "./inbox/store";
 import { receiveNotification } from "./triggers/notify";
 import { assessIsolation } from "./runtime/isolation";
 
+import { machineDirectory } from "./runtime/machines";
+
+import { telegramAdapter } from "./triggers/telegram";
+
 export function registerAgency(bb: BbPluginApi) {
+  const telegram=telegramAdapter(bb);
+  const machines=machineDirectory(bb);
   const inbox = createInbox(openDatabase(bb));
   const status = () => ({ phase: "scaffold" as const,
     execution: "unavailable" as const,
@@ -15,7 +21,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!receipt.duplicate) bb.realtime.publish("inbox-changed", null);
     return receipt;
   };
-  bb.rpc.register(rpcContract, { uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map(host => ({ id: host.id, name: host.name })) }), status, notify: input => notify(input, "rpc") });
+  bb.rpc.register(rpcContract, { telegramInfo:telegram.inspect,telegramPreferences:telegram.preferences,configureTelegram:telegram.configure, machines:machines.list, machineInventory:({hostId})=>machines.inspect(hostId), setCliPolicy:machines.setPolicy, uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map(host => ({ id: host.id, name: host.name })) }), status, notify: input => notify(input, "rpc") });
   bb.cli.register({
     name: "agency", summary: "Каркас агентства: состояние и приём уведомлений",
     commands: [

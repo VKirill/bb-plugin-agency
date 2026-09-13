@@ -13,3 +13,13 @@
  .agency-task-sidebar-toggle { display: none; }
  .agency-task-sidebar-content, .agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: block; margin-top: 20px; }
 }
+.agency-file-body { min-height: 360px; max-height: 72dvh; }
+.agency-file-body pre { max-width: 100%; overflow-x: auto; }
+@container agency-task (max-width: 600px) {
+ .agency-file-body { min-height: 280px; max-height: none; }
+}
+/* Native BB document pane replaces the property rail, never the task body. */
+.agency-task-layout[data-document-visible="true"] .agency-task-grid { grid-template-areas: "title" "content"; grid-template-columns: minmax(0,1fr); }
+.agency-task-layout[data-document-visible="true"] .agency-task-sidebar { display: none; }
+
+.agency-native-doc .agency-file-body { min-height: 0; max-height: none; }
