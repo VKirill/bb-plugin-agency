@@ -1,9 +1,9 @@
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
-import { OverviewPage } from "./src/app/pages/overview";
+import { AgencyPrototype } from "./src/app/prototype/shell";
 
 export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "agency", title: "Агентство", icon: "Workflow",
-    path: "overview", component: OverviewPage,
+    path: "overview", component: AgencyPrototype,
   });
 });

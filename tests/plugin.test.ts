@@ -1,10 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost, makeHostResponse } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server";
 
 const signal = { projectId: "proj_test", eventId: "research-1", topic: "research.delivered", reference: "artifact-1" };
 
 describe("agency notification scaffold", () => {
+  it("exposes only machine identity to the prototype", async () => {
+    const { bb, harness } = createFakePluginHost({ pluginId: "agency", sdk: {
+      hosts: { list: async () => [makeHostResponse({ id: "host-mini", name: "Mac mini" })] },
+    }});
+    try {
+      await plugin(bb);
+      expect(await harness.behavior.callRpc("uiContext", null)).toEqual({ hosts: [{id:"host-mini",name:"Mac mini"}] });
+      expect(harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
+    } finally { await harness.lifecycle.dispose(); }
+  });
   it("persists through reload without starting workers", async () => {
     let { bb, harness } = createFakePluginHost({ pluginId: "agency" });
     try {

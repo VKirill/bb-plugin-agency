@@ -15,7 +15,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!receipt.duplicate) bb.realtime.publish("inbox-changed", null);
     return receipt;
   };
-  bb.rpc.register(rpcContract, { status, notify: input => notify(input, "rpc") });
+  bb.rpc.register(rpcContract, { uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map(host => ({ id: host.id, name: host.name })) }), status, notify: input => notify(input, "rpc") });
   bb.cli.register({
     name: "agency", summary: "Каркас агентства: состояние и приём уведомлений",
     commands: [
