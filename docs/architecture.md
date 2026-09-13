@@ -59,3 +59,10 @@ Artifact, Review, Rule, Automation, Occurrence, Inbox, Outbox, Lease.
   RuleMatch, ActionIntent, Approval, DeliveryAttempt, модули и порядок обработки.
 - [Контекст и уровни инструкций](instruction-context.md): PolicyVersion,
   ContextSnapshot, пересечение прав и межотдельная передача.
+
+## Ревью alpha.9
+
+[Ревью продукта и критерии следующей версии](product-review.md) уточняет
+ID/membership и привязки BB, сохранение/revision, работу в общей папке,
+жизненный цикл назначения/ответа/повтора/остановки и сценарии первого запуска.
+Реализованные UI-исправления и оставшиеся пункты разделены в таблице всех экранов.

@@ -1,12 +1,13 @@
 import type { Automation, WebhookDraft } from "./data";
 import { Button, TextField, Field, Choice, Panel } from "./shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 const defaults:WebhookDraft={source:"Контентный workflow",topic:"research.delivered",auth:"hmac",mode:"observe",status:"ready",overlap:"queue"};
 export function WebhookEditor({item,update}:{item:Automation;update:(a:Automation)=>void}) {
  const config={...defaults,...item.webhook};
  const change=(patch:Partial<WebhookDraft>)=>update({...item,webhook:{...config,...patch}});
  const [sample,setSample]=useState(JSON.stringify({schemaVersion:1,eventId:"example-001",topic:"research.delivered",occurredAt:"2026-09-13T18:00:00Z",subject:{externalId:"research-42",version:"1"},data:{status:"ready",reference:"artifact:research-42"}},null,2));
  const [verdict,setVerdict]=useState("");
+ useEffect(()=>setVerdict(""),[item]);
  const preview=()=>{try{const body=JSON.parse(sample);if(body.schemaVersion!==1||typeof body.eventId!=="string"||!body.eventId.trim()||typeof body.topic!=="string"||typeof body.subject?.externalId!=="string")throw new Error("Нужны schemaVersion: 1, eventId, topic и subject.externalId.");if(body.topic!==config.topic||config.status&&body.data?.status!==config.status){setVerdict("Условия не совпали. Событие осталось бы в журнале без действия.");return;}setVerdict(config.mode==="off"?"Источник выключен: новые события не принимаются.":config.mode==="observe"?"Условия совпали. Режим наблюдения: только запись в журнал.":config.mode==="approval"?`Условия совпали. Во «Входящих» появилось бы согласование для отдела «${item.department}».`:`Условия совпали. В проекте «${item.project}» создалась бы задача отделу «${item.department}» по шаблону из вкладки «Действие».`);}catch(error){setVerdict(`Проверьте пример: ${error instanceof Error?error.message:"неверный JSON"}`);}};
  return <div className="space-y-5">
   <Panel title="Источник уведомлений"><div className="grid gap-4 md:grid-cols-2"><TextField label="Название источника" value={config.source} onChange={source=>change({source})}/><Field label="Режим работы"><Choice label="Режим вебхука" value={config.mode} onChange={mode=>change({mode})} options={[{value:"off",label:"Выключен"},{value:"observe",label:"Только наблюдать"},{value:"approval",label:"Запрашивать подтверждение"},{value:"auto",label:"Автоматически"}]}/></Field></div><p className="mt-3 text-xs text-muted-foreground">Привязан к проекту «{item.project}». Адресат и поручение задаются во вкладке «Действие».</p></Panel>

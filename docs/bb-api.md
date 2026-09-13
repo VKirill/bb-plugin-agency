@@ -29,3 +29,14 @@ testing. Точные типы находятся в закреплённом п
 глобальных/native skills CLI, инструментов shell и полномочий BB CLI. Выбор
 галочек должен контролировать фактическую конфигурацию процесса, включая resume
 и параллельные профили. Смена cwd или запись mcp.json не считается доказательством.
+
+## Повторная проверка SDK при ревью alpha.9
+
+В bundled-types/bb-plugin-sdk.d.ts версии 0.4.87 сверены ThreadSpawnArgs /
+createThreadRequestSchema: есть environment, providerId, model, permissionMode,
+reasoningLevel, serviceTier, visibility, metadata; per-thread mcpIds/skillIds
+в этом контракте нет. executionInputSources отмечает источник выбора модели/CLI,
+а не доступные инструменты. Возможности адаптеров требуют отдельного spike.
+background.schedule: durable row при загрузке, CAS по next_run_at, пять полей,
+локальное время сервера и выполнение только пока плагин загружен. Это не
+гарантирует исполнение Job/повтор внешнего эффекта; для этого нужен наш журнал.

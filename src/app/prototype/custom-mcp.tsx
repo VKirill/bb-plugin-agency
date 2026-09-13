@@ -25,7 +25,7 @@ export function CustomMcpEditor({items, reservedNames, onChange}: {items:CustomM
     } catch(e) { setPreview(null); setError(e instanceof Error ? e.message : 'Не удалось проверить JSON.'); }
   };
   return <section className="space-y-3">
-    <PageHead title="Собственные MCP" description="Дополнительные подключения только для этого сотрудника."><Button variant="outline" onClick={()=>edit()}>Добавить MCP через JSON</Button></PageHead>
+    <PageHead level={2} title="Собственные MCP" description="Дополнительные подключения только для этого сотрудника."><Button variant="outline" onClick={()=>edit()}>Добавить MCP через JSON</Button></PageHead>
     {items.length>0 && <div className="divide-y divide-border rounded-lg border border-border">{items.map(item=><div key={item.name} className="flex flex-wrap items-center gap-3 px-3 py-3">
       <Switch aria-label={`Использовать ${item.name}`} checked={item.enabled} onCheckedChange={enabled=>onChange(items.map(i=>i.name===item.name?{...i,enabled}:i))}/>
       <div className="min-w-0 flex-1"><p className="break-all text-sm font-medium">{item.name}</p><p className="text-xs text-muted-foreground">{mcpTransport(item.config)} · {item.enabled?'Выбран':'Выключен'} · Не подключён</p></div>
