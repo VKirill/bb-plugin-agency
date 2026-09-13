@@ -1,5 +1,5 @@
 import { experimental_ProviderIcon, experimental_useProviders } from "@get-bb/plugin-sdk/app";
-import { useId, type ReactNode } from "react";
+import { useId, type ComponentProps, type ReactNode } from "react";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Textarea } from "../../../components/ui/textarea";
@@ -25,3 +25,7 @@ export function Collection({columns,rows}:{columns:string[];rows:{id:string;name
 }
 
 export function AgentMark({id,className="size-5"}:{id:string;className?:string}) { const {providers}=experimental_useProviders();const ProviderIcon=experimental_ProviderIcon;return <ProviderIcon providerKind="agent" provider={providers.find(p=>p.id===id)||{id}} fallback="Bot" className={className}/>; }
+
+export function SearchInput({className="",...props}:ComponentProps<"input">) {
+ return <div className={`relative w-full max-w-sm ${className}`}><Icon name="Search" aria-hidden className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"/><Input {...props} type="search" className="h-9 border-foreground/25 bg-muted/30 pl-9 pr-3 shadow-sm hover:border-foreground/40 focus-visible:bg-background"/></div>;
+}

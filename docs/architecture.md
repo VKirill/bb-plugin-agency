@@ -52,3 +52,10 @@ Artifact, Review, Rule, Automation, Occurrence, Inbox, Outbox, Lease.
 Сборка и тесты каркаса не подтверждают изоляцию, автопилот или установку.
 Страница прямо сообщает текущий этап. Отсутствующий адаптер не заменяется
 промптом «не используй остальные инструменты».
+
+## Уточнения контрактов
+
+- [Автоматизации и webhook](automation-architecture.md): источники, RuleVersion,
+  RuleMatch, ActionIntent, Approval, DeliveryAttempt, модули и порядок обработки.
+- [Контекст и уровни инструкций](instruction-context.md): PolicyVersion,
+  ContextSnapshot, пересечение прав и межотдельная передача.
