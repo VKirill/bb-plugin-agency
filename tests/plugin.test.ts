@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createFakePluginHost, makeHostResponse } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server";
+import { statusSchema } from "../src/shared/schemas";
 
 const signal = { projectId: "proj_test", eventId: "research-1", topic: "research.delivered", reference: "artifact-1" };
 
@@ -21,7 +22,13 @@ describe("agency notification scaffold", () => {
       await plugin(bb);
       expect(await harness.behavior.callRpc("notify", signal)).toMatchObject({ accepted: true, duplicate: false, execution: "unavailable" });
       ({ bb, harness } = await harness.lifecycle.reload(plugin));
-      expect(await harness.behavior.callRpc("status", null)).toMatchObject({ inboxCount: 1, execution: "unavailable" });
+      const status = statusSchema.parse(await harness.behavior.callRpc("status", null));
+      expect(status).toMatchObject({
+        inboxCount: 1,
+        phase: "runtime",
+        execution: "requires_readiness",
+      });
+      expect(status.reason).toMatch(/getIsolationReadiness/);
       expect(await harness.behavior.callRpc("notify", signal)).toMatchObject({ duplicate: true });
       expect(harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
     } finally { await harness.lifecycle.dispose(); }

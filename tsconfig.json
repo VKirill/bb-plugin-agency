@@ -22,6 +22,7 @@
   },
   "include": [
     "server.ts",
+    "host.ts",
     "app.tsx",
     "src",
     "tests",

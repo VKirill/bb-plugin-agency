@@ -14,8 +14,13 @@ export const receiptSchema = z.object({
   eventId: z.string(), accepted: z.literal(true), duplicate: z.boolean(),
   state: z.literal("pending"), execution: z.literal("unavailable"),
 }).strict();
+export const STATUS_REQUIRES_READINESS_REASON =
+  "status does not grant launch. Call getIsolationReadiness with jobId; without jobId launchAllowedForAssigned stays false.";
+
 export const statusSchema = z.object({
-  phase: z.literal("scaffold"), execution: z.literal("unavailable"),
-  reason: z.string(), inboxCount: z.number().int().nonnegative(),
+  phase: z.literal("runtime"),
+  execution: z.literal("requires_readiness"),
+  reason: z.string(),
+  inboxCount: z.number().int().nonnegative(),
 }).strict();
 export type AgencyStatus = z.infer<typeof statusSchema>;

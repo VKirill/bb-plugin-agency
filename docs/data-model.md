@@ -1,7 +1,8 @@
 # Данные и состояния первой рабочей версии
 
-Проект контракта от 14 сентября 2026. Это требования к миграциям и сервисам,
-а не утверждение, что таблицы уже созданы. [Текущая реализация](architecture.md).
+Сверено 2026-09-14. Таблицы этапа 1, RunAttempt, receipt, job input и
+`agency_job_needs_input` уже в миграциях. Ниже — контракт полей и переходов,
+не план «создать SQL». [Реализация](architecture.md).
 
 ## Идентификаторы и принадлежность
 
@@ -26,7 +27,7 @@ expectedRevision и requestId; конфликт не перезаписывае�
 | JobDependency | jobId, dependsOnJobId | Нет циклов и self-link; смена зависимости не отменяет выполненную работу молча |
 | RunAttempt | id, jobId, attemptNo, launchId, snapshotId, state | threadId отсутствует только до bind/при неопределённом запуске; attemptNo уникален в Job |
 | ContextSnapshot | id, instruction versions, input artifact versions, effective policy, CLI/host/environment | Immutable; сохраняется до spawn; происхождение каждого уровня видно |
-| Artifact / ArtifactVersion | artifactId, jobId, version, hostId, relativePath, mime, size, hash, authorRunId | Версии неизменяемы; source-файл и preview не одно и то же |
+| Artifact / ArtifactVersion | artifactId, jobId, version, hostId, relativePath, mime, size, hash, author | Версии неизменяемы; source-файл и preview не одно и то же; автор — user или run |
 | Review | id, jobId, artifactVersionIds/hashes, reviewer, decision, comment | Возврат требует замечание; принятие не относится к будущим версиям |
 | Interaction | id, jobId, runId, threadId, bbInteractionId, kind, version, state | Ответ адресуется исходному запросу; двойная отправка не создаёт два ответа |
 | Activity | id, jobId, actor, kind, causationId, timestamp, references | Автор/агент и служебное событие различаются; неизменяемая история без секретов |
@@ -45,20 +46,42 @@ ProjectBinding/Department, Job/Dependency, Artifact/Version и Activity. Ост�
 таблицы добавлять на своём этапе. Тип сущности не обязательно равен одной таблице:
 снимки могут храниться валидированным JSON с индексами внешних связей.
 
+Автор версии артефакта — явное происхождение, не обязательный Run. Пользователь
+может прикрепить файл до первого запуска: `author = { kind: "user", userId }`.
+Версия, созданная исполнением, использует `author = { kind: "run", runId }`.
+Фиктивный Run для пользовательского вложения не создавать. Приёмка относится к
+конкретным artifactId+jobId+version+hash; чужой файл или задача с тем же hash
+не принимаются.
+
 ## Состояния задачи и запуска
 
 Job: `backlog → queued → running → review → done`.
-`waiting_input` — открыт вопрос пользователю; `blocked` — техническая причина или
-зависимость; `canceled` — явная отмена. Причина, ожидаемый участник и следующий шаг
-хранятся отдельно от статуса. В интерфейсе не сводить все причины к «ждёт решения».
+`waiting_input` — открыт вопрос пользователю **после typed** `reportNeedsInput`
+(Job и attempt, durable questions); watcher completion этого не делает.
+Общий `transitionJob` не заменяет эту команду для worker. `blocked` — техническая причина или
+зависимость, тоже не автомат idle. `canceled` — явная отмена. Причина, ожидаемый
+участник и следующий шаг хранятся отдельно от статуса. В интерфейсе не сводить
+все причины к «ждёт решения».
+После `idle` без hash-проверенной текущей ArtifactVersion Job остаётся `running`.
+`idle` + такая версия → `review`, не `done` и не accept.
 
 - Из backlog в queued: есть исполнитель, привязка, бриф и критерий готовности.
 - Из queued в running: успешная привязка запущенного треда к Run.
 - Из running в review: результат опубликован с версиями и готов к проверке.
 - Из review в done: соблюдена review policy и принята текущая версия результата.
 - Возврат из review создаёт задание доработки; замечание обязательно.
-- Ответ на вопрос закрывает только соответствующий Interaction; следующий статус
-  зависит от оставшихся вопросов/блокировок и подтверждённого продолжения BB.
+- Durable вопрос воркера — `reportNeedsInput` / `getJob.needsInput`, не BB
+  `threads.interactions` (эта таблица Interaction ещё целевая). Комментарий
+  не закрывает `waiting_input`; возврат в running требует confirmed continuation
+  и `openQuestions=false`. Возврат в running — typed `answerNeedsInput` (тот же
+attempt/thread, official send). `transitionJob` и комментарий не заменяют команду.
+`agency_job_needs_input_wait` — история циклов (`waitId`); один открытый wait
+на Job (`closed_at IS NULL`). `agency_job_needs_input_answer` хранит answers и
+`send_state` на `waitId`. Replay `requestId` привязан к своему wait: старый
+успех не закрывает новый цикл. `agency_job_needs_input_amendment` — неизменяемые
+проверенные тексты/хеши текущего процесса и задачи плюс process id снимка
+запуска. Recover `unknown` → `needs_reconciliation` без send; повторная
+доставка только при доказанном `absent`. `queued` не есть активный turn.
 - Завершение всех подзадач делает родителя готовым к его приёмке, но не done автоматически.
 - Новая правка принятого результата создаёт версию и требует повторной проверки.
 - Отмена сначала запрещает новые действия; UI различает «остановка запрошена» и
@@ -69,6 +92,12 @@ Run: `preparing → starting → running → waiting_input → running → succe
 неизвестного исхода запуска/остановки. `succeeded` — завершение попытки, не приёмка Job.
 Один основной активный Run на Job в первой версии. Параллельная работа — отдельная
 подзадача с явным владельцем ресурсов, а не второй писатель той же задачи.
+
+Persisted RunAttempt хранит `prepared` (= preparing), `launching` (= starting),
+`unknown` (= reconciling), плюс `running` / `waiting_input` / `awaiting_review` /
+`succeeded` / `failed` / `canceled`. Spawn — отдельный coordinator, не сама таблица.
+`unknown` ≠ `failed`: неопределённый транспорт не ретраит spawn автоматически.
+Job.state не становится `running`, пока нет подтверждённого `threadId`.
 
 Interaction: `pending → submitting → resolved`; также expired/canceled/stale.
 При таймауте resolve сначала проверить исход BB. Не отправлять повторно вслепую.

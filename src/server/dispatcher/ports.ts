@@ -1,9 +1,25 @@
-import type { RunSnapshot } from "../../domain/models";
+import { fail, type DomainResult } from "../../domain";
+import type { RuleAction } from "../../shared/contracts";
 
-// A port, not an implementation. No spawn until the isolation milestone passes.
-export interface RunLauncher {
-  launch(run: RunSnapshot): Promise<{ threadId: string }>;
+/** Prepare/launch from dispatcher. Default implementation is unavailable until shared integration. */
+export type DispatcherLaunchPort = {
+  enqueueLaunch(input: {
+    intentId: string;
+    action: RuleAction;
+    fencingToken: string;
+    fencingGeneration: number;
+    launchId: string;
+  }): Promise<DomainResult<{ jobId: string | null; launchId: string | null }>>;
+};
+
+export type DispatcherPreparePort = DispatcherLaunchPort;
+
+export function unavailableDispatcherLaunchPort(): DispatcherLaunchPort {
+  return {
+    async enqueueLaunch() {
+      return fail("capability_unavailable", "dispatcher launch port is unavailable until shared integration");
+    },
+  };
 }
-export interface Reconciler {
-  reconcile(signal: AbortSignal): Promise<void>;
-}
+
+export { unavailableDispatcherLaunchPort as unavailableDispatcherPreparePort };

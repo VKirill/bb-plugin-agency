@@ -9,7 +9,7 @@
 | Компонент | Проверено | Условие |
 | --- | --- | --- |
 | BB | 0.43.1 | engines.bb >=0.43.1 <0.44 |
-| Plugin SDK | pin и host 0.4.87 | engines.bbPluginSdk >=0.4.87 <0.5; dev pin exact |
+| Plugin SDK | compile pin `0.4.87-agy16.431` file:vendor; host production 0.4.87 | engines.bbPluginSdk >=0.4.87 <0.5 (CRUD на ordinary runtime). Spawn только GET `/api/v1/system/experimental_thread-spawn-contract`, не engines |
 | Агентство | 0.1.0-alpha.12 | path установка, running |
 | Telegram Projects | 0.5.1, optional API v1 | Наличие/версию проверять capabilities, не по названию |
 | Node в shell проверки | 26.3.1 | Не доказательство версии процесса сервера или поддержки Node 22 |
@@ -32,8 +32,22 @@
 | @radix-ui/react-tabs | ^1.1.21 | 1.1.21 | prod | Компонент, bundled |
 | cron-parser | ^5.5.0 | 5.10.1 | prod | Вычисление cron preview и будущих occurrences |
 | yaml | ^2.9.1 | 2.9.1 | prod | Frontmatter |
+| @tiptap/core | 3.31.3 | 3.31.3 | prod | Markdown editor; GHSA-cp6q-959q-f8rh, patched ≥3.30.4. Docs pin 2.27.2 уязвим, не гарантия |
+| @tiptap/pm | 3.31.3 | 3.31.3 | prod | peer core |
+| @tiptap/starter-kit | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/markdown | 3.31.3 | 3.31.3 | prod | official markdown parse/serialize; замена tiptap-markdown 0.8.10 |
+| @tiptap/extension-link | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-list | 3.31.3 | 3.31.3 | prod | peer TaskList/TaskItem |
+| @tiptap/extension-placeholder | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extensions | 3.31.3 | 3.31.3 | prod | peer Placeholder |
+| @tiptap/extension-table | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-table-cell | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-table-header | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-table-row | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-task-item | 3.31.3 | 3.31.3 | prod | editor |
+| @tiptap/extension-task-list | 3.31.3 | 3.31.3 | prod | editor |
 | zod | ^4.3.6 | 4.6.4 | prod | RPC/данные, bundled |
-| @get-bb/plugin-sdk | 0.4.87 | 0.4.87 | dev | SDK и декларации, точный pin |
+| @get-bb/plugin-sdk | file:vendor/get-bb-plugin-sdk-0.4.87-agy16.431.tgz | 0.4.87-agy16.431 | dev | Compile pin SHA256 a517adf2…; engines не readiness; GET spawn-contract = runtime gate |
 | @pierre/diffs | ^1.2.9 | 1.4.2 | dev | BB shim, локальная версия для разработки |
 | @radix-ui/react-alert-dialog | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
 | @radix-ui/react-context-menu | ^2.3.3 | 2.3.7 | dev | BB shim, портальный UI |
@@ -57,7 +71,7 @@
 | tailwind-merge | ^3.4.0 | 3.7.0 | dev | BB shim, CSS helpers |
 | typescript | ^5.7.0 | 5.9.3 | dev | Typecheck |
 | vaul | ^1.1.2 | 1.1.2 | dev | BB shim, drawer |
-| vitest | ^3.2.0 | 3.2.7 | dev | Тесты; см. advisory ниже |
+| vitest | 4.1.11 | 4.1.11 | dev | Тесты |
 
 ## Политика пакетов
 
@@ -81,15 +95,14 @@ Native Markdown включает нужные рендереры; Mermaid/KaTeX 
 
 ## Audit и запланированное обновление
 
-Полный `npm audit`: 2 moderate findings (vitest и @vitest/mocker, **одна** advisory),
-0 high/critical. `npm audit --omit=dev`: 0 findings. Установлен Vitest 3.2.7.
-[GHSA-82fw-gwwq-j7x9 от разработчиков Vitest](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)
-описывает чтение файлов через redirect mock при доступе к dev-server WebSocket.
-Исправления есть в 4.1.11 и 5.0.0; 3.x не получает исправление. Текущий запуск —
-node `vitest run`, публичный mocker/dev server не настроен; это не подтверждённая
-уязвимость production-плагина.
+Проверено 2026-09-14 04:01 +02:00: `npm audit --omit=dev` — **0 findings**.
+TipTap поднят с 2.27.2 до exact **3.31.3** (core и согласованные editor-пакеты),
+markdown — official `@tiptap/markdown@3.31.3`. Референс Docs 2.27.2 содержит
+[GHSA-cp6q-959q-f8rh](https://github.com/advisories/GHSA-cp6q-959q-f8rh)
+(`mergeAttributes` / `__proto__` при `@tiptap/core` < 3.30.4) и не используется
+как pin безопасности. `npm audit fix --force` не применялся; версии выбраны
+через `npm view` peerDependencies.
 
-План этапа 0: проверить переход на исправленную совместимую 4.1.x, либо 5.x,
-с SDK harness, Node baseline, lock и всеми тестами. npm audit предлагает major
-upgrade; не применять force fix автоматически. До обновления не открывать наружу
-тестовый mocker server. Сохранённый audit отражает дату проверки, не вечную гарантию.
+Vitest в lock — 4.1.11. Полный `npm audit` (с dev) не обещает 0: смотреть
+актуальный отчёт, не эту строку. Сохранённый audit — дата проверки, не вечная
+гарантия.

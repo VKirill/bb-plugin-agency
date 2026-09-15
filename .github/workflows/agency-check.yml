@@ -1,0 +1,59 @@
+# Node "22.19" is the declared bb-app 0.43.1 floor for this job.
+# Local Mini proof of the suite is Node 26.3.1 only; Node 22 CI has not been executed.
+name: Agency check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+      - name: Install plugin
+        run: npm ci --include=dev
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: SDK pin offline
+        run: |
+          node --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+          const pin = pkg.devDependencies["@get-bb/plugin-sdk"];
+          const locked = lock.packages["node_modules/@get-bb/plugin-sdk"]?.version;
+          if (pin !== "0.4.87" || locked !== "0.4.87") {
+            throw new Error(`SDK pin offline mismatch: package ${pin} lock ${locked}`);
+          }
+          if (pkg.dependencies?.["bb-app"] || pkg.devDependencies?.["bb-app"]) {
+            throw new Error("bb-app must not be in the plugin package graph");
+          }
+          if (lock.packages["node_modules/bb-app"]) {
+            throw new Error("bb-app must not be in package-lock");
+          }
+          console.log("SDK pin offline: @get-bb/plugin-sdk 0.4.87 exact");
+          '
+      - name: Build with isolated bb-app
+        run: |
+          TOOLCHAIN="$RUNNER_TEMP/bb-toolchain"
+          mkdir -p "$TOOLCHAIN"
+          npm install --prefix "$TOOLCHAIN" bb-app@0.43.1
+          test -x "$TOOLCHAIN/node_modules/.bin/bb"
+          "$TOOLCHAIN/node_modules/.bin/bb" --version
+          "$TOOLCHAIN/node_modules/.bin/bb" plugin build
+      - name: Record isolated bb-app audit
+        if: always()
+        run: |
+          echo "Isolated bb-app@0.43.1 audit (not a plugin gate; advisories are not removed by isolation)"
+          npm audit --prefix "$RUNNER_TEMP/bb-toolchain" || true
+      - name: Plugin production audit
+        run: npm audit --omit=dev
+      - name: Plugin full audit
+        run: npm audit

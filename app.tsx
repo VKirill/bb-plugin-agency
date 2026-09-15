@@ -1,5 +1,6 @@
 import { DocumentPanel } from "./src/app/prototype/document-panel";
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
+import { AgencySidebarAccessory } from "./src/app/sidebar-accessory";
 import { AgencyPrototype } from "./src/app/prototype/shell";
 
 export default definePluginApp((app) => {
@@ -7,5 +8,6 @@ export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "agency", title: "Агентство", icon: "Workflow",
     path: "overview", component: AgencyPrototype,
+    experimental_sidebarAccessory: AgencySidebarAccessory,
   });
 });

@@ -4,7 +4,7 @@ import { Switch } from "../../../components/ui/switch";
 import { Button, Textarea, PageHead } from "./shared";
 import { parseMcpImport, mcpExample, mcpTransport, type CustomMcp } from "./mcp-config";
 
-export function CustomMcpEditor({items, reservedNames, onChange}: {items:CustomMcp[];reservedNames:string[];onChange:(items:CustomMcp[])=>void}) {
+export function CustomMcpEditor({items, reservedNames, onChange, disabled=false}: {items:CustomMcp[];reservedNames:string[];onChange:(items:CustomMcp[])=>void;disabled?:boolean}) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string|null>(null);
   const [text, setText] = useState('');
@@ -25,11 +25,11 @@ export function CustomMcpEditor({items, reservedNames, onChange}: {items:CustomM
     } catch(e) { setPreview(null); setError(e instanceof Error ? e.message : 'Не удалось проверить JSON.'); }
   };
   return <section className="space-y-3">
-    <PageHead level={2} title="Собственные MCP" description="Дополнительные подключения только для этого сотрудника."><Button variant="outline" onClick={()=>edit()}>Добавить MCP через JSON</Button></PageHead>
+    <PageHead level={2} title="Собственные MCP" description={disabled?"Свои MCP в версии профиля не хранятся — только идентификаторы из каталога.":"Дополнительные подключения только для этого сотрудника."}>{!disabled&&<Button variant="outline" onClick={()=>edit()}>Добавить MCP через JSON</Button>}</PageHead>
     {items.length>0 && <div className="divide-y divide-border rounded-lg border border-border">{items.map(item=><div key={item.name} className="flex flex-wrap items-center gap-3 px-3 py-3">
-      <Switch aria-label={`Использовать ${item.name}`} checked={item.enabled} onCheckedChange={enabled=>onChange(items.map(i=>i.name===item.name?{...i,enabled}:i))}/>
+      <Switch aria-label={`Использовать ${item.name}`} checked={item.enabled} disabled={disabled} onCheckedChange={enabled=>onChange(items.map(i=>i.name===item.name?{...i,enabled}:i))}/>
       <div className="min-w-0 flex-1"><p className="break-all text-sm font-medium">{item.name}</p><p className="text-xs text-muted-foreground">{mcpTransport(item.config)} · {item.enabled?'Выбран':'Выключен'} · Не подключён</p></div>
-      <div className="flex gap-1"><Button size="sm" variant="ghost" aria-label={`Изменить ${item.name}`} onClick={()=>edit(item)}>Изменить</Button><Button size="sm" variant="ghost" aria-label={`Удалить ${item.name}`} onClick={()=>onChange(items.filter(i=>i.name!==item.name))}>Удалить</Button></div>
+      {!disabled&&<div className="flex gap-1"><Button size="sm" variant="ghost" aria-label={`Изменить ${item.name}`} onClick={()=>edit(item)}>Изменить</Button><Button size="sm" variant="ghost" aria-label={`Удалить ${item.name}`} onClick={()=>onChange(items.filter(i=>i.name!==item.name))}>Удалить</Button></div>}
     </div>)}</div>}
     <p className="text-xs text-muted-foreground">JSON хранится в примере до обновления страницы. Серверы не запускаются и доступы CLI не меняются.</p>
     <Dialog open={open} onOpenChange={value=>{if(!value)close();}}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">

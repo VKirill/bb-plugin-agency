@@ -43,6 +43,11 @@ pending. Повтор projectId+eventId с теми же данными возв
 потребуются проверка проекта/источника и явное включение правила. Уведомления
 каркаса нельзя автоматически проигрывать при обновлении до запускающей версии.
 
+Typed контур (AGY-11): `ingestInboxEvent` → версия правила → match → outbox/claim.
+`notify` в `agency_inbox` диспетчер не читает. `dispatchTick`/`claim` с `live=true`
+отклоняются до root gate. Spawn из callback нет. G9-3 resource-lease — отдельный
+модуль, не этот dispatcher.
+
 ## BB Workflows
 
 BB Workflows выполняет заданный JS-конвейер; сам скрипт не имеет сети/файловой

@@ -1,0 +1,518 @@
+import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import { fail, ok, type DomainResult } from "../../domain";
+import { createSdkHostFilePortFromBinding, type HostFileRpcClient } from "../../host";
+import { publicLaunchReasonCode, rpcContract } from "../../shared/rpc-contract";
+import { listStoredBindings } from "./catalog";
+import { resolveRpcAccess } from "./auth";
+import type { SqlDatabase } from "../db/sql";
+import type { DomainStore, ServiceContext } from "../services";
+import {
+  applyVerifiedCompletionLifecycle,
+  interpretVerifiedCompletion,
+  readJobPublishedArtifact,
+  pinCatalogRolesForPrepare,
+  resolveCatalogRoles,
+  type IsolatedCatalogRolesConfig,
+  createCoreCapabilityHandshakePort,
+  createIsolatedSpawnPort,
+  createIsolatedThreadVerifyPort,
+  createSdkSkillCatalogPort,
+  createStoreJobRunningPort,
+  handshakeAllowsSpawn,
+  officialSdkAllowsIsolatedSpawn,
+  bindOfficialThreads,
+  isolatedViewFromRecord,
+  CLAUDE_ONLY_ISOLATION_NOTE,
+  ISOLATION_PROVEN_PROVIDERS,
+  SDK_ISOLATION_BLOCKER,
+  assertProvenIsolationProvider,
+  resolveLiveAssignedProvider,
+  type LiveAssignedProvider,
+  readCompletionFromCore,
+} from "../runtime/isolated-sdk";
+import {
+  attemptStoreFromRunStore,
+  createLaunchCoordinator,
+  liveIdentityFromDatabase,
+  type LaunchCoordinatorResult,
+} from "../runtime/launch";
+import {
+  createJobInputPort,
+  createPrepareRun,
+  isHandshakeReady,
+  readinessFromHandshake,
+  type IsolatedCapabilityHandshake,
+  type IsolatedCapabilityHandshakePort,
+  type PrepareRunPublicInput,
+} from "../runtime/prepare-run";
+import { createInternalRunStoreReads, createRunStore } from "../runtime/run-store";
+import { createCancelLaunchService } from "../runtime/cancel-launch";
+import type { IsolatedSendPort } from "../runtime/isolated-sdk/send-port.js";
+import { flushParentWakes } from "../runtime/parent-wake";
+import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../runtime/stop-handoff/ports.js";
+import type { OfficialThreadStatus } from "../runtime/stop-handoff/types.js";
+
+type LaunchMethod =
+  | "prepareLaunch"
+  | "getLaunch"
+  | "reconcileLaunch"
+  | "interpretWorkerCompletion"
+  | "listJobAttempts"
+  | "getIsolationReadiness"
+  | "cancelLaunch";
+type LaunchHandlers = Pick<PluginRpcHandlers<typeof rpcContract>, LaunchMethod>;
+
+const DEFAULT_APPLICABLE = [{ sourceId: "binding", relativePath: ".bb/AGENTS.md" }] as const;
+
+const OFFICIAL: ReadonlySet<string> = new Set(["active", "error", "idle", "pending", "starting", "stopping"]);
+
+function officialCancelPorts(threads: BbPluginApi["sdk"]["threads"]): {
+  stop: ThreadStopPort;
+  get: ThreadGetPort;
+  listRunning: ThreadListRunningPort;
+} {
+  const listRunningFn = Reflect.get(threads, "listRunning");
+  return {
+    stop: {
+      supported: true,
+      async stop(args) {
+        const result = await threads.stop({ threadId: args.threadId });
+        if (Reflect.get(result, "ok") !== true) throw new Error("threads.stop did not acknowledge");
+        return { ok: true };
+      },
+    },
+    get: {
+      supported: true,
+      async get(args) {
+        const view = isolatedViewFromRecord(await threads.get({ threadId: args.threadId }));
+        const status = view.status && OFFICIAL.has(view.status) ? (view.status as OfficialThreadStatus) : null;
+        return { threadId: view.id || args.threadId, status };
+      },
+    },
+    listRunning:
+      typeof listRunningFn === "function"
+        ? {
+            supported: true,
+            async listRunning() {
+              const listed = await listRunningFn.call(threads);
+              const rows = Array.isArray(listed) ? listed : Reflect.get(listed, "threads");
+              if (!Array.isArray(rows)) return [];
+              return rows
+                .filter((row) => Boolean(row) && typeof row === "object")
+                .map((row) => ({
+                  id: String(Reflect.get(row, "id") ?? ""),
+                  hostId: typeof Reflect.get(row, "hostId") === "string" ? String(Reflect.get(row, "hostId")) : null,
+                }))
+                .filter((row) => row.id.length > 0);
+            },
+          }
+        : { supported: false },
+  };
+}
+
+export function createIsolatedLaunchRpc(deps: {
+  bb: BbPluginApi;
+  store: DomainStore;
+  db: SqlDatabase;
+  documents: HostFileRpcClient;
+  handshake?: IsolatedCapabilityHandshakePort;
+  loadCatalogRoles?: () => Promise<DomainResult<IsolatedCatalogRolesConfig | undefined>>;
+  onChanged?: () => void;
+  send?: IsolatedSendPort;
+}): LaunchHandlers {
+  const handshake =
+    deps.handshake ??
+    createCoreCapabilityHandshakePort({
+      baseUrl: () => deps.bb.server.experimental_appUrl ?? deps.bb.server.loopbackBaseUrl,
+    });
+  const runs = createRunStore(deps.db);
+  const reads = createInternalRunStoreReads(deps.db);
+  const catalog = createSdkSkillCatalogPort(deps.bb.sdk.skills);
+  const officialThreads = bindOfficialThreads(deps.bb.sdk.threads);
+
+  function systemCtx(): ServiceContext {
+    return {
+      actor: { kind: "system" },
+      allowedBindingIds: listStoredBindings(deps.db).map((row) => row.id),
+    };
+  }
+
+  function buildCoordinator(supported: boolean, handshakeValue: IsolatedCapabilityHandshake) {
+    return createLaunchCoordinator({
+      store: attemptStoreFromRunStore(runs, reads),
+      liveIdentity: liveIdentityFromDatabase(deps.db),
+      readiness: { assess: () => readinessFromHandshake(handshakeValue) },
+      spawn: createIsolatedSpawnPort(
+        officialThreads,
+        (contract) => {
+          const stored = reads.getSnapshot(systemCtx(), contract.snapshotId);
+          return stored.ok ? stored.value.snapshot : undefined;
+        },
+        (contract) => {
+          const attempt = reads.getAttempt(systemCtx(), contract.attemptId);
+          return attempt.ok ? attempt.value.jobId : "";
+        },
+        supported,
+      ),
+      threadVerify: createIsolatedThreadVerifyPort(officialThreads, supported),
+      jobRunning: createStoreJobRunningPort(deps.store),
+    });
+  }
+
+  async function withAccess<T>(
+    run: (ctx: ServiceContext) => Promise<DomainResult<T>> | DomainResult<T>,
+  ): Promise<DomainResult<T>> {
+    const access = resolveRpcAccess(deps.db);
+    if (!access.ok) return access;
+    return run(access.value.ctx);
+  }
+
+  return {
+    prepareLaunch: async (input) => {
+      return withAccess<{
+        handshakeReady: boolean;
+        snapshotId: string;
+        digest: string;
+        attemptId: string;
+        launched: LaunchCoordinatorResult | null;
+        reason: string;
+      }>(async (ctx) => {
+        const job = deps.store.getJob(input.jobId);
+        if (!job) return fail("not_found", `job ${input.jobId} not found`);
+        const assigned = resolveLiveAssignedProvider(deps.store, job);
+        if (!assigned.ok) return assigned;
+        const proven = assertProvenIsolationProvider(assigned.value.providerId);
+        if (!proven.ok) return proven;
+        const binding = deps.store.getBinding(job.bindingId);
+        if (!binding) return fail("not_found", `binding ${job.bindingId} not found`);
+        const files = createSdkHostFilePortFromBinding(deps.documents, binding);
+        if (!files.ok) return files;
+        const listed = await catalog.list({
+          projectId: binding.bbProjectId,
+          environmentId: binding.environmentId,
+          hostId: binding.hostId,
+        });
+        if (!listed.ok) return listed;
+        const loaded = deps.loadCatalogRoles ? await deps.loadCatalogRoles() : { ok: true as const, value: undefined };
+        if (!loaded.ok) return loaded;
+        const roles = loaded.value
+          ? await pinCatalogRolesForPrepare({
+              catalog,
+              listed: listed.value,
+              config: loaded.value,
+              hostId: binding.hostId,
+            })
+          : resolveCatalogRoles(listed.value);
+        if (!roles.ok) return roles;
+        const prepare = createPrepareRun({
+          store: deps.store,
+          files: files.value,
+          catalog,
+          handshake,
+          runs,
+          jobInputs: createJobInputPort({ store: deps.store, db: deps.db, files: files.value }),
+          server: {
+            applicable: DEFAULT_APPLICABLE,
+            catalogRoles: roles.value,
+          },
+        });
+        const publicInput: PrepareRunPublicInput = {
+          requestId: input.requestId,
+          jobId: input.jobId,
+          expectedRevision: input.expectedRevision,
+        };
+        const prepared = await prepare.prepare(ctx, publicInput);
+        if (!prepared.ok) return prepared;
+        const coreReady = prepared.value.handshakeReady && (await handshakeAllowsSpawn(handshake));
+        const sdkReady = officialSdkAllowsIsolatedSpawn();
+        const spawnAllowed = coreReady && sdkReady;
+        if (!spawnAllowed) {
+          return ok({
+            handshakeReady: prepared.value.handshakeReady,
+            snapshotId: prepared.value.reserved.snapshotId,
+            digest: prepared.value.reserved.digest,
+            attemptId: prepared.value.reserved.attempt.attemptId,
+            launched: null,
+            reasonCode: "handshake_unready" as const,
+            reason: !prepared.value.handshakeReady
+              ? "runtime handshake is not proven; spawn is not called"
+              : !sdkReady
+                ? SDK_ISOLATION_BLOCKER
+                : "runtime handshake is not proven; spawn is not called",
+          });
+        }
+        const launched = await buildCoordinator(true, prepared.value.handshake).launchPreparedRun(ctx, {
+          requestId: input.requestId,
+          snapshotId: prepared.value.reserved.snapshotId,
+          digest: prepared.value.reserved.digest,
+          attemptId: prepared.value.reserved.attempt.attemptId,
+          attestation: {
+            accessVerified: true,
+            revisionsVerified: true,
+            expectedJobRevision: prepared.value.snapshot.job.revision,
+            expectedBindingRevision: prepared.value.snapshot.binding.revision,
+          },
+          claimedBbProjectId: prepared.value.snapshot.binding.bbProjectId,
+        });
+        if (!launched.ok) return launched;
+        deps.onChanged?.();
+        return ok({
+          handshakeReady: true,
+          snapshotId: prepared.value.reserved.snapshotId,
+          digest: prepared.value.reserved.digest,
+          attemptId: prepared.value.reserved.attempt.attemptId,
+          launched: launched.value,
+          reasonCode: "ok" as const,
+          reason: launched.value.kind === "running" ? "verified bind applied" : launched.value.kind,
+        });
+      });
+    },
+    getLaunch: async (input) => {
+      return withAccess((ctx) => {
+        if (input.launchId) return reads.getLaunchReceipt(ctx, input.launchId);
+        if (input.attemptId) return reads.getLaunchReceiptByAttempt(ctx, input.attemptId);
+        return fail("invalid_command", "getLaunch needs launchId or attemptId");
+      });
+    },
+    reconcileLaunch: async (input) => {
+      return withAccess(async (ctx) => {
+        const supported = await handshakeAllowsSpawn(handshake);
+        const probed = await handshake.probe();
+        if (!probed.ok) return probed;
+        const result = await buildCoordinator(supported, probed.value).reconcileLaunch(ctx, {
+          requestId: input.requestId,
+          attemptId: input.attemptId,
+          launchId: input.launchId,
+        });
+        if (!result.ok) return result;
+        const attempt = result.value.attempt;
+        if ((attempt.state === "running" || attempt.state === "awaiting_review") && attempt.threadId) {
+          let threadStatus: string | null = null;
+          try {
+            const thread = await officialThreads.get({
+              threadId: attempt.threadId,
+              include: "environment,host",
+            });
+            threadStatus = thread.status ?? null;
+          } catch {
+            threadStatus = null;
+          }
+          const published = await readJobPublishedArtifact(
+            { ctx, store: deps.store, db: deps.db, documents: deps.documents },
+            attempt.jobId,
+          );
+          const reading = interpretVerifiedCompletion({
+            threadStatus,
+            publishedVerified: published.ok ? published.value.publishedVerified : false,
+            acceptedVerified: published.ok ? published.value.acceptedVerified : false,
+          });
+          const applied = applyVerifiedCompletionLifecycle({
+            store: deps.store,
+            runs,
+            reads,
+            ctx,
+            jobId: attempt.jobId,
+            launchId: input.launchId,
+            reading,
+            publishedHash: published.ok ? published.value.publishedHash : null,
+          });
+          if (applied.ok && (applied.value.attemptReviewApplied || applied.value.attemptAcceptedApplied)) {
+            const latest = reads.getAttempt(ctx, attempt.attemptId);
+            if (latest.ok) {
+              deps.onChanged?.();
+              return ok({ ...result.value, attempt: latest.value });
+            }
+          }
+        }
+        deps.onChanged?.();
+        return result;
+      });
+    },
+    interpretWorkerCompletion: async (input) => {
+      return withAccess(async (ctx) => {
+        const job = deps.store.getJob(input.jobId);
+        if (!job) return fail("not_found", `job ${input.jobId} not found`);
+        let threadStatus: string | null = null;
+        if (input.launchId) {
+          const receipt = reads.getLaunchReceipt(ctx, input.launchId);
+          if (receipt.ok && receipt.value.jobId !== input.jobId) {
+            return fail("caller_job_mismatch", "launch receipt job does not match interpret jobId");
+          }
+          if (receipt.ok && receipt.value.threadId) {
+            try {
+              const thread = await officialThreads.get({
+                threadId: receipt.value.threadId,
+                include: "environment,host",
+              });
+              threadStatus = thread.status ?? null;
+            } catch {
+              threadStatus = null;
+            }
+          }
+        }
+        const assessed = await readCompletionFromCore({
+          threadStatus,
+          jobId: input.jobId,
+          ctx,
+          store: deps.store,
+          db: deps.db,
+          documents: deps.documents,
+        });
+        if (!assessed.ok) return assessed;
+        if (!input.launchId) return assessed;
+        const published = await readJobPublishedArtifact(
+          { ctx, store: deps.store, db: deps.db, documents: deps.documents },
+          input.jobId,
+        );
+        const applied = applyVerifiedCompletionLifecycle({
+          store: deps.store,
+          runs,
+          reads,
+          ctx,
+          jobId: input.jobId,
+          launchId: input.launchId,
+          reading: assessed.value,
+          publishedHash: published.ok ? published.value.publishedHash : null,
+        });
+        if (!applied.ok) return applied;
+        if (applied.value.reviewApplied || applied.value.attemptReviewApplied || applied.value.attemptAcceptedApplied) {
+          deps.onChanged?.();
+        }
+        return ok({
+          runSucceeded: false as const,
+          runFailed: applied.value.runFailed,
+          mayEnterReview: applied.value.mayEnterReview,
+          publishedVerified: applied.value.publishedVerified,
+          acceptedVerified: applied.value.acceptedVerified,
+          threadStatus: applied.value.threadStatus,
+          reason: applied.value.reason,
+        });
+      });
+    },
+
+    listJobAttempts: async (input) => {
+      return withAccess((ctx) => {
+        const job = deps.store.getJob(input.jobId);
+        if (!job) return fail("not_found", `job ${input.jobId} not found`);
+        const access = deps.store.assertBindingAccess(ctx, job.bindingId);
+        if (!access.ok) return access;
+        if (input.claimedBbProjectId) {
+          const scoped = deps.store.scopedJob(ctx, input.jobId, input.claimedBbProjectId);
+          if (!scoped.ok) return scoped;
+        }
+        const listed = reads.listAttempts(ctx, input.jobId);
+        if (!listed.ok) return listed;
+        return ok({
+          jobId: input.jobId,
+          attempts: listed.value.map((attempt) => ({
+            attemptId: attempt.attemptId,
+            jobId: attempt.jobId,
+            attemptNo: attempt.attemptNo,
+            snapshotId: attempt.snapshotId,
+            digest: attempt.digest,
+            threadId: attempt.threadId,
+            launchId: attempt.launchId,
+            state: attempt.state,
+            revision: attempt.revision,
+            createdAt: attempt.createdAt,
+            updatedAt: attempt.updatedAt,
+          })),
+        });
+      });
+    },
+
+    getIsolationReadiness: async (input) => {
+      return withAccess(async (ctx) => {
+        const probed = await handshake.probe();
+        if (!probed.ok) return probed;
+        const ready = readinessFromHandshake(probed.value);
+        const sdkTypedSpawnReady = officialSdkAllowsIsolatedSpawn();
+        const handshakeReady = isHandshakeReady(probed.value);
+        let assignedProvider: LiveAssignedProvider | null = null;
+        let assignedReason: string | null = null;
+        let assignedErrorCode: string | null = null;
+        if (input.jobId) {
+          const job = deps.store.getJob(input.jobId);
+          if (!job) return fail("not_found", `job ${input.jobId} not found`);
+          const access = deps.store.assertBindingAccess(ctx, job.bindingId);
+          if (!access.ok) return access;
+          const assigned = resolveLiveAssignedProvider(deps.store, job);
+          if (!assigned.ok) {
+            assignedErrorCode = assigned.error.code;
+            assignedReason = assigned.error.message;
+          } else {
+            assignedProvider = assigned.value;
+            const proven = assertProvenIsolationProvider(assigned.value.providerId);
+            if (!proven.ok) {
+              assignedErrorCode = proven.error.code;
+              assignedReason = proven.error.message;
+            }
+          }
+        } else {
+          assignedReason = "getIsolationReadiness without jobId does not authorize a launch";
+        }
+        const launchAllowedForAssigned = Boolean(
+          handshakeReady && sdkTypedSpawnReady && assignedProvider && !assignedReason,
+        );
+        const reason = assignedReason
+          ? assignedReason
+          : !handshakeReady
+            ? ready.reason
+            : !sdkTypedSpawnReady
+              ? SDK_ISOLATION_BLOCKER
+              : `${ready.reason}; ${CLAUDE_ONLY_ISOLATION_NOTE}`;
+        return ok({
+          handshakeReady,
+          executionAvailable: ready.executionAvailable && sdkTypedSpawnReady,
+          isolationReady: ready.isolationReady && sdkTypedSpawnReady,
+          isolatedSpawnFields: ready.isolatedSpawnFields && sdkTypedSpawnReady,
+          sdkTypedSpawnReady,
+          provenIsolationProviders: [...ISOLATION_PROVEN_PROVIDERS],
+          assignedProvider,
+          launchAllowedForAssigned,
+          reasonCode: publicLaunchReasonCode({
+            assignedErrorCode,
+            handshakeReady,
+            sdkTypedSpawnReady,
+            launchAllowed: launchAllowedForAssigned,
+            hasJobId: Boolean(input.jobId),
+          }),
+          reason,
+        });
+      });
+    },
+
+    cancelLaunch: async (input) => {
+      return withAccess(async (ctx) => {
+        const ports = officialCancelPorts(deps.bb.sdk.threads);
+        const result = await createCancelLaunchService({
+          db: deps.db,
+          store: deps.store,
+          runs,
+          reads,
+          stop: ports.stop,
+          get: ports.get,
+          listRunning: ports.listRunning,
+        }).cancelLaunch(ctx, input);
+        if (result.ok && deps.send) {
+          await flushParentWakes({ db: deps.db, send: deps.send, now: new Date().toISOString() });
+        }
+        return result;
+      });
+    },
+  };
+}
+
+export function listBoundLaunchWatches(db: SqlDatabase): Array<{ threadId: string; jobId: string; launchId: string }> {
+  return (
+    db
+      .prepare(
+        `SELECT launch_id as launchId, job_id as jobId, thread_id as threadId
+         FROM agency_launch_receipt
+         WHERE thread_id IS NOT NULL`,
+      )
+      .all() as Array<{ launchId: string; jobId: string; threadId: string | null }>
+  )
+    .filter((row): row is { launchId: string; jobId: string; threadId: string } => Boolean(row.threadId))
+    .map((row) => ({ launchId: row.launchId, jobId: row.jobId, threadId: row.threadId }));
+}

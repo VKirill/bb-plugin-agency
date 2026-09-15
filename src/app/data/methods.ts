@@ -1,0 +1,62 @@
+/** Official stage-1 RPC names from AGY-17. UI does not register them. */
+export const STAGE1_RPC = {
+  listWorkspace: "listWorkspace",
+  listBbCatalog: "listBbCatalog",
+  listCapabilityCatalog: "listCapabilityCatalog",
+  getJob: "getJob",
+  getAgent: "getAgent",
+  getDepartment: "getDepartment",
+  listActivity: "listActivity",
+  listArtifactVersions: "listArtifactVersions",
+  createPolicyVersion: "createPolicyVersion",
+  createAgentVersion: "createAgentVersion",
+  createProcessVersion: "createProcessVersion",
+  saveAgentProfile: "saveAgentProfile",
+  saveDepartmentProfile: "saveDepartmentProfile",
+  provisionAgent: "provisionAgent",
+  updateAgent: "updateAgent",
+  provisionDepartment: "provisionDepartment",
+  updateDepartment: "updateDepartment",
+  addMembership: "addMembership",
+  removeMembership: "removeMembership",
+  createProjectBinding: "createProjectBinding",
+  updateProjectBinding: "updateProjectBinding",
+  linkDepartment: "linkDepartment",
+  createJob: "createJob",
+  updateJob: "updateJob",
+  transitionJob: "transitionJob",
+  reportNeedsInput: "reportNeedsInput",
+  answerNeedsInput: "answerNeedsInput",
+  createActivity: "createActivity",
+  createArtifact: "createArtifact",
+  publishArtifactVersion: "publishArtifactVersion",
+  acceptArtifactVersion: "acceptArtifactVersion",
+  openArtifact: "openArtifact",
+  resolveArtifactPreview: "resolveArtifactPreview",
+  prepareLaunch: "prepareLaunch",
+  getLaunch: "getLaunch",
+  reconcileLaunch: "reconcileLaunch",
+  interpretWorkerCompletion: "interpretWorkerCompletion",
+  listJobAttempts: "listJobAttempts",
+  getIsolationReadiness: "getIsolationReadiness",
+  listDashboardUsage: "listDashboardUsage",
+} as const;
+
+export type Stage1RpcName = (typeof STAGE1_RPC)[keyof typeof STAGE1_RPC];
+
+/** AGY-11 allowlist from dispatcher-ui-contract. UI does not register them. */
+export const DISPATCHER_RPC = {
+  saveEventDefinition: "saveEventDefinition",
+  saveEventSource: "saveEventSource",
+  saveRuleVersion: "saveRuleVersion",
+  ingestInboxEvent: "ingestInboxEvent",
+  dispatchTick: "dispatchTick",
+  listActionIntents: "listActionIntents",
+  listEventDefinitions: "listEventDefinitions",
+  listEventSources: "listEventSources",
+  listRuleVersions: "listRuleVersions",
+  claimActionIntent: "claimActionIntent",
+  approveActionIntent: "approveActionIntent",
+} as const;
+
+export type DispatcherRpcName = (typeof DISPATCHER_RPC)[keyof typeof DISPATCHER_RPC];

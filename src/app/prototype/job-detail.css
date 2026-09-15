@@ -1,25 +1,230 @@
 /* Layout follows the space available inside BB, including its side panels. */
 .agency-task-layout { container: agency-task / inline-size; }
-.agency-task-grid { display: grid; grid-template-areas: "title" "sidebar" "content"; gap: 20px; }
+/* Narrow: work first. Sidebar stacks after content so it cannot displace the job. */
+.agency-task-grid {
+  display: grid;
+  grid-template-areas: "title" "content" "sidebar";
+  gap: 20px;
+}
 .agency-task-title { grid-area: title; min-width: 0; }
+.agency-task-heading { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-width: 0; }
+.agency-task-heading-title {
+  display: block;
+  width: 100%;
+  min-width: min(100%, 16rem);
+  flex: 0 0 auto;
+  margin: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.375;
+  letter-spacing: -0.025em;
+}
+.agency-task-heading-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; width: 100%; min-width: 0; }
+.agency-task-heading-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; font-size: 0.75rem; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+@container agency-task (min-width: 600px) {
+  .agency-task-heading {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .agency-task-heading-title {
+    width: auto;
+    flex: 1 1 auto;
+  }
+  .agency-task-heading-actions {
+    width: auto;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+}
 .agency-task-content { grid-area: content; min-width: 0; }
-.agency-task-sidebar { grid-area: sidebar; min-width: 0; align-self: start; }
+.agency-task-sidebar { grid-area: sidebar; min-width: 0; max-width: 100%; align-self: start; overflow-x: hidden; font-size: 12.5px; line-height: 18px; }
+.agency-task-sidebar h2,
+.agency-task-sidebar h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
 .agency-task-sidebar-heading { display: none; }
 .agency-task-sidebar-content { display: none; }
-.agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: block; margin-top: 20px; }
-@container agency-task (min-width: 880px) {
- .agency-task-grid { grid-template-areas: "title sidebar" "content sidebar"; grid-template-columns: minmax(0, 1fr) 288px; column-gap: 32px; align-items: start; }
- .agency-task-sidebar-heading { display: block; }
- .agency-task-sidebar-toggle { display: none; }
- .agency-task-sidebar-content, .agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: block; margin-top: 20px; }
+.agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
+.agency-rail-section + .agency-rail-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, hsl(var(--border)));
 }
-.agency-file-body { min-height: 360px; max-height: 72dvh; }
+/* Rail cards: one card per fact group, rows of label → value, no form controls. */
+.agency-rail-card {
+  border: 1px solid var(--border, hsl(var(--border)));
+  border-radius: 8px;
+  background: var(--background, hsl(var(--background)));
+  padding: 12px 14px;
+  min-width: 0;
+}
+.agency-rail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+  margin-bottom: 8px;
+}
+.agency-rail-card-head > .agency-rail-card-title { margin-bottom: 0; }
+.agency-rail-card-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground, hsl(var(--muted-foreground)));
+}
+.agency-rail-card-head :where(button) { height: auto; min-height: 24px; padding: 0 8px; font-size: 11px; }
+.agency-rail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 5px 0;
+}
+.agency-rail-row + .agency-rail-row { border-top: 1px solid var(--border, hsl(var(--border))); }
+.agency-rail-label { flex: 0 0 auto; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+.agency-rail-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-weight: 500;
+  color: var(--foreground, hsl(var(--foreground)));
+}
+.agency-rail-value-muted { font-weight: 400; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+.agency-rail-value-success { color: #10b981; }
+.agency-rail-value-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.agency-rail-value :where(button) { height: auto; min-height: 0; padding: 0; font-size: 12px; font-weight: 500; }
+.agency-rail-value ul { display: flex; flex-direction: column; gap: 2px; }
+.agency-rail-files { display: flex; flex-direction: column; gap: 6px; }
+.agency-rail-files > button { width: 100%; min-height: 46px; padding: 6px 10px; }
+.agency-rail-files > button :where(span.size-9) { width: 1.875rem; height: 1.875rem; }
+.agency-rail-empty { font-size: 11.5px; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+.agency-task-sidebar .space-y-1\.5 > .text-sm,
+.agency-task-sidebar .space-y-1\.5 > label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--muted-foreground, hsl(var(--muted-foreground)));
+}
+.agency-task-sidebar select,
+.agency-task-sidebar [role="combobox"],
+.agency-task-sidebar input {
+  min-height: 1.75rem;
+  height: auto;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.agency-task-tree-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.agency-task-tree-row-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+.agency-task-tree-row-key {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted-foreground, hsl(var(--muted-foreground)));
+}
+.agency-task-tree-row-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.agency-task-tree-row-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.agency-task-tree-row-agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agency-task-tree-root-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--muted-foreground, hsl(var(--muted-foreground)));
+}
+.agency-task-tree-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin-bottom: 8px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+/* Desktop (>=880px per DESIGN.md): clean 2-column layout (work | properties 288px) */
+@container agency-task (min-width: 880px) {
+  .agency-task-grid {
+    grid-template-areas: "title sidebar" "content sidebar";
+    grid-template-columns: minmax(0, 1fr) 288px;
+    column-gap: 32px;
+    align-items: start;
+  }
+  .agency-task-sidebar-toggle { display: none; }
+  .agency-task-sidebar-content,
+  .agency-task-sidebar[data-expanded="true"] .agency-task-sidebar-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 0;
+  }
+}
+.agency-file-body { min-height: 0; }
 .agency-file-body pre { max-width: 100%; overflow-x: auto; }
+.agency-file-workspace:not(.agency-native-doc) .agency-file-body { min-height: 360px; max-height: 72dvh; }
 @container agency-task (max-width: 600px) {
- .agency-file-body { min-height: 280px; max-height: none; }
+  .agency-file-workspace:not(.agency-native-doc) .agency-file-body { min-height: 280px; max-height: none; }
 }
 /* Native BB document pane replaces the property rail, never the task body. */
-.agency-task-layout[data-document-visible="true"] .agency-task-grid { grid-template-areas: "title" "content"; grid-template-columns: minmax(0,1fr); }
+.agency-task-layout[data-document-visible="true"] .agency-task-grid { grid-template-areas: "title" "content"; grid-template-columns: minmax(0, 1fr); }
 .agency-task-layout[data-document-visible="true"] .agency-task-sidebar { display: none; }
 
+.agency-native-doc { min-height: 0; height: 100%; }
 .agency-native-doc .agency-file-body { min-height: 0; max-height: none; }
+
+/* Team pickers inside the edit dialog: same rhythm as the other dialog fields. */
+.agency-edit-team { border-top: 1px solid var(--border, hsl(var(--border))); padding-top: 12px; }
+.agency-edit-team h3 { margin: 0 0 8px; font-size: 0.875rem; font-weight: 600; line-height: 1.25rem; }
+.agency-edit-team .agency-rail-section { font-size: 0.8125rem; }
+.agency-edit-team select { min-height: 1.75rem; font-size: 0.8125rem; }

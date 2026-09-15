@@ -1,5 +1,6 @@
 # Адаптеры триггеров
 
-Сейчас notify.ts валидирует CLI/RPC и пишет Inbox. Следующие bb-events.ts,
-cron.ts и webhook.ts добавляются только с тестами доставки и сверки.
-Триггеры не запускают агента напрямую. Полный контракт — docs/events.md.
+`notify.ts` пишет legacy `agency_inbox` и не запускает tick. `ingest.ts` — typed
+контур EventSource. Cron/webhook persist — `durable-inbox.ts` (явный `bbProjectId`,
+не auth). Наружный HTTP и secret store не здесь. Триггеры не вызывают spawn.
+Live/auto — root gate.

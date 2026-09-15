@@ -1,33 +1,35 @@
 # Рабочая документация Агентства
 
-Сверено 14 сентября 2026 с исходниками **0.1.0-alpha.12 / a18c3b6**, BB 0.43.1,
-SDK 0.4.87. Это план перехода от прототипа к рабочему продукту, не описание
-уже включённой автономии. Актуальные решения собраны здесь; история чата не
-заменяет контракт. Реализацию и её статус ведём в штатном задачнике, не в ещё
-одной Markdown-доске.
+Сверено 2026-09-14 с исходниками **0.1.0-alpha.12**. Введение и границы установки —
+в корневом README плагина (его ведёт отдельный релизный проход). Здесь — контракты
+и статус runtime: что уже в коде, что остаётся за релизом.
 
-Порядок чтения:
+Это не описание полной автономии. Production rollout (core/SDK pin, reload)
+готовится отдельно и этим набором файлов не включается.
 
-1. [Готовность и границы первой версии](implementation-readiness.md): сценарии,
-   обнаруженные пробелы, что можно начинать и что блокирует запуск.
-2. [Этапы](roadmap.md): зависимости и наблюдаемые критерии результата.
-3. [Архитектура и файловая структура](architecture.md): текущие и будущие модули.
-4. [Данные и состояния](data-model.md): идентификаторы, версии, связи и переходы.
-5. [API BB](bb-api.md) и [версии пакетов](dependencies.md): проверенная опора.
-6. [Карта экранов](ui-plan.md) и [единый дизайн](../DESIGN.md): состав интерфейса.
+## Порядок чтения
 
-Подробные контракты, дополняющие основной план:
+1. [Готовность и границы runtime](implementation-readiness.md) — что работает,
+   что доказано только на isolated Claude, что ещё нельзя обещать.
+2. [Этапы](roadmap.md) — что закрыто, что осталось.
+3. [Архитектура](architecture.md) — модули source.
+4. [Данные и состояния](data-model.md) — ID, Job/attempt, `waiting_input`.
+5. [CLI](cli.md) — allowlist, `--input-json`, launch и `reportNeedsInput`.
+6. [API BB](bb-api.md) и [версии пакетов](dependencies.md).
+7. [Карта экранов](ui-plan.md) и [дизайн](../DESIGN.md).
 
-- [Автоматизации, cron и webhook](automation-architecture.md).
-- [Документы, вопросы, передача задачи, машины и Telegram](interaction-and-runtime.md).
-- [Общение внутри задачи](task-interaction.md), [импорт MCP](mcp-import.md).
-- [Уровни инструкций](instruction-context.md): подробный материал; итоговые
-  ограничения исполнения также закреплены в архитектуре и модели данных.
-- [События](events.md): исходное объяснение; актуальное разделение источников — в API и архитектуре.
+## Контракты runtime
 
-Исследовательские материалы: [Multica и ревью alpha.9](product-review.md),
-[UI-референсы](ui-references.md), [сценарии видео](video-scenarios.md).
-Это основания решений, а не текущий статус всех функций. При расхождении старых
-alpha-заметок с ревью 14 сентября использовать основной план выше. Локальные
-незавершённые правки instruction-context.md и product-review.md при этом ревью
-сохранены без изменения.
+- [Уровни инструкций](instruction-context.md): слои не отменяют друг друга;
+  конфликт — typed `reportNeedsInput`, не regex.
+- [Снимок запуска](session-context-contract.md) и [revise compiler](context-snapshot-revise.md):
+  schema 2 реализован в `compile.ts`.
+- [Документы, вопросы, машины, Telegram](interaction-and-runtime.md): durable
+  `getJob.needsInput` ≠ демо AG-105 ≠ BB `threads.interactions`.
+- [Навык и каталог](skills-integration.md).
+- [Автоматизации](automation-architecture.md), [события](events.md) — план
+  registry/cron; notify сейчас только inbox.
+
+Исследовательские заметки ([product-review](product-review.md),
+[ui-references](ui-references.md), [video-scenarios](video-scenarios.md))
+не заменяют статус выше.

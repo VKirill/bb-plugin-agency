@@ -3,12 +3,13 @@
   "version": "0.1.0-alpha.12",
   "type": "module",
   "engines": {
+    "node": "^22.19.0 || ^24.0.0 || ^26.0.0",
     "bb": ">=0.43.1 <0.44",
     "bbPluginSdk": ">=0.4.87 <0.5"
   },
   "bb": {
     "name": "Агентство",
-    "description": "Кликабельный прототип агентства: сотрудники, отделы, задачи и автоматизации. Исполнение ещё недоступно.",
+    "description": "Команда, отделы, задачи и версии результатов. Запуск агентов доступен при подтверждённой готовности среды.",
     "branding": {
       "icon": "Workflow"
     },
@@ -25,12 +26,26 @@
     "@radix-ui/react-checkbox": "^1.3.7",
     "@radix-ui/react-slot": "^1.3.0",
     "@radix-ui/react-tabs": "^1.1.21",
+    "@tiptap/core": "3.31.3",
+    "@tiptap/extension-link": "3.31.3",
+    "@tiptap/extension-list": "3.31.3",
+    "@tiptap/extension-placeholder": "3.31.3",
+    "@tiptap/extension-table": "3.31.3",
+    "@tiptap/extension-table-cell": "3.31.3",
+    "@tiptap/extension-table-header": "3.31.3",
+    "@tiptap/extension-table-row": "3.31.3",
+    "@tiptap/extension-task-item": "3.31.3",
+    "@tiptap/extension-task-list": "3.31.3",
+    "@tiptap/extensions": "3.31.3",
+    "@tiptap/markdown": "3.31.3",
+    "@tiptap/pm": "3.31.3",
+    "@tiptap/starter-kit": "3.31.3",
     "cron-parser": "^5.5.0",
     "yaml": "^2.9.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.4.87",
+    "@get-bb/plugin-sdk": "file:vendor/get-bb-plugin-sdk-0.4.87-agy16.431.tgz",
     "@pierre/diffs": "^1.2.9",
     "@radix-ui/react-alert-dialog": "^1.1.19",
     "@radix-ui/react-context-menu": "^2.3.3",
@@ -49,12 +64,13 @@
     "better-sqlite3": "^12.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "happy-dom": "^20.14.5",
     "hono": "^4.11.9",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.4.0",
     "typescript": "^5.7.0",
     "vaul": "^1.1.2",
-    "vitest": "^3.2.0"
+    "vitest": "4.1.11"
   },
   "scripts": {
     "build": "bb plugin build",
