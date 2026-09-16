@@ -31,21 +31,6 @@
 | @radix-ui/react-slot | ^1.3.0 | 1.3.3 | prod | Компонент, bundled |
 | @radix-ui/react-tabs | ^1.1.21 | 1.1.21 | prod | Компонент, bundled |
 | cron-parser | ^5.5.0 | 5.10.1 | prod | Вычисление cron preview и будущих occurrences |
-| yaml | ^2.9.1 | 2.9.1 | prod | Frontmatter |
-| @tiptap/core | 3.31.3 | 3.31.3 | prod | Markdown editor; GHSA-cp6q-959q-f8rh, patched ≥3.30.4. Docs pin 2.27.2 уязвим, не гарантия |
-| @tiptap/pm | 3.31.3 | 3.31.3 | prod | peer core |
-| @tiptap/starter-kit | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/markdown | 3.31.3 | 3.31.3 | prod | official markdown parse/serialize; замена tiptap-markdown 0.8.10 |
-| @tiptap/extension-link | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-list | 3.31.3 | 3.31.3 | prod | peer TaskList/TaskItem |
-| @tiptap/extension-placeholder | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extensions | 3.31.3 | 3.31.3 | prod | peer Placeholder |
-| @tiptap/extension-table | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-table-cell | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-table-header | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-table-row | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-task-item | 3.31.3 | 3.31.3 | prod | editor |
-| @tiptap/extension-task-list | 3.31.3 | 3.31.3 | prod | editor |
 | zod | ^4.3.6 | 4.6.4 | prod | RPC/данные, bundled |
 | @get-bb/plugin-sdk | file:vendor/get-bb-plugin-sdk-0.4.87-agy16.431.tgz | 0.4.87-agy16.431 | dev | Compile pin SHA256 a517adf2…; engines не readiness; GET spawn-contract = runtime gate |
 | @pierre/diffs | ^1.2.9 | 1.4.2 | dev | BB shim, локальная версия для разработки |
@@ -78,11 +63,16 @@
 React/ReactDOM, портальные Radix, sonner, vaul и @pierre/diffs предоставляются
 BB. Не добавлять второй React или свою копию портального окружения в bundle.
 Предпочитать штатные SourceCode/Diff/Markdown. Checkbox/Slot/Tabs, Hugeicons,
-cron-parser, yaml и zod используют собственную сборку плагина. Zod необходим
+cron-parser и zod используют собственную сборку плагина. Zod необходим
 и на сервере, и в браузере. SQLite продукта — `bb.storage.database()`, не
 отдельное соединение better-sqlite3 поверх той же базы.
 
-Native Markdown включает нужные рендереры; Mermaid/KaTeX не добавлять отдельными
+Агентство не редактирует и не рендерит Markdown само: `.md`/`.markdown` открывает
+и редактирует отдельный плагин «Markdown PRO» (`md-editor`) через штатный file
+opener BB. TipTap/`@tiptap/*` и `yaml` были удалены из зависимостей вместе с
+собственным Markdown-редактором и YAML-frontmatter превью — не переустанавливать
+их ради работы с `.md`. Native Markdown у остальных документов (описания задач,
+чата) включает нужные рендереры; Mermaid/KaTeX не добавлять отдельными
 зависимостями без найденного ограничения. Аналогично нет основания сейчас
 добавлять Redis, внешний scheduler или библиотеку графов для уже работающей оргсхемы.
 Новые пакеты вводить по конкретному отсутствующему контракту и с проверкой BB bundle.
@@ -96,12 +86,9 @@ Native Markdown включает нужные рендереры; Mermaid/KaTeX 
 ## Audit и запланированное обновление
 
 Проверено 2026-09-14 04:01 +02:00: `npm audit --omit=dev` — **0 findings**.
-TipTap поднят с 2.27.2 до exact **3.31.3** (core и согласованные editor-пакеты),
-markdown — official `@tiptap/markdown@3.31.3`. Референс Docs 2.27.2 содержит
-[GHSA-cp6q-959q-f8rh](https://github.com/advisories/GHSA-cp6q-959q-f8rh)
-(`mergeAttributes` / `__proto__` при `@tiptap/core` < 3.30.4) и не используется
-как pin безопасности. `npm audit fix --force` не применялся; версии выбраны
-через `npm view` peerDependencies.
+Markdown-редактор на TipTap (и его `@tiptap/*`/`yaml` зависимости) удалён из
+плагина: `.md`/`.markdown` теперь открывает плагин «Markdown PRO» (`md-editor`),
+GHSA-cp6q-959q-f8rh больше не относится к этому плагину.
 
 Vitest в lock — 4.1.11. Полный `npm audit` (с dev) не обещает 0: смотреть
 актуальный отчёт, не эту строку. Сохранённый audit — дата проверки, не вечная

@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { experimental_SourceCode as SourceCode } from "@get-bb/plugin-sdk/app";
-import { MarkdownEditor } from "../editor";
 import { Button, Icon } from "./shared";
 import type { TaskFile } from "./data";
 
@@ -26,7 +25,6 @@ export function FileWorkspace({
   error?: string | null;
 }) {
   const dirty = draft !== file.content;
-  const markdown = /\.(md|markdown)$/i.test(file.name);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -71,8 +69,6 @@ export function FileWorkspace({
       <div className="agency-file-body flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-5">
         {file.kind === "image" ? (
           <img src={file.content} alt={file.name} className="mx-auto max-h-[65dvh] max-w-full object-contain" />
-        ) : markdown ? (
-          <MarkdownEditor value={draft} onChange={onDraft} readOnly={saving} onSave={onSave} />
         ) : (
           <SourceCode content={draft} path={file.name} overflow="scroll" />
         )}

@@ -1,8 +1,6 @@
-import { markdownShowcase } from "../markdown-showcase";
 import type { TaskFile } from "../data";
 
 export const exampleFiles: TaskFile[] = [
   {id:"offer-v2",version:2,name:"Оффер.md",size:540,kind:"text",content:"# AI-фотосессия для вашего профиля\n\nПодберите образ и подготовьте фотографии для личной страницы.\n\n## Перед публикацией\nПроверить фактические условия услуги и согласовать формулировки.\n\n_Демонстрационный материал, версия 2._"},
   {id:"review-notes",name:"Проверка.md",size:310,kind:"text",content:"# Проверка оффера\n\n- Уточнить условия услуги перед публикацией.\n- Сопоставить обещания с актуальным описанием продукта.\n\n_Пример замечаний проверяющего._"},
-  {id:"markdown-demo",version:1,name:"Возможности Markdown.md",size:new TextEncoder().encode(markdownShowcase).length,kind:"text",content:markdownShowcase},
 ];
