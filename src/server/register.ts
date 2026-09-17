@@ -16,7 +16,7 @@ import { createWebhookRateLimiter } from "./triggers/webhook-ingress/rate-limit"
 import { reviewJobText, startAutoReview, type AutoReviewPorts } from "./runtime/auto-review/service";
 import { claimActionIntent, completeActionIntent, dispatchTick, listActionIntents } from "./dispatcher/engine";
 import { createIntentJobPort } from "./dispatcher/job-port";
-import { dequeueLaunch, enqueueLaunch, LAUNCH_QUEUE_SWEEP_MS, listLaunchQueue, sweepLaunchQueue } from "./runtime/launch-queue/service";
+import { dequeueLaunch, enqueueLaunch, LAUNCH_QUEUE_SWEEP_MS, listLaunchQueue, repairQueuedJobs, sweepLaunchQueue } from "./runtime/launch-queue/service";
 import { uuidV5 } from "./runtime/launch/operation-ids";
 
 const LAUNCH_QUEUE_NAMESPACE = "3d5f1c2e-7a4b-4c8d-9e6f-0a1b2c3d4e5f";
@@ -955,6 +955,8 @@ export function registerAgency(bb: BbPluginApi) {
     if (queueBusy) return;
     queueBusy = true;
     try {
+      // A launch that vanished from the queue goes back in line before the sweep.
+      if (repairQueuedJobs(db, new Date().toISOString()).length) onChanged();
       const result = await sweepLaunchQueue({
         db,
         getJob: (jobId) => store.getJob(jobId),
@@ -969,6 +971,9 @@ export function registerAgency(bb: BbPluginApi) {
           return prepared as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
         },
         comment: systemComment,
+        notifyOwner: (input) => {
+          void sendOwnerMessage({ text: input.text, level: "warning", jobId: input.jobId, dedupeKey: input.dedupeKey }, "launch-queue");
+        },
         now: () => new Date().toISOString(),
       });
       if (result.launched || result.removed) onChanged();

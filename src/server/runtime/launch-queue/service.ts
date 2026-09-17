@@ -22,6 +22,24 @@ export const LAUNCH_QUEUE_SWEEP_MS = 15_000;
 /** Refusals that mean «wait», not «stop». */
 export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted", "dependencies_open", "owns_overlap"]);
 
+/**
+ * Refusals that pass: a machine that blinked, a provider that answered 502, a launch that
+ * did not start this time. The queue keeps the job and tries again instead of dropping it
+ * silently — a job left in «queued» with nothing watching it waits forever.
+ */
+const TRANSIENT_CODES = new Set(["host_offline", "host_unavailable", "provider_unavailable", "launch_not_started", "provider_cli_missing"]);
+const TRANSIENT_TEXT = /\b(50[0-9]|429)\b|not connected|timed? ?out|timeout|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed/i;
+
+/** The owner hears about a stuck launch after this long, and the job leaves the queue after the second one. */
+export const TRANSIENT_NOTIFY_MS = 10 * 60_000;
+export const TRANSIENT_GIVE_UP_MS = 60 * 60_000;
+/** A job in «queued» with no queue row and no live attempt is put back after this long. */
+export const QUEUE_REPAIR_MS = 5 * 60_000;
+
+function transient(error: { code: string; message: string }): boolean {
+  return TRANSIENT_CODES.has(error.code) || TRANSIENT_TEXT.test(error.message);
+}
+
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 export type QueueEntry = { jobId: string; position: number; requestedAt: string; waitingReason: string | null };
@@ -53,8 +71,46 @@ export type LaunchQueuePorts = {
   /** Prepares and launches the job with its current revision. */
   launch: (job: Job, requestedAt: string) => Promise<DomainResult<unknown>>;
   comment: (job: Job, text: string) => boolean;
+  /** Tells the owner: a launch that keeps failing or leaves the queue is not visible otherwise. */
+  notifyOwner?: (input: { jobId: string; text: string; dedupeKey: string }) => void;
   now: () => string;
 };
+
+function failureAge(db: SqlDatabase, jobId: string, now: string): number {
+  const row = db.prepare(`SELECT failing_since FROM agency_launch_queue WHERE job_id = ?`).get(jobId) as { failing_since: string | null } | undefined;
+  if (!row?.failing_since) {
+    db.prepare(`UPDATE agency_launch_queue SET failing_since = ? WHERE job_id = ?`).run(now, jobId);
+    return 0;
+  }
+  return Date.parse(now) - Date.parse(row.failing_since);
+}
+
+function clearFailure(db: SqlDatabase, jobId: string): void {
+  db.prepare(`UPDATE agency_launch_queue SET failing_since = NULL WHERE job_id = ? AND failing_since IS NOT NULL`).run(jobId);
+}
+
+/**
+ * A job in «queued» that no longer has a queue row and never got an attempt is stuck: the
+ * queue dropped it, or a restart lost it. It goes back in line after a grace period, so a
+ * launch never disappears without a trace.
+ */
+export function repairQueuedJobs(db: SqlDatabase, now: string, graceMs = QUEUE_REPAIR_MS): string[] {
+  const rows = db
+    .prepare(
+      `SELECT j.id, j.updated_at FROM agency_job j
+       WHERE j.state = 'queued'
+         AND NOT EXISTS (SELECT 1 FROM agency_launch_queue q WHERE q.job_id = j.id)
+         AND NOT EXISTS (SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id)`,
+    )
+    .all() as { id: string; updated_at: string }[];
+  const repaired: string[] = [];
+  for (const row of rows) {
+    if (Date.parse(now) - Date.parse(row.updated_at) < graceMs) continue;
+    enqueueLaunch(db, row.id, now);
+    repaired.push(row.id);
+  }
+  return repaired;
+}
 
 function setReason(db: SqlDatabase, jobId: string, reason: string, now: string): void {
   db.prepare(`UPDATE agency_launch_queue SET waiting_reason = ?, updated_at = ? WHERE job_id = ? AND COALESCE(waiting_reason, '') != ?`).run(reason, now, jobId, reason);
@@ -87,17 +143,34 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
       continue;
     }
     if (WAIT_CODES.has(result.error.code)) {
+      clearFailure(ports.db, job.id);
       setReason(ports.db, job.id, result.error.message, ports.now());
       continue;
     }
+    const now = ports.now();
+    if (transient(result.error)) {
+      const age = failureAge(ports.db, job.id, now);
+      setReason(ports.db, job.id, result.error.message, now);
+      if (age < TRANSIENT_GIVE_UP_MS) {
+        if (age >= TRANSIENT_NOTIFY_MS) {
+          ports.notifyOwner?.({
+            jobId: job.id,
+            dedupeKey: `launch-queue-stuck:${job.id}:${entry.requestedAt}`,
+            text: en
+              ? `${job.key} has been waiting in the launch queue for more than ${Math.round(age / 60_000)} min: ${result.error.message}. The Agency keeps trying.`
+              : `${job.key} ждёт в очереди запуска дольше ${Math.round(age / 60_000)} мин: ${result.error.message}. Агентство продолжает попытки.`,
+          });
+        }
+        continue;
+      }
+    }
     dequeueLaunch(ports.db, job.id);
     removed += 1;
-    ports.comment(
-      job,
-      en
-        ? `Left the launch queue: ${result.error.message}. Check readiness in the job card and launch by hand.`
-        : `Снята с очереди запуска: ${result.error.message}. Проверьте готовность в карточке задачи и запустите вручную.`,
-    );
+    const text = en
+      ? `Left the launch queue: ${result.error.message}. Check readiness in the job card and launch by hand.`
+      : `Снята с очереди запуска: ${result.error.message}. Проверьте готовность в карточке задачи и запустите вручную.`;
+    ports.comment(job, text);
+    ports.notifyOwner?.({ jobId: job.id, dedupeKey: `launch-queue-left:${job.id}:${entry.requestedAt}`, text: `${job.key}: ${text}` });
   }
   return { launched, removed };
 }

@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { fail, ok } from "../src/domain";
 import { openMigratedDatabase } from "../src/server/db";
-import { dequeueLaunch, enqueueLaunch, listLaunchQueue, sweepLaunchQueue, type LaunchQueuePorts } from "../src/server/runtime/launch-queue/service";
+import { dequeueLaunch, enqueueLaunch, listLaunchQueue, repairQueuedJobs, sweepLaunchQueue, type LaunchQueuePorts } from "../src/server/runtime/launch-queue/service";
 import { createJobCommandSchema } from "../src/shared/contracts/job";
 import { seed } from "./role-types.test";
 
@@ -63,6 +63,56 @@ describe("launch queue", () => {
     expect(listLaunchQueue(db)).toEqual([{ jobId: waiting.id, position: 1, requestedAt: "2026-09-17T10:00:00.000Z", waitingReason: "Уже работают запусков отдела: 2, лимит 2." }]);
     expect(comments.find(([id]) => id === broken.id)?.[1]).toContain("Снята с очереди запуска: Машина не в сети");
     expect(comments.find(([id]) => id === ready.id)?.[1]).toContain("Запущена из очереди");
+  });
+
+  it("waits out a machine that blinked, tells the owner, and gives up only after an hour", async () => {
+    const { db, s, job } = setup();
+    const item = job("Проверка");
+    enqueueLaunch(db, item.id, "2026-09-17T10:00:00.000Z");
+    const comments: string[] = [];
+    const owner: { text: string; dedupeKey: string }[] = [];
+    let now = "2026-09-17T10:00:10.000Z";
+    const ports: LaunchQueuePorts = {
+      db,
+      getJob: (id) => s.store.getJob(id),
+      checkLimits: async () => ok({ warnings: [] }),
+      // The real failure that left a review hanging: the host answered 502 for a moment.
+      launch: async () => fail("launch_not_started", "HTTP 502: Host is not connected"),
+      comment: (_item, text) => {
+        comments.push(text);
+        return true;
+      },
+      notifyOwner: (input) => owner.push({ text: input.text, dedupeKey: input.dedupeKey }),
+      now: () => now,
+    };
+    expect(await sweepLaunchQueue(ports)).toEqual({ launched: 0, removed: 0 });
+    expect(listLaunchQueue(db)[0]?.waitingReason).toContain("502");
+    expect(owner).toEqual([]);
+    now = "2026-09-17T10:12:00.000Z";
+    expect(await sweepLaunchQueue(ports)).toEqual({ launched: 0, removed: 0 });
+    expect(owner[0]?.text).toContain("ждёт в очереди запуска дольше");
+    now = "2026-09-17T11:30:00.000Z";
+    expect(await sweepLaunchQueue(ports)).toEqual({ launched: 0, removed: 1 });
+    expect(comments.at(-1)).toContain("Снята с очереди запуска");
+    expect(owner.at(-1)?.text).toContain("Снята с очереди запуска");
+    expect(listLaunchQueue(db)).toEqual([]);
+  });
+
+  it("puts a queued job with no queue row and no attempt back in line", () => {
+    const { db, s, job } = setup();
+    const stuck = job("Потерялась");
+    const fresh = job("Только что");
+    for (const item of [stuck, fresh]) {
+      const moved = s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: item.id, expectedRevision: item.revision, to: "queued" });
+      expect(moved.ok).toBe(true);
+    }
+    // The job moved to queued long ago; the other one just now.
+    db.prepare(`UPDATE agency_job SET updated_at = ? WHERE id = ?`).run("2026-09-17T10:00:00.000Z", stuck.id);
+    db.prepare(`UPDATE agency_job SET updated_at = ? WHERE id = ?`).run("2026-09-17T10:09:30.000Z", fresh.id);
+    expect(repairQueuedJobs(db, "2026-09-17T10:10:00.000Z")).toEqual([stuck.id]);
+    expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([stuck.id]);
+    // The one already in the queue is not repaired twice; the second job waits out its grace.
+    expect(repairQueuedJobs(db, "2026-09-17T10:20:00.000Z")).toEqual([fresh.id]);
   });
 
   it("forgets a job that was launched or canceled by hand", async () => {

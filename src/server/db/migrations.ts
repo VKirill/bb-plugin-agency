@@ -631,6 +631,7 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   KIT_RECORD_MIGRATION,
   `ALTER TABLE agency_agent_version ADD COLUMN service_tier TEXT
     CHECK (service_tier IS NULL OR service_tier IN ('default', 'fast'));`,
+  `ALTER TABLE agency_launch_queue ADD COLUMN failing_since TEXT;`,
 ];
 
 function statementHash(sql: string): string {
