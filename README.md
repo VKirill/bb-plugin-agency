@@ -1,80 +1,83 @@
-# Агентство
+# Agency
 
-BB-плагин, который превращает набор разрозненных запусков AI-агентов в
-**организацию**: постоянные сотрудники, отделы, проекты, поручения, версии
-результатов и явная приёмка.
+**English** · [Русский](README.ru.md)
 
-Агент здесь не «чат, который что-то сделал», а сотрудник с версионируемой
-инструкцией, ролью, отделом, политикой прав и историей работ. Поручение живёт
-своей жизнью: его назначают, запускают, оно возвращается с вопросом, публикует
-версию файла и проходит проверку.
+A BB plugin that turns scattered AI agent runs into an **organization**: standing
+employees, departments, projects, jobs, result versions and explicit acceptance.
 
-> **Статус:** `0.1.0-alpha.15`, рабочая альфа. Постоянные данные, управляемые
-> запуски, правила работы, лимиты и бюджеты, очередь запуска, расписания и
-> webhook, знания, цели и резервные копии работают. Изоляция проверена только для
-> Claude Code — границы честно перечислены ниже и в
-> [docs/implementation-readiness.md](docs/implementation-readiness.md).
+An agent here is not "a chat that did something" but an employee with a versioned
+job description, a role, a department, a permission policy and a work history. A
+job has a life of its own: it is assigned, launched, comes back with a question,
+publishes a file version and goes through review.
 
-## Зачем
+> **Status:** `0.1.0-alpha.15`, a working alpha. Durable data, managed launches,
+> work rules, limits and budgets, the launch queue, schedules and webhooks,
+> knowledge, goals and backups work. Isolation is verified for Claude Code only;
+> the limits are listed below and in
+> [docs/implementation-readiness.md](docs/implementation-readiness.md) (Russian).
 
-Обычный сценарий работы с coding-агентами не сохраняет ничего между запусками:
-инструкции живут в голове и в CLAUDE.md, результат — в истории чата, «кто
-проверил» — нигде. Агентство добавляет недостающий слой:
+## Why
 
-- **Сотрудник** — именованная сущность с версией инструкции, ролью, провайдером
-  и политикой прав. Правка инструкции создаёт новую версию, а не затирает старую.
-- **Отдел** — процесс, критерии результата и политика проверки для группы
-  сотрудников; у отдела есть руководитель.
-- **Привязка к проекту** — проверенная связь с BB-проектом, машиной и корневым
-  каталогом. Файлы заказа принадлежат проекту заказчика.
-- **Поручение** — бриф, критерий готовности, зависимости, назначение,
-  попытки запуска, обсуждение и версии артефактов.
-- **Приёмка** — по конкретным `artifactId + version + hash`, а не по фразе
-  «готово» в тексте треда.
+A usual workflow with coding agents keeps nothing between runs: instructions live
+in someone's head and in CLAUDE.md, the result in a chat history, and "who reviewed
+it" nowhere. The Agency adds the missing layer:
 
-Проверенная на реальном BB цепочка отдела «Программисты»: Fable руководит,
-Sonnet разрабатывает, Opus проверяет, результат принят владельцем.
+- **Employee** — a named entity with a versioned job description, a role, a
+  provider and a permission policy. Editing the description creates a new version
+  instead of overwriting the old one.
+- **Department** — the process, result criteria and review policy of a group of
+  employees; every department has a lead.
+- **Project binding** — a verified link to a BB project, a machine and a root
+  folder. The job's files belong to the client project.
+- **Job** — a brief, acceptance criteria, dependencies, an assignee, launch
+  attempts, discussion and artifact versions.
+- **Acceptance** — of a specific `artifactId + version + hash`, never of the word
+  "done" in a thread.
 
-## Архитектура
+Verified on a live BB: a department lead splits a job into subtasks, an executor
+hands in a version, a reviewer checks it and the owner accepts it; the Agency
+creates and launches the next step for another department by itself; an employee
+whose workplace is a Mac mini tests a site in a real browser.
 
-### Границы
+## Architecture
 
-Агентство владеет сотрудниками, отделами, поручениями, версиями файлов и
-запуском **через собственные RPC и CLI**. BB владеет провайдерами, машинами,
-тредами и оболочкой UI. Уведомления попадают во входящий журнал и **не**
-запускают агентов — запуск возможен только через `prepareLaunch` после
-проверки готовности.
+### Boundaries
+
+The Agency owns employees, departments, jobs, file versions and launches
+**through its own RPC and CLI**. BB owns providers, machines, threads and the UI
+shell. Notifications land in an inbox and do **not** start agents: a launch
+happens only through `prepareLaunch` after a readiness check.
 
 ```mermaid
 flowchart TD
-  UI[UI страницы плагина и CLI bb agency] --> S[Domain RPC]
-  S --> D[(SQLite: сотрудники, отделы, задачи, версии)]
-  S --> F[Файлы на host привязки проекта]
-  S --> P[prepare-run: сборка ContextSnapshot]
+  UI[Plugin pages and the bb agency CLI] --> S[Domain RPC]
+  S --> D[(SQLite: employees, departments, jobs, versions)]
+  S --> F[Files on the project binding's host]
+  S --> P[prepare-run: ContextSnapshot]
   P --> L[launch coordinator]
-  L --> T[Скрытый тред BB у провайдера]
-  T --> W[Watch: idle + hash версии]
+  L --> T[Hidden BB thread with the provider]
+  T --> W[Watch: idle + version hash]
   W --> S
   S --> N[reportNeedsInput]
-  N --> A[answerNeedsInput + официальная отправка]
+  N --> A[answerNeedsInput + official send]
 ```
 
-### Слои
+### Layers
 
-| Слой | Содержимое | Правило |
+| Layer | Contents | Rule |
 | --- | --- | --- |
-| `src/shared` | Zod-схемы и RPC-контракт | Один контракт для UI, RPC и CLI |
-| `src/domain` | Переходы Job и попыток, правила | Чистая логика без I/O |
-| `src/server/db` | SQLite и append-only миграции | Откат кода только с совместимой схемой |
-| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn только после handshake |
-| `src/server/dispatcher` | typed inbox → правило → outbox/claim | Live и автозапуск выключены |
-| `src/app` | Рабочие экраны на RPC и отдельное демо | Демоданные не смешиваются с рабочими |
+| `src/shared` | Zod schemas and the RPC contract | One contract for UI, RPC and CLI |
+| `src/domain` | Job and attempt transitions, rules | Pure logic, no I/O |
+| `src/server/db` | SQLite and append-only migrations | Roll code back only with a compatible schema |
+| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn only after the handshake |
+| `src/server/dispatcher` | typed inbox → rule → outbox/claim | Event rules, schedules and webhooks |
+| `src/app` | Working screens over RPC and a separate demo | Demo data never mixes with real data |
 
-Одна бизнес-логика на всех: `bb agency` вызывает те же обработчики и те же
-Zod-схемы, что и UI. Отдельного SQL в CLI нет, произвольный RPC закрыт
-allowlist — см. [docs/cli.md](docs/cli.md).
+One business logic for everyone: `bb agency` calls the same handlers and the same
+Zod schemas as the UI. The CLI has no SQL of its own, and arbitrary RPC is closed
+by an allowlist; see [docs/cli.md](docs/cli.md) (Russian).
 
-### Жизненный цикл поручения
+### Job lifecycle
 
 ```text
 backlog → queued → running → review → done
@@ -82,114 +85,124 @@ backlog → queued → running → review → done
                  waiting_input / blocked / canceled
 ```
 
-1. **Durable CRUD.** Поручение получает бриф, критерий готовности, исполнителя и
-   закреплённые входные версии файлов (`attachJobInput`).
-2. **Готовность.** `getIsolationReadiness` и `GET spawn-contract` ядра. Нет
-   контракта или провайдер вне proven (`claude-code`) — запуск недоступен,
-   каталог при этом жив.
-3. **Снимок контекста.** Неизменяемый `ContextSnapshot`: версии правил, процесса
-   отдела, роли, брифа, действующей политики, CLI и host, входы и передачи.
-   Слой поручения не отменяет слой отдела; конфликт — это typed-вопрос, а не
-   тихий выбор одного из вариантов.
-4. **Запуск.** `prepareLaunch` → receipt → скрытый тред BB. `reconcile` не
-   создаёт второй spawn.
-5. **Наблюдение.** `idle` плюс hash текущей версии артефакта → `review` и
-   `awaiting_review`. `idle` без такой версии оставляет поручение в `running`.
-6. **Вопрос.** Работник вызывает `reportNeedsInput` — поручение переходит в
-   `waiting_input` с сохранёнными вопросами. Комментарий к задаче работу **не**
-   продолжает; продолжает `answerNeedsInput` с официальной отправкой.
-7. **Приёмка.** Отдельная команда по `artifactId + version + hash`. Публикация
-   не равна принятию, а `awaiting_review` — это ожидание проверки.
+1. **Durable CRUD.** A job gets a brief, acceptance criteria, an assignee and
+   pinned input file versions (`attachJobInput`). It can wait for other jobs and
+   name a next step for another department.
+2. **Readiness.** `getIsolationReadiness` and the core `GET spawn-contract`. No
+   contract, or a provider outside the proven set (`claude-code`), means no launch;
+   the catalog keeps working.
+3. **Context snapshot.** An immutable `ContextSnapshot`: versions of the rules, the
+   department process, the role, the brief, the effective policy, CLI and host,
+   inputs and handoffs. The job layer does not cancel the department layer; a
+   conflict is a typed question, not a silent choice.
+4. **Launch.** `prepareLaunch` → receipt → a hidden BB thread. `reconcile` never
+   spawns a second thread.
+5. **Watch.** `idle` plus the hash of the current artifact version → `review` and
+   `awaiting_review`. `idle` without such a version keeps the job `running`.
+6. **Question.** The worker calls `reportNeedsInput` and the job moves to
+   `waiting_input` with the questions saved. A job comment does **not** resume
+   work; `answerNeedsInput` with the official send does.
+7. **Acceptance.** A separate command on `artifactId + version + hash`. Publishing
+   is not accepting, and `awaiting_review` means waiting for review.
 
-### Права
+### Permissions
 
-Полномочия запуска — пересечение платформы, привязки проекта, отдела,
-сотрудника и поручения. Текст поручения не расширяет allowlist. Неизвестная
-capability блокирует запуск. Значения секретов не хранятся ни в базе, ни в Git,
-ни в уведомлениях — только имена ссылок.
+Launch authority is the intersection of the platform, the project binding, the
+department, the employee and the job. A job's text never widens the allowlist. An
+unknown capability blocks the launch. Secret values are stored neither in the
+database, nor in Git, nor in notifications — only reference names.
 
-## Интерфейс
+## Interface
 
-Главный экран — поручения по статусам, справа выбор проекта, отдела или
-сотрудника. Главная задача выделена и показывает, сколько подзадач закрыто;
-подзадачи стоят под ней. Закрытые уходят с доски: подзадачи через 1 ч, остальные
-через 24 ч (настройки плагина). Карточка поручения: работа и обсуждение слева,
-свойства, файлы и запуски справа.
+The home screen lists jobs by state, with a project, department or employee picker
+on the right. A main job stands out and shows how many of its subtasks are closed;
+subtasks sit under it. Closed jobs leave the board: subtasks after 1 h, the rest
+after 24 h (plugin settings). The job card has the work and discussion on the left
+and properties, files and launches on the right.
 
-Плагин добавляет в каждую новую сессию BB инструкцию маршрута: что сделать в
-чате, а что поручить отделу проекта и кому. Треды руководителя и исполнителя
-задачи получают свою роль. Режим `delegate` / `suggest` / `off` — в настройках.
+Every new BB session gets a routing section: what to do in the chat and what to
+hand to which department of the project. An employee gets its role — lead,
+executor or reviewer — in the launch prompt. Instructions and service messages to
+agents are always in English; the "Agency language" setting sets the language of
+reports and comments. The `delegate` / `suggest` / `off` mode is in the settings.
 
-Файлы открываются по клику в закрываемой правой вкладке BB. Агентство
-показывает свой редактор для txt/json/yaml/csv и изображений; `.md`/`.markdown`
-открывает и редактирует отдельный плагин «Markdown PRO» (`md-editor`).
-Сохранение в редакторе Агентства создаёт новую версию на машине и в папке
-привязанного проекта.
+Files open with a click in a closable right-hand BB tab. The Agency has its own
+editor for txt/json/yaml/csv and images; `.md` / `.markdown` files open in the
+separate Markdown PRO plugin (`md-editor`). Saving in the Agency editor creates a
+new version on the machine and in the folder of the bound project.
 
-Разделы: «Задачи» (список и канбан, архив, поиск по описаниям и комментариям,
-сохранённые виды), «Входящие», «Цели», «Проекты», «Отделы», «Сотрудники» (вкладка
-«Показатели»), «Автоматизации», «Знания», «Запуски», «Дашборд» расхода и бюджетов,
-«Настройки». В настройках владелец меняет поведение без правки кода: правила работы
-Агентства, отдела и сотрудника (круги доработки, наблюдение за запуском, лимиты
-параллельности, бюджеты, автопроверка, эскалация), общие правила — верхний слой
-промпта, шаблоны регламента и должностных инструкций, язык (русский / English),
-закрепление версии навыков, резервные копии, правило «Запуск без песочницы» (в том числе для машины),
-ночная перепроверка принятого и мягкие лимиты WIP колонок канбана.
+Sections: Jobs (list and kanban, archive, search in briefs and comments, saved
+views), Inbox, Goals, Projects, Departments, Employees (with a Metrics tab),
+Automations, Knowledge, Launches, a Dashboard of spend and budgets, and Settings.
+The owner changes behavior without code: work rules of the Agency, a department, a
+machine and an employee (rework rounds, launch watch, concurrency limits, budgets,
+auto review, escalation, "Run without sandbox", nightly recheck), the Agency-wide
+rules — the top prompt layer, charter and job description templates, the language
+(Russian / English), skill version pinning, backups and soft WIP limits of kanban
+columns. The interface and the standard templates switch between Russian and
+English.
 
-Порядок работы задачи — в её карточке: какие задачи должны быть готовы до запуска и «следующий шаг»
-другому отделу, который Агентство создаёт само после приёмки. Сообщения скриптов и сторожей
-(`bb agency notify-owner`, `bb agency digest`) приходят во «Входящие → Сообщения».
+A job's work order is in its card: which jobs must be done before it launches, and
+a "next step" for another department that the Agency creates by itself after
+acceptance. Messages from scripts and watchdogs (`bb agency notify-owner`,
+`bb agency digest`) arrive in Inbox → Messages.
 
-Дополнительные плагины BB открывают возможности, без них они не показываются: с Projects & Sections
-у проекта несколько папок на разных машинах и подзадачи между ними, с File Gateway у сотрудника
-рабочее место на своей машине. Плагины BB выдаются сотруднику по одному во вкладке «Плагины» профиля:
-его запуск получает их навыки и инструкции, остальные плагины в изолированный запуск не попадают.
+Other BB plugins unlock features and stay invisible without them: with Projects &
+Sections a project has several folders on different machines and subtasks between
+them; with File Gateway an employee has a workplace on its own machine. BB plugins
+are given to an employee one by one in the profile's Plugins tab: the launch gets
+their skills and instructions, and other plugins stay out of the isolated launch.
+The tab marks what each plugin gives — instructions, a skill, tools — and hides
+plugins that only change the BB interface.
 
-Единые правила интерфейса: [DESIGN.md](DESIGN.md).
+Shared interface rules: [DESIGN.md](DESIGN.md) (Russian).
 
-## Чего ещё нет
+## Not there yet
 
-Честный список границ, чтобы не читать альфу как готовый продукт:
+An honest list of limits, so the alpha is not read as a finished product:
 
-- Изоляция всех CLI. Проверена только автоматическая загрузка навыков для
-  Claude Code — это не файловая песочница. Codex и OpenCode приёмку не прошли;
-  расход их токенов зависит от ядра BB.
-- Приёмка по тексту «готово» и вывод `waiting_input` из прозы треда. Оба —
-  только typed-команды.
-- Резервный CLI при недоступности основного.
-- Инструменты плагинов BB в изолированном треде Claude Code: BB 0.43.1 их не подключает,
-  сотрудник работает командой `bb <плагин>`.
-- Двусторонний Telegram и многопользовательская модель.
-- Production rollout ядра и SDK готовится отдельно.
+- Isolation of every CLI. Only automatic skill loading for Claude Code is
+  verified, and that is not a file sandbox. Codex and OpenCode did not pass
+  acceptance; their token accounting depends on the BB core.
+- Acceptance by the word "done" and inferring `waiting_input` from thread prose.
+  Both are typed commands only.
+- A fallback CLI when the main one is unavailable.
+- BB plugin tools inside an isolated Claude Code thread: BB 0.43.1 does not attach
+  them, so an employee uses the `bb <plugin>` command.
+- Two-way Telegram and a multi-user model.
+- The production rollout of the core and SDK is prepared separately.
 
-## Структура
+## Layout
 
 ```text
-server.ts                    регистрация серверной части
-app.tsx                      регистрация страницы и fileOpener BB
-host.ts                      запись копий предпросмотра на выбранный host
+server.ts                    server registration
+app.tsx                      page and BB fileOpener registration
+host.ts                      preview copies on the chosen host
 src/
-  shared/                    Zod-схемы и RPC-контракт
-  domain/                    модель сотрудников, отделов, задач, запусков и правил
+  shared/                    Zod schemas and the RPC contract
+  domain/                    employees, departments, jobs, launches and rules
   server/
-    register.ts              сборка зависимостей и регистрация RPC/CLI
-    db/                      SQLite и append-only миграции
-    inbox/                   сохраняемые входящие уведомления
-    triggers/                адаптеры источников событий
+    register.ts              dependency wiring and RPC/CLI registration
+    db/                      SQLite and append-only migrations
+    inbox/                   stored incoming notifications
+    triggers/                event source adapters
     runtime/                 isolation, ContextSnapshot, run-store, launch, prepare-run
-    dispatcher/              контракты запуска и сверки состояния
-  app/prototype/             используемый UI и демонстрационные данные
-components/ui/               компоненты из штатного scaffold BB
-skills/agency/               инструкция использования CLI для работника
-tests/                       проверки поведения через SDK harness
-docs/                        архитектура, события, API и этапы
+    dispatcher/              launch and reconciliation contracts
+    flow/                    dependencies and next steps
+    owner-messages/          messages, summaries and watchdogs for the owner
+  app/prototype/             the UI in use and demo data
+  app/i18n/                  English dictionary keyed by the Russian source text
+components/ui/               components from the standard BB scaffold
+skills/agency/               how a worker uses the CLI
+tests/                       behavior checks through the SDK harness
+docs/                        architecture, events, API and stages (Russian)
 ```
 
-## Установка и разработка
+## Install and develop
 
-Требуется BB `>=0.43.1 <0.44` и Node 22/24/26. Пакет собирается с закреплённым
-BB Plugin SDK; сам tarball SDK в репозиторий не включён — положите его в
-`vendor/` согласно `devDependencies` в `package.json`.
+Requires BB `>=0.43.1 <0.44` and Node 22/24/26. The package builds against a
+pinned BB Plugin SDK; the SDK tarball is not in the repository — put it into
+`vendor/` as named in `devDependencies` of `package.json`.
 
 ```sh
 npm ci --include=dev
@@ -198,7 +211,7 @@ npm test
 npm run build
 ```
 
-Локальная установка в BB из каталога плагина:
+Local install into BB from the plugin folder:
 
 ```sh
 bb plugin install .
@@ -206,48 +219,48 @@ bb agency status --json
 bb agency help
 ```
 
-Плагин регистрирует страницу `/plugins/agency/overview` и CLI `bb agency`.
-Успешная сборка не означает установку, а заявленная совместимость BB не
-доказывает наличие experimental API: запуск дополнительно требует ответа
-`/api/v1/system/experimental_thread-spawn-contract` текущего сервера.
+The plugin registers the `/plugins/agency/overview` page and the `bb agency` CLI.
+A successful build is not an install, and the declared BB compatibility does not
+prove the experimental API is there: a launch also needs an answer from the
+current server's `/api/v1/system/experimental_thread-spawn-contract`.
 
-Команды CRUD и семантика `--input-json` / server-fs: [docs/cli.md](docs/cli.md).
+CRUD commands and the `--input-json` / server-fs semantics:
+[docs/cli.md](docs/cli.md) (Russian).
 
-## Данные и откат
+## Data and rollback
 
-Собственная база: `<BB dataDir>/plugins/agency/data.db`. Соединением владеет BB и
-закрывает его при перезагрузке. Исходники и база раздельны. Копию делайте из
-«Настройки → Хранение → Резервные копии»: это согласованный снимок SQLite с учётом
-WAL, файлы лежат рядом с базой в `backups/`. Восстановление там же: сначала
-сохраняется копия текущего состояния, потом данные заменяются. Секреты внешних
-адресов и закрепление навыков в копию не входят. Простое копирование активного
-`data.db` без WAL не годится.
+Own database: `<BB dataDir>/plugins/agency/data.db`. BB owns the connection and
+closes it on reload. Sources and the database are separate. Make a copy from
+Settings → Storage → Backups: it is a consistent SQLite snapshot that accounts for
+WAL, stored next to the database in `backups/`. Restore from the same place: the
+current state is saved first, then the data is replaced. Webhook secrets and skill
+pins are not part of a backup. Copying an active `data.db` without its WAL is not
+a backup.
 
-Закрытые задачи уходят в архив через 30 дней (настройка плагина «Убирать закрытые
-задачи в архив через, дней»); архив открывается на доске и ищется, из базы ничего не
-удаляется.
+Closed jobs move to the archive after 30 days (the archive period is a plugin
+setting in BB); the archive opens from the board and is searchable, and nothing is
+deleted from the database.
 
-`bb plugin disable agency` выключает плагин; сохранённые данные при этом не
-удалять. Отключение останавливает наблюдение, но не отменяет уже созданные треды
-работников. Перед обновлением сохраните состояние активных попыток и проверьте
-их восстановление после включения.
+`bb plugin disable agency` turns the plugin off; keep the stored data. Disabling
+stops the watch but does not cancel worker threads already created. Before an
+update, save the state of active attempts and check that they recover after the
+plugin is enabled again.
 
-## Документы
+## Documents
 
-**Начать с [рабочего плана и индекса](docs/README.md)**.
+The documents are in Russian. **Start with the [work plan and index](docs/README.md)**.
 
-- [Анализ, сравнение с аналогами и план развития](docs/operating-model.md)
-
-- [Готовность и границы runtime](docs/implementation-readiness.md)
-- [Файловая архитектура и границы модулей](docs/architecture.md)
-- [Данные и состояния](docs/data-model.md) · [версии пакетов](docs/dependencies.md)
-- [CLI](docs/cli.md) · [API BB: возможности и ограничения](docs/bb-api.md)
-- [Правила и контекст разных уровней](docs/instruction-context.md)
-- [Снимок запуска](docs/session-context-contract.md) · [revise compiler](docs/context-snapshot-revise.md)
-- [Контракты взаимодействий и готовность](docs/interaction-and-runtime.md)
-- [Общение и история внутри задачи](docs/task-interaction.md)
-- [Архитектура автоматизаций и webhook](docs/automation-architecture.md) · [события](docs/events.md)
-- [Импорт собственных MCP через JSON](docs/mcp-import.md) · [навык и каталог](docs/skills-integration.md)
-- [Все экраны и поведение прототипа](docs/ui-plan.md) · [единые правила интерфейса](DESIGN.md)
-- [Ревью продукта и сравнение с Multica](docs/product-review.md)
-- [Этапы и критерии приёмки](docs/roadmap.md)
+- [Analysis, comparison with similar products and the development plan](docs/operating-model.md)
+- [Runtime readiness and limits](docs/implementation-readiness.md)
+- [File architecture and module boundaries](docs/architecture.md)
+- [Data and states](docs/data-model.md) · [package versions](docs/dependencies.md)
+- [CLI](docs/cli.md) · [BB API: what it can and cannot do](docs/bb-api.md)
+- [Rules and context of different levels](docs/instruction-context.md)
+- [Launch snapshot](docs/session-context-contract.md) · [revise compiler](docs/context-snapshot-revise.md)
+- [Interaction contracts and readiness](docs/interaction-and-runtime.md)
+- [Communication and history inside a job](docs/task-interaction.md)
+- [Automation and webhook architecture](docs/automation-architecture.md) · [events](docs/events.md)
+- [Importing your own MCP servers with JSON](docs/mcp-import.md) · [skill and catalog](docs/skills-integration.md)
+- [All screens and prototype behavior](docs/ui-plan.md) · [shared interface rules](DESIGN.md)
+- [Product review and comparison with Multica](docs/product-review.md)
+- [Stages and acceptance criteria](docs/roadmap.md)
