@@ -42,7 +42,7 @@ describe("UsageDashboard", () => {
     expect(container.textContent).toContain("5 задач");
     expect(container.textContent).toContain("1 неизвестно");
     expect(container.textContent).toContain("Нет цены");
-    expect(container.querySelector("details")?.textContent).toContain("visible_epoch_peaks");
+    expect(container.querySelector('[data-testid="usage-technical"]')?.textContent).toContain("visible_epoch_peaks");
     expect(container.textContent).not.toContain("All-time");
     expect(container.textContent).not.toMatch(/Не lifetime|Видимые пики|Все корни|input /);
     expect(container.textContent).not.toContain("3/4");

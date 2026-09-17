@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { BudgetStatusView, ProviderUsageView } from "../../shared/rpc-contract";
 import type { ListDashboardUsageOutput } from "../../shared/contracts/dashboard-usage";
 import {
@@ -24,7 +25,7 @@ import {
   type UsageGroupBy,
 } from "../data/usage-dashboard";
 import { Button, Empty, PageHead } from "./shared";
-import { tr } from "../i18n";
+import { tr, uiLocale } from "../i18n";
 
 const GROUP_LABEL: Record<UsageGroupBy, string> = {
   project: "Проект",
@@ -64,16 +65,20 @@ function NativeSelect({
 function TokenCells({
   totals,
   known,
+  strong,
 }: {
   totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number; totalTokens: number } | null;
   known: boolean;
+  /** The total row: the same columns, read as a sum. */
+  strong?: boolean;
 }) {
+  const cell = `px-3 py-2 text-right text-xs tabular-nums${strong ? " font-medium" : ""}`;
   return (
     <>
-      <td className="px-3 py-2 text-xs">{formatTokenCount(totals?.inputTokens, known)}</td>
-      <td className="px-3 py-2 text-xs">{formatTokenCount(totals?.cachedInputTokens, known)}</td>
-      <td className="px-3 py-2 text-xs">{formatTokenCount(totals?.outputTokens, known)}</td>
-      <td className="px-3 py-2 text-xs">{formatTokenCount(totals?.totalTokens, known)}</td>
+      <td className={cell}>{formatTokenCount(totals?.inputTokens, known)}</td>
+      <td className={cell}>{formatTokenCount(totals?.cachedInputTokens, known)}</td>
+      <td className={cell}>{formatTokenCount(totals?.outputTokens, known)}</td>
+      <td className={`${cell} text-foreground`}>{formatTokenCount(totals?.totalTokens, known)}</td>
     </>
   );
 }
@@ -110,120 +115,141 @@ export function UsageDashboard({
   const options = usageFilterOptions(payload ? filteredUsageView(payload, EMPTY_USAGE_FILTER, names).rows : []);
   const maxDay = view?.daySeries.reduce((max, day) => Math.max(max, day.totalTokens), 0) ?? 0;
   const unpriced = view ? modelsWithoutPrice(view.rows) : [];
+  const compactChart = (view?.daySeries.length ?? 0) <= 12;
+  const filtered = Boolean(filter.projectId || filter.departmentId || filter.model || filter.rootJobId || filter.fromDate || filter.toDate);
 
   return (
-    <div className="space-y-5" data-testid="usage-dashboard">
+    <div className="space-y-4" data-testid="usage-dashboard">
       <PageHead title="Дашборд" description="Расход по запускам Агентства." />
-      {budgets.length > 0 && <BudgetsPanel budgets={budgets} />}
-      {providers.length > 0 && <ProvidersPanel providers={providers} />}
       {error && <p role="alert" className="text-sm">{error}</p>}
       {loading && <p className="text-xs text-muted-foreground">{tr("Загружаем расход…")}</p>}
       {!payload && !error && !loading && <Empty title="Нет данных" description={USAGE_EMPTY} />}
       {payload && view && (
         <>
-          <div className="flex flex-wrap gap-3">
-            <NativeSelect
-              label="Группировка"
-              value={groupBy}
-              onChange={(value) => onGroupBy?.(value as UsageGroupBy)}
-              options={USAGE_GROUP_BY.map((value) => ({ value, label: GROUP_LABEL[value] }))}
-            />
-            <NativeSelect
-              label="Проект"
-              value={filter.projectId || "all"}
-              onChange={(value) => onFilter?.({ ...filter, projectId: value === "all" ? "" : value })}
-              options={[{ value: "all", label: "Все проекты" }, ...options.projects]}
-            />
-            <NativeSelect
-              label="Отдел"
-              value={filter.departmentId || "all"}
-              onChange={(value) => onFilter?.({ ...filter, departmentId: value === "all" ? "" : value })}
-              options={[{ value: "all", label: "Все отделы" }, ...options.departments]}
-            />
-            <NativeSelect
-              label="Модель"
-              value={filter.model || "all"}
-              onChange={(value) => onFilter?.({ ...filter, model: value === "all" ? "" : value })}
-              options={[{ value: "all", label: "Все модели" }, ...options.models]}
-            />
-            <NativeSelect
-              label="Главная задача"
-              value={filter.rootJobId || "all"}
-              onChange={(value) => onFilter?.({ ...filter, rootJobId: value === "all" ? "" : value })}
-              options={[{ value: "all", label: "Все главные задачи" }, ...options.roots]}
-            />
-            <label className="block text-xs text-muted-foreground">
-              {tr("С")}
-              <input
-                type="date"
-                aria-label={tr("Дата с")}
-                className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-                value={filter.fromDate}
-                onChange={(event) => onFilter?.({ ...filter, fromDate: event.target.value })}
+          <section aria-label={tr("Фильтры")} className="rounded-lg border border-border p-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+              <NativeSelect
+                label="Группировка"
+                value={groupBy}
+                onChange={(value) => onGroupBy?.(value as UsageGroupBy)}
+                options={USAGE_GROUP_BY.map((value) => ({ value, label: GROUP_LABEL[value] }))}
               />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              {tr("По")}
-              <input
-                type="date"
-                aria-label={tr("Дата по")}
-                className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-                value={filter.toDate}
-                onChange={(event) => onFilter?.({ ...filter, toDate: event.target.value })}
+              <NativeSelect
+                label="Проект"
+                value={filter.projectId || "all"}
+                onChange={(value) => onFilter?.({ ...filter, projectId: value === "all" ? "" : value })}
+                options={[{ value: "all", label: "Все проекты" }, ...options.projects]}
               />
-            </label>
-          </div>
-          <section aria-label={tr("Покрытие")} className="space-y-1 text-xs text-muted-foreground" data-testid="usage-coverage">
-            {coverageLines(view.coverage).map((line) => <p key={line}>{line}</p>)}
-          </section>
-          <section aria-label={tr(USAGE_AVAILABLE)} className="space-y-1">
-            <h2 className="text-sm font-medium">{tr(USAGE_AVAILABLE)}</h2>
-            <p className="text-sm" data-testid="usage-all-time">{view.availableLabel}</p>
-            <p className="text-xs text-muted-foreground">{tr(USAGE_CACHE_SEPARATE)}</p>
-            {view.availableTotals && (
-              <p className="text-xs text-muted-foreground">
-                {tr("Входные без кэша {value}", { value: formatTokenCount(view.availableTotals.inputTokens, true) })}
-                {" · "}{tr("Кэш {value}", { value: formatTokenCount(view.availableTotals.cachedInputTokens, true) })}
-                {" · "}{tr("Ответы {value}", { value: formatTokenCount(view.availableTotals.outputTokens, true) })}
-              </p>
-            )}
-            <p className="text-sm" data-testid="usage-cost">{tr("Стоимость: {cost}", { cost: view.costLabel })}</p>
-            <p className="text-xs text-muted-foreground">{tr(USAGE_COST_BASIS)}</p>
-            {unpriced.length > 0 && (
-              <div className="space-y-1" data-testid="usage-unpriced">
-                <p className="text-xs text-muted-foreground">
-                  {tr("Токены этих моделей посчитаны, но цены у них нет: {models}. Добавьте её в «Настройки → Плагины → Агентство → Цены моделей», USD за миллион токенов:", { models: unpriced.join(", ") })}
-                </p>
-                <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px]">{modelPriceSnippet(unpriced)}</pre>
+              <NativeSelect
+                label="Отдел"
+                value={filter.departmentId || "all"}
+                onChange={(value) => onFilter?.({ ...filter, departmentId: value === "all" ? "" : value })}
+                options={[{ value: "all", label: "Все отделы" }, ...options.departments]}
+              />
+              <NativeSelect
+                label="Модель"
+                value={filter.model || "all"}
+                onChange={(value) => onFilter?.({ ...filter, model: value === "all" ? "" : value })}
+                options={[{ value: "all", label: "Все модели" }, ...options.models]}
+              />
+              <NativeSelect
+                label="Главная задача"
+                value={filter.rootJobId || "all"}
+                onChange={(value) => onFilter?.({ ...filter, rootJobId: value === "all" ? "" : value })}
+                options={[{ value: "all", label: "Все главные задачи" }, ...options.roots]}
+              />
+              <label className="block text-xs text-muted-foreground">
+                {tr("С")}
+                <input
+                  type="date"
+                  aria-label={tr("Дата с")}
+                  className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                  value={filter.fromDate}
+                  onChange={(event) => onFilter?.({ ...filter, fromDate: event.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                {tr("По")}
+                <input
+                  type="date"
+                  aria-label={tr("Дата по")}
+                  className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                  value={filter.toDate}
+                  onChange={(event) => onFilter?.({ ...filter, toDate: event.target.value })}
+                />
+              </label>
+              <div className="flex items-end">
+                {filtered && onFilter && (
+                  <Button size="sm" variant="outline" className="h-8 w-full" onClick={() => onFilter({ ...EMPTY_USAGE_FILTER })}>{tr("Сбросить фильтры")}</Button>
+                )}
               </div>
-            )}
+            </div>
           </section>
-          <section aria-label={tr(USAGE_PERIOD)} className="space-y-3">
-            <h2 className="text-sm font-medium">{tr(USAGE_PERIOD)}</h2>
-            <p className="text-sm" data-testid="usage-period">{view.periodLabel}</p>
-            {view.daySeries.length > 0 && (
-              <>
+
+          <section aria-label={tr("Итоги")} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Tile label={USAGE_AVAILABLE} value={view.availableLabel} testId="usage-all-time">
+              {view.availableTotals && (
+                <dl className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                  <TileRow label="Входные без кэша" value={formatTokenCount(view.availableTotals.inputTokens, true)} />
+                  <TileRow label="Кэш" value={formatTokenCount(view.availableTotals.cachedInputTokens, true)} />
+                  <TileRow label="Ответы" value={formatTokenCount(view.availableTotals.outputTokens, true)} />
+                </dl>
+              )}
+            </Tile>
+            <Tile label="Стоимость" value={view.costLabel} testId="usage-cost" hint={USAGE_COST_BASIS} />
+            <Tile label={USAGE_PERIOD} value={view.periodLabel} testId="usage-period" hint={view.daySeries.length ? USAGE_PERIOD_OBSERVED : undefined} />
+            <Tile label="Треды с расходом" value={`${view.coverage.threadsWithUsage} ${tr("из")} ${view.coverage.uniqueThreadCount}`}>
+              <p className="mt-2 text-xs text-muted-foreground">{tr(USAGE_CACHE_SEPARATE)}</p>
+            </Tile>
+          </section>
+
+          {unpriced.length > 0 && (
+            <section className="rounded-lg border border-border bg-muted/30 p-3" data-testid="usage-unpriced" aria-label={tr("Модели без цены")}>
+              <p className="text-xs text-muted-foreground">
+                {tr("Токены этих моделей посчитаны, но цены у них нет: {models}. Добавьте её в «Настройки → Плагины → Агентство → Цены моделей», USD за миллион токенов:", { models: unpriced.join(", ") })}
+              </p>
+              <pre className="mt-2 whitespace-pre-wrap break-all rounded-md border border-border bg-background p-2 font-mono text-[11px]">{modelPriceSnippet(unpriced)}</pre>
+            </section>
+          )}
+
+          {view.daySeries.length > 0 && (
+            <section aria-label={tr("Расход по дням")} className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold">{tr("Расход по дням")}</h2>
                 <p className="text-xs text-muted-foreground">{tr(USAGE_PERIOD_OBSERVED)}</p>
-                <div className="flex h-24 items-end gap-1" data-testid="usage-day-chart" role="img" aria-label={tr("Расход по дням")}>
+              </div>
+              <div className="flex h-28 items-end gap-2 border-b border-border pb-px" data-testid="usage-day-chart" role="img" aria-label={tr("Расход по дням")}>
+                {view.daySeries.map((day) => (
+                  <div key={day.date} className="flex min-w-0 max-w-14 flex-1 flex-col items-center justify-end gap-1">
+                    {compactChart && <span className="text-[10px] tabular-nums text-muted-foreground">{formatTokenCount(day.totalTokens, true)}</span>}
+                    <div
+                      className="w-full rounded-t bg-foreground/55"
+                      style={{ height: `${maxDay ? Math.max(6, Math.round((day.totalTokens / maxDay) * 84)) : 6}px` }}
+                      title={`${day.date}: ${formatTokenCount(day.totalTokens, true)}`}
+                    />
+                  </div>
+                ))}
+              </div>
+              {compactChart ? (
+                <div className="flex gap-2">
                   {view.daySeries.map((day) => (
-                    <div key={day.date} className="flex min-w-0 flex-1 flex-col items-center justify-end">
-                      <div
-                        className="w-full rounded-t bg-foreground/70"
-                        style={{ height: `${maxDay ? Math.max(8, Math.round((day.totalTokens / maxDay) * 96)) : 8}px` }}
-                        title={`${day.date}: ${formatTokenCount(day.totalTokens, true)}`}
-                      />
-                    </div>
+                    <span key={day.date} className="min-w-0 max-w-14 flex-1 text-center text-[10px] text-muted-foreground">{day.date.slice(5)}</span>
                   ))}
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
+              ) : (
+                <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
+                  <span>{`${view.daySeries[0]?.date} — ${view.daySeries[view.daySeries.length - 1]?.date}`}</span>
+                  <span>{tr("пик {value}", { value: formatTokenCount(maxDay, true) })}</span>
+                </div>
+              )}
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">{tr("Дни таблицей")}</summary>
+                <div className="mt-2 overflow-x-auto rounded-lg border border-border">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-muted/40 text-xs text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2 font-medium">{tr("День")}</th>
-                        <th className="px-3 py-2 font-medium">{tr("Входные без кэша")}</th>
-                        <th className="px-3 py-2 font-medium">{tr("Кэш")}</th>
-                        <th className="px-3 py-2 font-medium">{tr("Ответы")}</th>
-                        <th className="px-3 py-2 font-medium">{tr("Всего")}</th>
+                        <NumberHeads />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -236,48 +262,68 @@ export function UsageDashboard({
                     </tbody>
                   </table>
                 </div>
-              </>
+              </details>
+            </section>
+          )}
+
+          <section aria-label={tr("Расход по группам")} className="space-y-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold">{tr(GROUP_TITLE[groupBy])}</h2>
+              <p className="text-xs text-muted-foreground">{tr("Строк: {count}", { count: groups.length })}</p>
+            </div>
+            {groups.length === 0 ? (
+              <Empty title="Нет строк" description={USAGE_EMPTY} />
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">{tr(GROUP_LABEL[groupBy])}</th>
+                      <th className="px-3 py-2 text-right font-medium">{tr("Треды")}</th>
+                      <NumberHeads />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {groups.map((group) => (
+                      <tr key={group.key} className="hover:bg-muted/30">
+                        <td className="px-3 py-2">
+                          {groupBy === "root" && onOpenJob ? (
+                            <Button size="sm" variant="ghost" className="h-auto px-0 font-normal" onClick={() => onOpenJob(workspaceJobKey(names, group.key))}>
+                              {group.label}
+                            </Button>
+                          ) : group.label}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                          {group.threadCount}
+                          {group.unknownThreads > 0 ? tr(" · {count} неизвестно", { count: group.unknownThreads }) : ""}
+                        </td>
+                        <TokenCells totals={group.peaks} known={Boolean(group.peaks)} />
+                      </tr>
+                    ))}
+                  </tbody>
+                  {view.availableTotals && (
+                    <tfoot className="border-t border-border bg-muted/20 text-sm">
+                      <tr>
+                        <td className="px-3 py-2 font-medium">{tr("Итого")}</td>
+                        <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">{view.coverage.uniqueThreadCount}</td>
+                        <TokenCells totals={view.availableTotals} known strong />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
             )}
           </section>
-          {groups.length === 0 ? (
-            <Empty title="Нет строк" description={USAGE_EMPTY} />
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-muted/40 text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">{tr("Группа")}</th>
-                    <th className="px-3 py-2 font-medium">{tr("Треды")}</th>
-                    <th className="px-3 py-2 font-medium">{tr("Входные без кэша")}</th>
-                    <th className="px-3 py-2 font-medium">{tr("Кэш")}</th>
-                    <th className="px-3 py-2 font-medium">{tr("Ответы")}</th>
-                    <th className="px-3 py-2 font-medium">{tr("Всего")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {groups.map((group) => (
-                    <tr key={group.key}>
-                      <td className="px-3 py-2">
-                        {groupBy === "root" && onOpenJob ? (
-                          <Button size="sm" variant="ghost" className="h-auto px-0" onClick={() => onOpenJob(workspaceJobKey(names, group.key))}>
-                            {group.label}
-                          </Button>
-                        ) : group.label}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
-                        {group.threadCount}
-                        {group.unknownThreads > 0 ? tr(" · {count} неизвестно", { count: group.unknownThreads }) : ""}
-                      </td>
-                      <TokenCells totals={group.peaks} known={Boolean(group.peaks)} />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+          {providers.length > 0 && <ProvidersPanel providers={providers} />}
+          {budgets.length > 0 && <BudgetsPanel budgets={budgets} />}
+
+          <details className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground" data-testid="usage-technical">
+            <summary className="cursor-pointer">{tr("Как это посчитано")}</summary>
+            <div className="mt-2 space-y-1" data-testid="usage-coverage">
+              {coverageLines(view.coverage).map((line) => <p key={line}>{line}</p>)}
             </div>
-          )}
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
-            <div className="mt-1 space-y-1 font-mono">
+            <div className="mt-2 space-y-1 font-mono">
               {technicalUsageLines(payload).map((line) => <p key={line}>{line}</p>)}
             </div>
             <ul className="mt-2 space-y-1 font-sans">
@@ -298,6 +344,58 @@ export function UsageDashboard({
   );
 }
 
+const GROUP_TITLE: Record<UsageGroupBy, string> = {
+  project: "Расход по проектам",
+  department: "Расход по отделам",
+  model: "Расход по моделям",
+  root: "Расход по главным задачам",
+};
+
+/** One number of the summary strip: a label, the number itself, optional detail under it. */
+function Tile({
+  label,
+  value,
+  hint,
+  testId,
+  children,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  testId?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col rounded-lg border border-border p-3" aria-label={tr(label)}>
+      <p className="text-xs text-muted-foreground">{tr(label)}</p>
+      <p className="mt-1 text-lg font-semibold leading-tight tabular-nums" {...(testId ? { "data-testid": testId } : {})}>{value}</p>
+      {children}
+      {hint && <p className="mt-auto pt-2 text-xs leading-snug text-muted-foreground">{tr(hint)}</p>}
+    </section>
+  );
+}
+
+function TileRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <dt>{tr(label)}</dt>
+      <dd className="tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+/** The four token columns, in one order everywhere on this page. */
+function NumberHeads() {
+  return (
+    <>
+      <th className="px-3 py-2 text-right font-medium">{tr("Входные без кэша")}</th>
+      <th className="px-3 py-2 text-right font-medium">{tr("Кэш")}</th>
+      <th className="px-3 py-2 text-right font-medium">{tr("Ответы")}</th>
+      <th className="px-3 py-2 text-right font-medium">{tr("Всего")}</th>
+    </>
+  );
+}
+
 /** Monthly budgets: spend against the limit, amber past the warning threshold, red when spent. */
 const PROVIDER_STATUS: Record<ProviderUsageView["status"], string> = {
   ok: "",
@@ -307,46 +405,85 @@ const PROVIDER_STATUS: Record<ProviderUsageView["status"], string> = {
   error: "BB не смог прочитать расход",
 };
 
+/** One share bar: the same width and colours for a subscription window and for a budget. */
+function ShareBar({ percent }: { percent: number }) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  const tone = value >= 100 ? "bg-red-500" : value >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <span className="flex items-center gap-2">
+      <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
+        <span className={`block h-full ${tone}`} style={{ width: `${value}%` }} />
+      </span>
+      <span className={`tabular-nums ${value >= 100 ? "text-red-600 dark:text-red-400" : value >= 80 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>{value}%</span>
+    </span>
+  );
+}
+
+function shortMoment(value: string): string {
+  return new Date(value).toLocaleString(uiLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 /** Subscription windows as BB reports them: plan, how much of the window is used, when it resets. */
 function ProvidersPanel({ providers }: { providers: readonly ProviderUsageView[] }) {
   return (
     <section aria-label={tr("Подписки провайдеров")} className="space-y-2" data-testid="usage-providers">
-      <h2 className="text-sm font-semibold">{tr("Подписки провайдеров")}</h2>
-      <p className="text-xs text-muted-foreground">
-        {tr("Расход подписки по данным BB. Токены Агентство считает само для Claude Code и Codex; остальные CLI событий расхода не присылают, и по ним видно только окно подписки.")}
-      </p>
-      <div className="divide-y divide-border rounded-lg border border-border">
-        {providers.map((provider) => {
-          const status = PROVIDER_STATUS[provider.status];
-          return (
-            <div key={provider.providerId} className="space-y-1.5 px-3 py-2.5">
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="text-sm font-medium">{provider.name}</span>
-                {provider.planLabel && <span className="text-xs text-muted-foreground">{provider.planLabel}</span>}
-                <span className="text-xs text-muted-foreground">{provider.countsTokens ? tr("токены считаются") : tr("токены не приходят")}</span>
-                {status && <span className="text-xs text-amber-700 dark:text-amber-400">{tr(status)}</span>}
-              </div>
-              {provider.windows.map((window) => {
-                const percent = Math.max(0, Math.min(100, Math.round(window.usedPercent)));
-                const tone = percent >= 100 ? "bg-red-500" : percent >= 80 ? "bg-amber-500" : "bg-emerald-500";
-                return (
-                  <div key={`${provider.providerId}:${window.label}`} className="grid gap-1.5 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
-                    <span className="truncate text-xs text-muted-foreground">{window.label}</span>
-                    <span className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-                      <span className={`block h-full ${tone}`} style={{ width: `${percent}%` }} />
-                    </span>
-                    <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                      {tr("{percent}%", { percent })}
-                      {window.usedUsdCents !== undefined ? ` · $${(window.usedUsdCents / 100).toFixed(2)}${window.limitUsdCents !== undefined ? ` из $${(window.limitUsdCents / 100).toFixed(2)}` : ""}` : ""}
-                      {window.resetsAt ? ` · ${tr("сброс")} ${new Date(window.resetsAt).toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">{tr("Подписки провайдеров")}</h2>
+        <p className="max-w-xl text-xs text-muted-foreground">
+          {tr("Расход подписки по данным BB. Токены Агентство считает само для Claude Code и Codex; остальные CLI событий расхода не присылают, и по ним видно только окно подписки.")}
+        </p>
       </div>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">{tr("CLI")}</th>
+              <th className="px-3 py-2 font-medium">{tr("План")}</th>
+              <th className="px-3 py-2 font-medium">{tr("Окно")}</th>
+              <th className="px-3 py-2 font-medium">{tr("Использовано")}</th>
+              <th className="px-3 py-2 font-medium">{tr("Сброс")}</th>
+              <th className="px-3 py-2 font-medium">{tr("Токены")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {providers.flatMap((provider) => {
+              const status = PROVIDER_STATUS[provider.status];
+              const windows = provider.windows.length ? provider.windows : [null];
+              return windows.map((window, index) => (
+                <tr key={`${provider.providerId}:${window?.label ?? "none"}`} className="hover:bg-muted/30">
+                  <td className="px-3 py-2">{index === 0 ? provider.name : ""}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{index === 0 ? provider.planLabel ?? "—" : ""}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {window ? window.label : <span className="text-amber-700 dark:text-amber-400">{status ? tr(status) : tr("Окон нет")}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {window ? (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <ShareBar percent={window.usedPercent} />
+                        {window.usedUsdCents !== undefined && (
+                          <span className="tabular-nums text-muted-foreground">
+                            ${(window.usedUsdCents / 100).toFixed(2)}
+                            {window.limitUsdCents !== undefined ? ` ${tr("из")} $${(window.limitUsdCents / 100).toFixed(2)}` : ""}
+                          </span>
+                        )}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-xs tabular-nums text-muted-foreground">{window?.resetsAt ? shortMoment(window.resetsAt) : "—"}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {index === 0 ? (provider.countsTokens ? tr("считаются") : tr("не приходят")) : ""}
+                  </td>
+                </tr>
+              ));
+            })}
+          </tbody>
+        </table>
+      </div>
+      {providers.some((provider) => provider.status !== "ok" && provider.windows.length > 0) && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {providers.filter((provider) => provider.status !== "ok").map((provider) => `${provider.name}: ${tr(PROVIDER_STATUS[provider.status])}`).join(" · ")}
+        </p>
+      )}
     </section>
   );
 }
@@ -355,26 +492,35 @@ function BudgetsPanel({ budgets }: { budgets: readonly BudgetStatusView[] }) {
   return (
     <section aria-label={tr("Бюджеты за месяц")} className="space-y-2">
       <h2 className="text-sm font-semibold">{tr("Бюджеты за месяц")}</h2>
-      <div className="divide-y divide-border rounded-lg border border-border">
-        {budgets.map((budget) => {
-          const spent = budget.percent >= 100;
-          const warn = !spent && budget.percent >= budget.warnPercent;
-          const tone = spent ? "bg-red-500" : warn ? "bg-amber-500" : "bg-emerald-500";
-          const label = budget.scope === "agency" ? tr("Всё Агентство") : budget.label.replace(/^отдела /, tr("Отдел ")).replace(/^сотрудника /, tr("Сотрудник "));
-          return (
-            <div key={budget.scope} className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
-              <span className="truncate text-sm">{label}</span>
-              <span className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-                <span className={`block h-full ${tone}`} style={{ width: `${Math.min(100, budget.percent)}%` }} />
-              </span>
-              <span className={`whitespace-nowrap text-xs tabular-nums ${spent ? "text-red-600 dark:text-red-400" : warn ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
-                {tr("{spent} из {limit} · {percent}%", { spent: `$${(budget.spendUsdCents / 100).toFixed(2)}`, limit: `$${budget.limitUsd}`, percent: budget.percent })}{spent ? tr(" · запуски остановлены") : ""}
-              </span>
-            </div>
-          );
-        })}
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">{tr("Уровень")}</th>
+              <th className="px-3 py-2 font-medium">{tr("Израсходовано")}</th>
+              <th className="px-3 py-2 text-right font-medium">{tr("Потрачено")}</th>
+              <th className="px-3 py-2 text-right font-medium">{tr("Лимит")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {budgets.map((budget) => {
+              const spent = budget.percent >= 100;
+              const label = budget.scope === "agency" ? tr("Всё Агентство") : budget.label.replace(/^отдела /, tr("Отдел ")).replace(/^сотрудника /, tr("Сотрудник "));
+              return (
+                <tr key={budget.scope} className="hover:bg-muted/30">
+                  <td className="px-3 py-2">
+                    {label}
+                    {spent && <span className="ml-2 text-xs text-red-600 dark:text-red-400">{tr("запуски остановлены")}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-xs"><ShareBar percent={budget.percent} /></td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums">{`$${(budget.spendUsdCents / 100).toFixed(2)}`}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">{`$${budget.limitUsd}`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-      <p className="text-xs text-muted-foreground">{tr("Оценка по ценам API за календарный месяц (UTC): стоимость попытки считается в месяц её запуска. Лимиты — «Настройки → Правила работы», карточка отдела и профиль сотрудника.")}</p>
     </section>
   );
 }
