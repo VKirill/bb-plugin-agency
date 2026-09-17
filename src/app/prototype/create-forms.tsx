@@ -1,3 +1,4 @@
+import { usePluginFeatures } from "./use-plugin-features";
 import { useEffect, useRef, useState } from "react";
 import { experimental_ProviderModelPicker as ProviderModelPicker, type ExperimentalProviderModelPickerValue } from "@get-bb/plugin-sdk/app";
 import { LAUNCH_PROVIDER_ID, REASONING_OPTIONS, ROLE_TYPE_OPTIONS, TITLE_PLACEHOLDER, type ReasoningLevel, type RoleType } from "../data/role-types";
@@ -5,7 +6,7 @@ import { jobDescriptionTemplate } from "../data/instruction-templates";
 import { useTemplates } from "./use-templates";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import type { BbCatalog } from "../data/store-commands";
-import { advancedCatalogPolicies, catalogEnvironmentOptions, DEFAULT_AGENT_POLICY_HINT, DEFAULT_BINDING_POLICY_HINT, DEFAULT_CATALOG_POLICY, environmentPlacementLabel, policyVersionIdForCreate } from "../data/persist-create";
+import { advancedCatalogPolicies, catalogEnvironmentOptions, projectHasActiveFolder, DEFAULT_AGENT_POLICY_HINT, DEFAULT_BINDING_POLICY_HINT, DEFAULT_CATALOG_POLICY, environmentPlacementLabel, policyVersionIdForCreate } from "../data/persist-create";
 import { Button, Checks, Choice, Field, HintedChoice, TextField } from "./shared";
 import { charterIssues } from "../data/charter";
 import { providerLaunchNote, useLaunchableProviders } from "./use-launchable-providers";
@@ -35,7 +36,7 @@ export function AgencyCreateDialogs({
   catalogError?: string;
   loadCatalog: () => Promise<boolean>;
   agents: { id: string; name: string; role?: string; enabled?: boolean; selection?: { providerId: string; model: string } }[];
-  bindings: { id: string; name: string; archivedAt?: string; environmentId?: string; root?: string }[];
+  bindings: { id: string; name: string; archivedAt?: string; environmentId?: string; root?: string; bbProjectId?: string }[];
   departments?: { id: string; name: string }[];
   /** Machine whose model catalog the picker reads. */
   routingHostId?: string;
@@ -56,6 +57,7 @@ export function AgencyCreateDialogs({
 }) {
   const [pending, setPending] = useState(false);
   const launchableProviders = useLaunchableProviders();
+  const features = usePluginFeatures(kind === "project");
   // Starting model and reasoning per role type come from «Настройки → Правила работы».
   const roleDefaults = useRoleDefaults(kind === "agent");
   // Starting texts from «Настройки → Шаблоны».
@@ -209,10 +211,12 @@ export function AgencyCreateDialogs({
           {kind === "project" && (
             <>
               <Choice label="Проект BB" value={projectId || "unset"} onChange={(value) => { setProjectId(value === "unset" ? "" : value); setEnvironmentId(""); }} options={[{ value: "unset", label: "Выберите проект" }, ...catalog.projects.map((item) => ({ value: item.id, label: item.name }))]} />
-              <Choice label="Рабочая папка" value={environmentId || "unset"} onChange={(value) => setEnvironmentId(value === "unset" ? "" : value)} options={[{ value: "unset", label: "Выберите рабочую папку" }, ...catalogEnvironmentOptions(catalog, projectId, bindings)]} />
-              {projectId && !loadingCatalog && !catalogEnvironmentOptions(catalog, projectId, bindings).length && (
+              <Choice label="Рабочая папка" value={environmentId || "unset"} onChange={(value) => setEnvironmentId(value === "unset" ? "" : value)} options={[{ value: "unset", label: "Выберите рабочую папку" }, ...catalogEnvironmentOptions(catalog, projectId, bindings, !features.projectFolders)]} />
+              {projectId && !loadingCatalog && !features.projectFolders && projectHasActiveFolder(projectId, bindings) ? (
+                <p className="text-xs text-muted-foreground">{tr("У проекта уже подключена папка. Несколько папок одного проекта доступны с плагином Projects & Sections.")}</p>
+              ) : projectId && !loadingCatalog && !catalogEnvironmentOptions(catalog, projectId, bindings).length ? (
                 <p className="text-xs text-muted-foreground">{tr("У проекта нет свободной рабочей папки. Папка появляется после первого треда в этом проекте BB; уже подключённые папки здесь не показываются.")}</p>
-              )}
+              ) : null}
               {environment && (
                 <p className="text-xs text-muted-foreground">
                   {tr("Привязка: {label}. Путь {path}.", { label: environmentPlacementLabel(environment), path: environment.path })}

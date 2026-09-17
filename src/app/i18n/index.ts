@@ -2,6 +2,7 @@ import { EN_AUTOMATIONS } from "./en/automations";
 import { EN_CORE } from "./en/core";
 import { EN_DATA } from "./en/data";
 import { EN_INSIGHTS } from "./en/insights";
+import { EN_PLUGINS } from "./en/plugins";
 import { EN_JOBS } from "./en/jobs";
 import { EN_PROJECTS } from "./en/projects";
 import { EN_SETTINGS } from "./en/settings";
@@ -17,7 +18,7 @@ import { EN_TEAM } from "./en/team";
  */
 export type UiLanguage = "ru" | "en";
 
-const EN: Record<string, string> = { ...EN_CORE, ...EN_JOBS, ...EN_TEAM, ...EN_PROJECTS, ...EN_AUTOMATIONS, ...EN_SETTINGS, ...EN_DATA, ...EN_INSIGHTS };
+const EN: Record<string, string> = { ...EN_CORE, ...EN_JOBS, ...EN_TEAM, ...EN_PROJECTS, ...EN_AUTOMATIONS, ...EN_SETTINGS, ...EN_DATA, ...EN_INSIGHTS, ...EN_PLUGINS };
 
 let current: UiLanguage = "ru";
 

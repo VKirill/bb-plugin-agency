@@ -101,6 +101,10 @@ export interface Agent {
   instructions: string;
   skills: string[];
   mcps: string[];
+  /** BB plugins whose tools, instructions and skills the employee's launch receives. */
+  plugins?: string[];
+  /** Folder where the employee always works (File Gateway); absent means the job's folder. */
+  workplaceBindingId?: string;
   customMcps?: CustomMcp[];
   selection: ExperimentalProviderModelPickerValue;
   permission: "auto" | "full" | "accept-edits";

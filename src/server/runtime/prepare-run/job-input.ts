@@ -1,5 +1,6 @@
 import { fail, ok, type DomainResult } from "../../../domain";
 import { hashBytes } from "../../../host/guarded-fs.js";
+import { inputCopyRelativePath } from "../../../host/safe-path.js";
 import type { HostFilePort } from "../../../host/file-port.js";
 import {
   attachJobInputCommandSchema,
@@ -101,7 +102,7 @@ async function openPinnedVersion(input: {
   sourceJobId: string;
   version: number;
   hash: string;
-}): Promise<DomainResult<ArtifactVersion & { accepted: boolean }>> {
+}): Promise<DomainResult<ArtifactVersion & { accepted: boolean; bytes: Uint8Array }>> {
   const sourceJob = input.store.getJob(input.sourceJobId);
   if (!sourceJob) return fail("not_found", `source job ${input.sourceJobId} not found`);
   const sourceBinding = input.store.getBinding(sourceJob.bindingId);
@@ -142,7 +143,39 @@ async function openPinnedVersion(input: {
   const accepted = Boolean(
     acceptance && acceptance.version === pinned.version && acceptance.hash === pinned.hash,
   );
-  return ok({ ...pinned, accepted });
+  return ok({ ...pinned, accepted, bytes: opened.value.bytes });
+}
+
+/** Host file RPC carries at most 8 MiB of base64: about 6 MiB of bytes. */
+const INPUT_COPY_MAX_BYTES = 6 * 1024 * 1024;
+
+/**
+ * An input from another folder of the same job tree is copied next to the target job, so the
+ * launch reads it on its own machine. The copy is verified by hash on write and on every prepare.
+ */
+async function copyInputToTarget(input: {
+  files: HostFilePort;
+  targetRoot: string;
+  artifactId: string;
+  version: number;
+  hash: string;
+  bytes: Uint8Array;
+}): Promise<DomainResult<string>> {
+  if (input.bytes.byteLength > INPUT_COPY_MAX_BYTES) {
+    return fail(
+      "input_copy_too_large",
+      `Версия больше ${INPUT_COPY_MAX_BYTES / 1024 / 1024} МБ не копируется между папками: перенесите файл через File Gateway и опишите путь в брифе.`,
+    );
+  }
+  const relativePath = inputCopyRelativePath(input.artifactId, input.version);
+  const written = await input.files.writeAtomic(input.targetRoot, relativePath, input.bytes);
+  if (!written.ok) return written;
+  const check = await input.files.read(input.targetRoot, relativePath);
+  if (!check.ok) return check;
+  if (hashBytes(check.value) !== input.hash) {
+    return fail("artifact_hash_mismatch", "input copy on the target machine does not match the pinned hash");
+  }
+  return ok(relativePath);
 }
 
 function validateHandoff(
@@ -172,7 +205,13 @@ function validateHandoff(
 }
 
 export async function attachJobInput(
-  deps: { store: DomainStore; db: SqlDatabase; files: HostFilePort },
+  deps: {
+    store: DomainStore;
+    db: SqlDatabase;
+    files: HostFilePort;
+    /** File port of the target job's folder; needed when the source job lives in another folder. */
+    targetFiles?: HostFilePort;
+  },
   ctx: ServiceContext,
   raw: AttachJobInputCommand,
 ): Promise<DomainResult<AttachedJobInput>> {
@@ -193,9 +232,13 @@ export async function attachJobInput(
   if (!source) return fail("not_found", `source job ${input.sourceJobId} not found`);
   const sourceAccess = deps.store.assertBindingAccess(ctx, source.bindingId);
   if (!sourceAccess.ok) return sourceAccess;
-  if (source.bindingId !== target.bindingId) {
+  const crossFolder = source.bindingId !== target.bindingId;
+  // Another folder is allowed only inside one job tree: every subtask there passed the placement rules.
+  if (crossFolder && !deps.store.sameJobTree(source.id, target.id)) {
     return fail("foreign_scope", "source job is outside the target job binding; parentJobId is not a grant");
   }
+  const targetBinding = crossFolder ? deps.store.getBinding(target.bindingId) : undefined;
+  if (crossFolder && !targetBinding) return fail("not_found", `target binding ${target.bindingId} not found`);
   const ownWork = deps.store.assertNotSelfReview(target, [source.id]);
   if (!ownWork.ok) return ownWork;
   const opened = await openPinnedVersion({
@@ -209,6 +252,22 @@ export async function attachJobInput(
     hash: input.hash,
   });
   if (!opened.ok) return opened;
+  let placed = { hostId: opened.value.hostId, relativePath: opened.value.relativePath };
+  if (crossFolder && targetBinding) {
+    if (!deps.targetFiles || deps.targetFiles.hostId !== targetBinding.hostId) {
+      return fail("host_mismatch", "a file port for the target job's machine is required to copy the input");
+    }
+    const copied = await copyInputToTarget({
+      files: deps.targetFiles,
+      targetRoot: targetBinding.canonicalRoot,
+      artifactId: input.artifactId,
+      version: input.version,
+      hash: opened.value.hash,
+      bytes: opened.value.bytes,
+    });
+    if (!copied.ok) return copied;
+    placed = { hostId: targetBinding.hostId, relativePath: copied.value };
+  }
   let handoff: ReturnType<typeof validateHandoff> extends DomainResult<infer T> ? T | undefined : never;
   if (input.handoff) {
     const checked = validateHandoff(deps.db, ctx, input.sourceJobId, input.handoff);
@@ -245,8 +304,8 @@ export async function attachJobInput(
         input.artifactId,
         input.version,
         opened.value.hash,
-        opened.value.hostId,
-        opened.value.relativePath,
+        placed.hostId,
+        placed.relativePath,
         opened.value.accepted ? 1 : 0,
         nowUtc(ctx),
       );
@@ -279,13 +338,38 @@ export async function attachJobInput(
       artifactId: input.artifactId,
       version: input.version,
       hash: opened.value.hash,
-      hostId: opened.value.hostId,
-      relativePath: opened.value.relativePath,
+      hostId: placed.hostId,
+      relativePath: placed.relativePath,
       publishedVerified: true as const,
       accepted: opened.value.accepted,
       authorizedInputJobIds: [input.targetJobId, ...sourceIds.map((row) => row.source_job_id)],
     });
   });
+}
+
+/** A copied input is verified in the target folder; null when the row points at the source folder. */
+async function openInputCopy(
+  deps: { store: DomainStore; files: HostFilePort },
+  job: { bindingId: string },
+  row: InputRow,
+): Promise<DomainResult<ArtifactVersion> | null> {
+  const source = deps.store.getJob(row.source_job_id);
+  if (!source || source.bindingId === job.bindingId) return null;
+  const binding = deps.store.getBinding(job.bindingId);
+  if (!binding) return fail("not_found", `binding ${job.bindingId} not found`);
+  const pinned = deps.store.getArtifactVersion(row.artifact_id, row.source_job_id, row.version);
+  if (!pinned || pinned.hash !== row.hash) {
+    return fail("artifact_hash_mismatch", `input ${row.artifact_id} v${row.version} no longer matches its pinned version`);
+  }
+  if (row.host_id !== binding.hostId || deps.files.hostId !== binding.hostId) {
+    return fail("host_mismatch", `input copy ${row.artifact_id} v${row.version} is not on the job's machine; attach it again`);
+  }
+  const bytes = await deps.files.read(binding.canonicalRoot, row.relative_path);
+  if (!bytes.ok) return bytes;
+  if (hashBytes(bytes.value) !== row.hash || bytes.value.byteLength !== pinned.size) {
+    return fail("artifact_hash_mismatch", `input copy ${row.relative_path} was changed; attach the version again`);
+  }
+  return ok({ ...pinned, hostId: binding.hostId, relativePath: row.relative_path });
 }
 
 export async function loadJobInputsForPrepare(
@@ -307,6 +391,21 @@ export async function loadJobInputsForPrepare(
   const authorized = new Set<string>([jobId]);
   const inputRefs: InputArtifactRef[] = [];
   for (const row of rows) {
+    const copied = await openInputCopy(deps, job, row);
+    if (copied) {
+      if (!copied.ok) return copied;
+      authorized.add(row.source_job_id);
+      inputArtifactVersions.push(copied.value);
+      inputRefs.push({
+        artifactId: copied.value.artifactId,
+        version: copied.value.version,
+        hash: copied.value.hash,
+        jobId: copied.value.jobId,
+        hostId: copied.value.hostId,
+        relativePath: copied.value.relativePath,
+      });
+      continue;
+    }
     const opened = await openPinnedVersion({
       store: deps.store,
       db: deps.db,
@@ -319,7 +418,7 @@ export async function loadJobInputsForPrepare(
     });
     if (!opened.ok) return opened;
     authorized.add(row.source_job_id);
-    const { accepted: _accepted, ...version } = opened.value;
+    const { accepted: _accepted, bytes: _bytes, ...version } = opened.value;
     inputArtifactVersions.push(version);
     inputRefs.push({
       artifactId: opened.value.artifactId,

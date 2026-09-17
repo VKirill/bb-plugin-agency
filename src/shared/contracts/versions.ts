@@ -19,6 +19,14 @@ export const reasoningEffortSchema = z.enum([
   "ultracode",
 ]);
 
+/** BB plugin id (`file-gateway`, `env-catalog`). */
+export const pluginIdSchema = z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/);
+/** Plugins whose tools, instructions and skills a launch of this employee receives. */
+export const agentPluginIdsSchema = z
+  .array(pluginIdSchema)
+  .max(16)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "pluginIds must be unique" });
+
 export const agentVersionSchema = z
   .object({
     id: opaqueIdSchema,
@@ -32,6 +40,7 @@ export const agentVersionSchema = z
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
 
@@ -71,6 +80,7 @@ export const createAgentVersionCommandSchema = createCommandSchema
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
 
@@ -107,6 +117,7 @@ export const agentVersionDraftSchema = z
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
 
@@ -124,6 +135,8 @@ export const saveAgentProfileCommandSchema = changeCommandSchema
     name: displayNameSchema,
     state: agentStateSchema,
     version: agentVersionDraftSchema,
+    /** Null clears the workplace; absent keeps it. */
+    workplaceBindingId: opaqueIdSchema.nullable().optional(),
   })
   .strict();
 
@@ -149,6 +162,11 @@ export type CreateProcessVersionCommand = z.infer<typeof createProcessVersionCom
 export type AgentVersionDraft = z.infer<typeof agentVersionDraftSchema>;
 export type SaveAgentProfileCommand = z.infer<typeof saveAgentProfileCommandSchema>;
 export type SaveDepartmentProfileCommand = z.infer<typeof saveDepartmentProfileCommandSchema>;
+
+/** Stored only when the employee has plugins, so older profiles and snapshots keep their shape. */
+export function optionalPluginIds(value: readonly string[] | undefined): { pluginIds: string[] } | Record<string, never> {
+  return value && value.length ? { pluginIds: [...value] } : {};
+}
 
 export function optionalReasoningEffort(
   value: ReasoningEffort | undefined,

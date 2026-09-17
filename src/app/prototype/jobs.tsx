@@ -88,7 +88,11 @@ export function JobsPage({ jobs, setJobs, open, project, department, scope, pers
   ? placements.projects.map((item) => ({ value: item.id, label: item.name }))
   : [...new Map(jobs.filter((job) => job.bindingId || job.project).map((job) => [job.bindingId || job.project, { value: job.bindingId || job.project, label: job.project }])).values()];
  const now=Date.now();
- const board$=partitionBoard(jobs.filter(j=>(!scope||inTaskScope(j,scope))&&(!project||j.project===project||j.bindingId===project)&&(!department||j.department===department||j.departmentId===department)),board,now);
+ const inDepartment=(j:Job)=>!department||j.department===department||j.departmentId===department;
+ const shownKeys=new Set(jobs.filter(j=>(!scope||inTaskScope(j,scope))&&(!project||j.project===project||j.bindingId===project)&&inDepartment(j)).map(j=>j.id));
+ // A project view keeps the subtasks of its jobs that run in another folder or at an employee's workplace.
+ if(project||scope?.kind==="project"){let grew=true;while(grew){grew=false;for(const j of jobs){if(!shownKeys.has(j.id)&&j.parentId&&shownKeys.has(j.parentId)&&inDepartment(j)){shownKeys.add(j.id);grew=true;}}}}
+ const board$=partitionBoard(jobs.filter(j=>shownKeys.has(j.id)),board,now);
  const matched=(showHidden?[...board$.visible,...board$.hidden]:board$.visible).filter(j=>(pr==="all"||j.bindingId===pr||j.project===pr)&&(priority==="all"||j.priority===priority)&&(filter==="all"||j.state===filter)&&(j.title+" "+j.id).toLowerCase().includes(q.toLowerCase()));
  const filtered=sort==="due"?[...matched].sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999")||compareJobKeys(a.id,b.id)):orderByFamily(matched,jobs);
  const progress=subtaskProgress(jobs);

@@ -34,6 +34,19 @@ const SOURCE_LABEL: Record<RuleSource, string> = {
   agent: "задано у сотрудника",
 };
 
+const SANDBOX_FIELD: FieldSpec = {
+  key: "runWithoutSandbox",
+  label: "Запуск без песочницы",
+  kind: "bool",
+  hint: (
+    <>
+      <p><Tr text={"Выключено (по умолчанию) — сотрудник работает в песочнице CLI: пишет только в папку задачи, сеть ограничена."} /></p>
+      <p><Tr text={"Включено — полные права без песочницы. Нужно рабочим местам с браузером и программами и машинам, где песочница не пускает команды Агентства (например, Linux-сервер)."} /></p>
+      <p><Tr text={"Команды, которые сотрудник всё же выполнил вне песочницы, Агентство отмечает в карточке задачи."} /></p>
+    </>
+  ),
+};
+
 export const AGENCY_RULE_GROUPS: RuleGroup[] = [
   {
     title: "Доработка и проверка",
@@ -55,6 +68,10 @@ export const AGENCY_RULE_GROUPS: RuleGroup[] = [
     ],
   },
   {
+    title: "Песочница",
+    fields: [SANDBOX_FIELD],
+  },
+  {
     title: "Сдача и сроки",
     fields: [
       { key: "completionReminders", label: "Напоминаний о несданной работе", kind: "int", min: 0, max: 5, hint: <><p><Tr text={"Сотрудник закончил ход без опубликованной версии — Агентство напоминает, как сдать работу. После этого числа напоминаний задача уходит руководителю."}/></p><p><Tr text={"0 — сразу к руководителю."}/></p></> },
@@ -63,6 +80,12 @@ export const AGENCY_RULE_GROUPS: RuleGroup[] = [
     ],
   },
 ];
+
+/** The one rule an employee may set for their own launches. */
+export const AGENT_SANDBOX_RULE_GROUP: RuleGroup = {
+  title: "Песочница",
+  fields: [SANDBOX_FIELD],
+};
 
 export const LIMIT_RULE_GROUP = (scopeLabel: string, withWarn = true): RuleGroup => ({
   title: "Бюджет и параллельность",
@@ -99,7 +122,7 @@ function formatValue(value: unknown, spec: FieldSpec, reasoning?: unknown): stri
  * in a department or employee a field either follows the inherited value or
  * holds its own, and the person sees which.
  */
-export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHostId, saveLabel = "Сохранить правила" }: { scope: string; groups: RuleGroup[]; inheritable: boolean; notice: (text: string) => void; saveLabel?: string; /** Machine whose model catalog the model fields read. */ routingHostId?: string }) {
+export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHostId, saveLabel = "Сохранить правила", inheritLabel = "Как в Агентстве ({value})" }: { scope: string; groups: RuleGroup[]; inheritable: boolean; notice: (text: string) => void; saveLabel?: string; /** Label of the inherited choice of a yes/no rule; {value} is the inherited value. */ inheritLabel?: string; /** Machine whose model catalog the model fields read. */ routingHostId?: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const api = useMemo(() => createRpcAgencyApi(rpc as unknown as RpcCaller), [rpc]);
   const [view, setView] = useState<WorkRulesView | null>(null);
@@ -195,7 +218,7 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
                           value={own ? String(value) : "inherit"}
                           onChange={(next) => (next === "inherit" ? unset(spec.key) : set(spec.key, next === "true"))}
                           options={[
-                            { value: "inherit", label: tr("Как в Агентстве ({value})", { value: formatValue(view.effective[spec.key], spec) }) },
+                            { value: "inherit", label: tr(inheritLabel, { value: formatValue(view.effective[spec.key], spec) }) },
                             { value: "true", label: "Да" },
                             { value: "false", label: "Нет" },
                           ]}

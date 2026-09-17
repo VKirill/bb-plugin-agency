@@ -1,4 +1,5 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
+import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
 import { listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
 import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
@@ -35,6 +36,7 @@ import { receiveNotification } from "./triggers/notify";
 import { STATUS_REQUIRES_READINESS_REASON } from "../shared/schemas";
 import { machineDirectory } from "./runtime/machines";
 import { telegramAdapter } from "./triggers/telegram";
+import { createPluginDirectory, FILE_GATEWAY_PLUGIN_ID, PROJECT_FOLDERS_PLUGIN_ID } from "./integrations/plugin-directory";
 import { documentHostContract } from "../shared/document-contract";
 import { createDomainStore } from "./services";
 import { createDomainRpc } from "./api/domain-rpc";
@@ -88,7 +90,15 @@ export function registerAgency(bb: BbPluginApi) {
   const machines=machineDirectory(bb);
   const db = openDatabase(bb);
   const inbox = createInbox(db);
-  const store = createDomainStore(db);
+  const plugins = createPluginDirectory({ listPlugins: () => bb.sdk.plugins.list() });
+  // Rules ask synchronously; the cache is filled at start and refreshed by the dispatcher loop.
+  void plugins.list().catch(() => undefined);
+  const store = createDomainStore(db, {
+    features: () => ({
+      projectFolders: plugins.runningCached(PROJECT_FOLDERS_PLUGIN_ID),
+      fileGateway: plugins.runningCached(FILE_GATEWAY_PLUGIN_ID),
+    }),
+  });
   const onChanged = () => bb.realtime.publish("domain-changed", null);
   const officialThreads = bindOfficialThreads(bb.sdk.threads);
   const send = createIsolatedSendPort(officialThreads);
@@ -252,6 +262,7 @@ export function registerAgency(bb: BbPluginApi) {
   };
   const launch = createIsolatedLaunchRpc({
     bb,
+    plugins,
     store,
     db,
     documents,
@@ -439,6 +450,23 @@ export function registerAgency(bb: BbPluginApi) {
       const offset = input.offset ?? 0;
       return { ok: true as const, value: { total: jobs.length, jobs: jobs.slice(offset, offset + (input.limit ?? 100)) } };
     },
+    listPlugins: async () => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      try {
+        const installed = await plugins.list();
+        const running = (id: string) => installed.some((plugin) => plugin.id === id && plugin.running);
+        return {
+          ok: true as const,
+          value: {
+            plugins: installed,
+            features: { projectFolders: running(PROJECT_FOLDERS_PLUGIN_ID), fileGateway: running(FILE_GATEWAY_PLUGIN_ID) },
+          },
+        };
+      } catch (error) {
+        return { ok: false as const, error: { code: "plugins_unavailable", message: `Не удалось прочитать список плагинов BB: ${error instanceof Error ? error.message : String(error)}` } };
+      }
+    },
     listSavedViews: async () => {
       const access = readOnly();
       if (!access.ok) return access;
@@ -552,6 +580,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "searchJobs"
     | "listArchivedJobs"
     | "listSavedViews"
+    | "listPlugins"
     | "saveSavedView"
     | "deleteSavedView"
     | "saveRuleSchedule"
@@ -732,7 +761,38 @@ export function registerAgency(bb: BbPluginApi) {
   // Dispatcher: accepted events → rule matches → intents; queued intents (auto mode or approved) become jobs.
   const dispatcherEngine = { db, launch: intentJobs };
   let dispatcherBusy = false;
+  const scanEscapes = async () => {
+    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const attempts = (
+      db
+        .prepare(
+          // Live attempts, recently finished ones, and older ones never read (a one-time backfill).
+          `SELECT a.id, a.job_id, a.thread_id FROM agency_run_attempt a
+           WHERE a.thread_id IS NOT NULL AND (
+             a.state IN ('launching', 'running', 'waiting_input', 'awaiting_review') OR a.updated_at > ?
+             OR NOT EXISTS (SELECT 1 FROM agency_sandbox_escape e WHERE e.attempt_id = a.id)
+           )
+           ORDER BY a.updated_at DESC LIMIT 50`,
+        )
+        .all(since) as { id: string; job_id: string; thread_id: string }[]
+    ).map((row) => ({ attemptId: row.id, jobId: row.job_id, threadId: row.thread_id }));
+    const grew = await scanSandboxEscapes(
+      {
+        db,
+        now: () => new Date().toISOString(),
+        onReadError: (threadId, error) => bb.log.warn(`Sandbox escape scan of ${threadId}: ${error instanceof Error ? error.message : String(error)}`),
+        events: {
+          list: ({ threadId, afterSeq, limit }) =>
+            bb.sdk.threads.events.list({ threadId, order: "asc", limit: String(limit), types: ["item/started"], ...(afterSeq ? { afterSeq } : {}) }),
+        },
+      },
+      attempts,
+    );
+    if (grew.length) onChanged();
+  };
   const runDispatcher = async () => {
+    void plugins.list().catch(() => undefined);
+    void scanEscapes().catch((error) => bb.log.warn(`Sandbox escape scan: ${String(error)}`));
     if (dispatcherBusy) return;
     dispatcherBusy = true;
     try {

@@ -22,6 +22,11 @@ export function originalRelativePath(artifactId: string, version: number): strin
   return join(".agency", "originals", artifactId, `v${version}`);
 }
 
+/** Copy of an input version from another folder, placed next to the job that reads it. */
+export function inputCopyRelativePath(artifactId: string, version: number): string {
+  return join(".agency", "inputs", artifactId, `v${version}`);
+}
+
 export function stagingRelativePath(requestId: string): string {
   return join(".agency", "staging", requestId);
 }

@@ -24,8 +24,15 @@ export type IsolatedThreadSpawnArgs = {
   /** Official `threads.spawn` field. Not `reasoningEffort`. */
   reasoningLevel?: ReasoningEffort;
   executionInputSources?: {
-    reasoningLevel: "explicit";
+    reasoningLevel?: "explicit";
+    permissionMode?: "explicit";
   };
+  /** Set only by the owner's rule «Запуск без песочницы». */
+  permissionMode?: "full";
+  /** Plugins selected in the employee profile: instructions, agent tools and the bridge that serves them. */
+  instructionPluginIds?: string[];
+  dynamicToolNames?: string[];
+  allowBridgeToolProxy?: boolean;
 };
 
 export type IsolatedThreadGetArgs = {

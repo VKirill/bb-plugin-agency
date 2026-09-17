@@ -363,6 +363,11 @@ export function JobLaunchPanel({
           {canceled && <div data-testid="job-launch-current">{tr(JOB_CANCELED_LABEL)}</div>}
           {!canceled && latest?.receipt?.persistError && <div>{tr("Ошибка: {reason}", { reason: productServerReason(latest.receipt.persistError.message) })}</div>}
           {!canceled && latest && <div>{tr("Состояние: {state}", { state: tr(launchStateLabel(latest.attempt.state)) })}</div>}
+          {!canceled && latest?.attempt.outsideSandboxCommands && (
+            <div data-testid="outside-sandbox" className="text-amber-700 dark:text-amber-400">
+              {tr("Сотрудник выполнил вне песочницы команд: {count}. Проверьте, что он не выходил за папку задачи.", { count: latest.attempt.outsideSandboxCommands })}
+            </div>
+          )}
           {!canceled && completion?.runFailed && <div>{tr("Сбой: {reason}", { reason: productServerReason(completion.reason) })}</div>}
         </dl>
       )}
@@ -469,6 +474,7 @@ export function JobLaunchPanel({
       <details className="mt-3 border-t border-border/60 pt-2 text-xs text-muted-foreground" data-testid="job-launch-done-details">
         <summary className="cursor-pointer font-medium hover:text-foreground">
           {latest ? tr("Запуски и сверка · попытка {number}, {state}", { number: latest.attempt.attemptNo, state: tr(launchStateLabel(latest.attempt.state)).toLowerCase() }) : tr("Запуски и сверка")}
+          {latest?.attempt.outsideSandboxCommands ? <span className="text-amber-700 dark:text-amber-400">{` · ${tr("вне песочницы: {count}", { count: latest.attempt.outsideSandboxCommands })}`}</span> : null}
         </summary>
         <div className="mt-3 space-y-3">
           {content}

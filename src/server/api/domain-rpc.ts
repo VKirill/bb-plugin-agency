@@ -440,7 +440,16 @@ export function createDomainRpc(deps: {
         if (!binding) return fail("not_found", `source binding ${source.bindingId} not found`);
         const files = createSdkHostFilePortFromBinding(documents, binding);
         if (!files.ok) return files;
-        return mutated(await attachJobInput({ store, db, files: files.value }, access.ctx, input));
+        const targetBinding = target.bindingId !== binding.id ? store.getBinding(target.bindingId) : undefined;
+        const targetFiles = targetBinding ? createSdkHostFilePortFromBinding(documents, targetBinding) : undefined;
+        if (targetFiles && !targetFiles.ok) return targetFiles;
+        return mutated(
+          await attachJobInput(
+            { store, db, files: files.value, ...(targetFiles?.ok ? { targetFiles: targetFiles.value } : {}) },
+            access.ctx,
+            input,
+          ),
+        );
       }),
 
     acceptArtifactVersion: (input) => withAccess((access) => mutated(store.acceptArtifactVersion(access.ctx, input))),

@@ -75,9 +75,12 @@ function wakeStateFromActivity(row: Activity): string | null {
   return ref.id;
 }
 
-/** A lead hears about every subtask of its job, including ones handed to another department. */
-function sameBinding(parent: Job, child: Job): boolean {
-  return parent.bindingId === child.bindingId;
+/**
+ * A lead hears about every subtask of its job: another department, another folder of the
+ * project or an employee's workplace. Placement was checked when the subtask was created.
+ */
+function linkedChild(parent: Job, child: Job): boolean {
+  return child.parentJobId === parent.id;
 }
 
 function latestJobTransitioned(db: SqlDatabase, jobId: string): Activity | null {
@@ -126,7 +129,7 @@ function resolveParentTarget(db: SqlDatabase, child: Job): ParentTarget | null {
   const repos = createRepositories(db);
   const parent = repos.job.get(child.parentJobId);
   if (!parent) return null;
-  if (!sameBinding(parent, child)) return null;
+  if (!linkedChild(parent, child)) return null;
   const head = db
     .prepare(
       `SELECT id, launch_id, thread_id, state, attempt_no FROM agency_run_attempt
@@ -162,7 +165,7 @@ function wakeStillCurrentHead(db: SqlDatabase, row: WakeRow): boolean {
   if (child.state !== row.child_state) return false;
   if (!isCurrentTransitionCausation(db, child.id, row.activity_id, row.causation_id)) return false;
   const parent = repos.job.get(row.parent_job_id);
-  if (!parent || !sameBinding(parent, child)) return false;
+  if (!parent || !linkedChild(parent, child)) return false;
   const target = resolveParentTarget(db, child);
   if (!target) return false;
   return (

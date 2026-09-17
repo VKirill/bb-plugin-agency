@@ -604,6 +604,27 @@ export type GoalViewRecord = z.infer<typeof goalViewSchema>;
 export type AgentMetricsView = z.infer<typeof agentMetricsSchema>;
 export type JobSearchHitView = z.infer<typeof jobSearchHitSchema>;
 export type SavedViewRecord = z.infer<typeof savedViewSchema>;
+export const installedPluginSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    version: z.string(),
+    running: z.boolean(),
+    toolNames: z.array(z.string()),
+    hasSkill: z.boolean(),
+    cliCommand: z.string().nullable(),
+  })
+  .strict();
+export const pluginDirectorySchema = z
+  .object({
+    plugins: z.array(installedPluginSchema),
+    /** Agency features opened by installed plugins. */
+    features: z.object({ projectFolders: z.boolean(), fileGateway: z.boolean() }).strict(),
+  })
+  .strict();
+export type InstalledPluginRecord = z.infer<typeof installedPluginSchema>;
+export type PluginDirectoryView = z.infer<typeof pluginDirectorySchema>;
 export type WebhookSourceView = z.infer<typeof webhookSourceViewSchema>;
 
 export const returnJobForReworkCommandSchema = z
@@ -700,6 +721,8 @@ export const publicRunAttemptSchema = z
     revision: z.number().int().positive(),
     createdAt: z.string(),
     updatedAt: z.string(),
+    /** Commands the employee ran outside the CLI sandbox in this attempt; absent when none. */
+    outsideSandboxCommands: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -803,6 +826,7 @@ export const rpcContract = defineRpcContract({
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), output: domainResultSchema(z.array(jobSearchHitSchema)) },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), output: domainResultSchema(z.object({ total: z.number().int(), jobs: z.array(jobSchema) }).strict()) },
   listSavedViews: { input: z.null(), output: domainResultSchema(z.array(savedViewSchema)) },
+  listPlugins: { input: z.null(), output: domainResultSchema(pluginDirectorySchema) },
   saveSavedView: { input: z.object({ id: z.string().optional(), name: z.string().max(80), filters: z.record(z.string(), z.string()) }).strict(), output: domainResultSchema(savedViewSchema) },
   deleteSavedView: { input: z.object({ id: z.string() }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
   saveRuleSchedule: { input: ruleScheduleSchema, output: domainResultSchema(ruleScheduleSchema) },

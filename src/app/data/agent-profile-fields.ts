@@ -47,7 +47,9 @@ export function persistedAgentDirty(current: Agent, next: Agent): boolean {
     (current.reasoningEffort ?? "") !== (next.reasoningEffort ?? "") ||
     (current.policyVersionId ?? "") !== (next.policyVersionId ?? "") ||
     !sameIds(current.skills, next.skills) ||
-    !sameIds(current.mcps, next.mcps)
+    !sameIds(current.mcps, next.mcps) ||
+    !sameIds(current.plugins ?? [], next.plugins ?? []) ||
+    (current.workplaceBindingId ?? "") !== (next.workplaceBindingId ?? "")
   );
 }
 

@@ -244,6 +244,7 @@ export async function persistAgentPatch(
     agentId: record.id,
     name: next.name,
     state: next.enabled ? "active" : "paused",
+    workplaceBindingId: next.workplaceBindingId ?? null,
     version: {
       version: (currentVersion?.version ?? 0) + 1,
       role: named,
@@ -253,6 +254,7 @@ export async function persistAgentPatch(
       ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
       skillIds: next.skills.map((item) => item.trim()).filter(Boolean),
       mcpIds: next.mcps.map((item) => item.trim()).filter(Boolean),
+      pluginIds: (next.plugins ?? []).map((item) => item.trim()).filter(Boolean),
       policyVersionId,
     },
   });

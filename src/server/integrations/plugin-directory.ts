@@ -1,0 +1,97 @@
+/**
+ * Installed BB plugins as the Agency sees them. Read from the BB server
+ * (`bb.sdk.plugins.list()`): no model and no tokens. The list is cached for a
+ * short time so domain rules can ask synchronously.
+ */
+
+export type InstalledPluginView = {
+  id: string;
+  name: string;
+  description: string | null;
+  version: string;
+  running: boolean;
+  /** Names of the agent tools the plugin contributes (`env_get`, `bb_file_gateway`). */
+  toolNames: string[];
+  /** The plugin ships at least one skill. */
+  hasSkill: boolean;
+  /** `bb <name>` command, when the plugin has one. */
+  cliCommand: string | null;
+};
+
+type ListedPlugin = {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  version?: string | null;
+  status?: string | null;
+  enabled?: boolean | null;
+  capabilities?: readonly { kind: string; id: string }[] | null;
+  cliCommand?: { name: string } | null;
+};
+
+export type PluginDirectory = {
+  list(): Promise<InstalledPluginView[]>;
+  /** Last successful read; null before the first one. */
+  cached(): InstalledPluginView[] | null;
+  running(pluginId: string): Promise<boolean>;
+  /** Synchronous check on the last read: false when nothing was read yet. */
+  runningCached(pluginId: string): boolean;
+};
+
+/** Plugins whose presence opens Agency features. */
+export const PROJECT_FOLDERS_PLUGIN_ID = "project-folders";
+export const FILE_GATEWAY_PLUGIN_ID = "file-gateway";
+
+/** The Agency itself and model providers are not offered as employee plugins. */
+export function isEmployeePluginCandidate(plugin: InstalledPluginView, selfId = "agency"): boolean {
+  if (plugin.id === selfId || plugin.id.startsWith("provider-")) return false;
+  return plugin.toolNames.length > 0 || plugin.hasSkill;
+}
+
+export function toPluginView(plugin: ListedPlugin): InstalledPluginView {
+  const capabilities = plugin.capabilities ?? [];
+  return {
+    id: plugin.id,
+    name: plugin.name?.trim() || plugin.id,
+    description: plugin.description?.trim() || null,
+    version: plugin.version ?? "",
+    running: plugin.status === "running" && plugin.enabled !== false,
+    toolNames: [...new Set(capabilities.filter((item) => item.kind === "agent-tool").map((item) => item.id))].sort(),
+    hasSkill: capabilities.some((item) => item.kind === "skill"),
+    cliCommand: plugin.cliCommand?.name ?? null,
+  };
+}
+
+export function createPluginDirectory(deps: {
+  listPlugins: () => Promise<{ plugins: readonly ListedPlugin[] }>;
+  now?: () => number;
+  ttlMs?: number;
+}): PluginDirectory {
+  const now = deps.now ?? (() => Date.now());
+  const ttlMs = deps.ttlMs ?? 30_000;
+  let last: { at: number; plugins: InstalledPluginView[] } | null = null;
+  let pending: Promise<InstalledPluginView[]> | null = null;
+
+  const read = async (): Promise<InstalledPluginView[]> => {
+    if (last && now() - last.at < ttlMs) return last.plugins;
+    if (pending) return pending;
+    pending = deps
+      .listPlugins()
+      .then((listed) => {
+        const plugins = listed.plugins.map(toPluginView).sort((a, b) => a.name.localeCompare(b.name));
+        last = { at: now(), plugins };
+        return plugins;
+      })
+      .finally(() => {
+        pending = null;
+      });
+    return pending;
+  };
+
+  return {
+    list: read,
+    cached: () => last?.plugins ?? null,
+    running: async (pluginId) => (await read()).some((plugin) => plugin.id === pluginId && plugin.running),
+    runningCached: (pluginId) => Boolean(last?.plugins.some((plugin) => plugin.id === pluginId && plugin.running)),
+  };
+}

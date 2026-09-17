@@ -1,4 +1,5 @@
 import { JobGoalChoice } from "./job-goal";
+import { usePluginFeatures } from "./use-plugin-features";
 import { humanizeIds } from "../data/humanize-ids";
 import { useTemplates } from "./use-templates";
 import { DUE_TONE_CLASS, dueStatus } from "../data/job-due";
@@ -51,7 +52,7 @@ import { AssigneeField, CONTRACT_HINT, JobBriefFields, JobContractFields, assign
 import { intakeLabel, latestIntake } from "../data/intake";
 import { tr, uiLocale } from "../i18n";
 
-type Props = {agents:Agent[];projects?:{id:string;name:string;members?:readonly string[];hostName?:string|null;archivedAt?:string}[];departments?:{id:string;name:string;members?:readonly string[];lead?:string;availability?:"all"|"selected";memberRoles?:Record<string,"executor"|"reviewer">}[];job:Job;jobs:Job[];update:(j:Job)=>void|Promise<boolean>;addJob:(j:Job)=>void|Promise<boolean>;openJob:(id:string)=>void;openAgent?:(id:string)=>void;openDepartment?:(id:string)=>void;openProject?:(id:string)=>void;back:()=>void;notice:(s:string)=>void;openRun:(runId:string)=>void;openUsage?:(recordId:string)=>void;runs?:import("./data").DemoRun[];demoMode?:boolean};
+type Props = {agents:Agent[];projects?:{id:string;name:string;members?:readonly string[];hostName?:string|null;archivedAt?:string;recordId?:string;bbProjectId?:string}[];departments?:{id:string;name:string;members?:readonly string[];lead?:string;availability?:"all"|"selected";memberRoles?:Record<string,"executor"|"reviewer">}[];job:Job;jobs:Job[];update:(j:Job)=>void|Promise<boolean>;addJob:(j:Job)=>void|Promise<boolean>;openJob:(id:string)=>void;openAgent?:(id:string)=>void;openDepartment?:(id:string)=>void;openProject?:(id:string)=>void;back:()=>void;notice:(s:string)=>void;openRun:(runId:string)=>void;openUsage?:(recordId:string)=>void;runs?:import("./data").DemoRun[];demoMode?:boolean};
 const nextState: Partial<Record<State, string>> = {
  backlog:"Поручение ещё не отправлено исполнителю. Проверьте бриф и критерии, затем поставьте в очередь.",queued:"Поручение в очереди. Нажмите «Запустить», чтобы сотрудник начал работу.",
  running:"Исполнитель готовит результат.",review:"Результат ожидает проверки.",waiting_input:"Нужен ответ на вопрос исполнителя.",blocked:"Работа остановлена. Причина — в истории задачи: верните задачу в очередь и запустите снова или отмените.",done:"Результат принят.",canceled:"Задача отменена.",
@@ -78,7 +79,7 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
   setEnvironment((current)=>current.isolationReady===next.isolationReady&&current.attempts===next.attempts?current:next);
  },[]);
  const [childForm,setChildForm]=useState(false);const [childTitle,setChildTitle]=useState("");const [childPending,setChildPending]=useState(false);
- const [childDepartment,setChildDepartment]=useState("");const [childAssignee,setChildAssignee]=useState("");const [childBrief,setChildBrief]=useState("");const [childAcceptance,setChildAcceptance]=useState("");const [childContract,setChildContract]=useState<Job["contract"]>();const childTemplates=useTemplates();
+ const [childFolder,setChildFolder]=useState("");const [childDepartment,setChildDepartment]=useState("");const [childAssignee,setChildAssignee]=useState("");const [childBrief,setChildBrief]=useState("");const [childAcceptance,setChildAcceptance]=useState("");const [childContract,setChildContract]=useState<Job["contract"]>();const childTemplates=useTemplates();
  const [placing,setPlacing]=useState(false);const [draftBinding,setDraftBinding]=useState("");const [draftDepartment,setDraftDepartment]=useState("");
  const [preview,setPreview]=useState<TaskFile|null>(null);const [pendingFiles,setPendingFiles]=useState<TaskFile[]>([]);const [reviewing,setReviewing]=useState(false);const [reason,setReason]=useState("");
  const children=jobs.filter(j=>j.parentId===job.id).sort((a,b)=>compareJobKeys(a.id,b.id));const ancestors=jobParentBreadcrumb(jobs,job);const childProgress=childProgressLabel(children);
@@ -313,14 +314,24 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
   }
   change({files:[...(job.files||[]),...added]},tr("Вы прикрепили: {names}",{names:added.map(f=>f.name).join(", ")}));
  };
- // Subtasks stay in the project of the main job; any department open to it may take one.
- const childDepartments=departmentsForBinding(departments,placementLinks,liveBinding);
+ const features=usePluginFeatures(!demoMode);
+ // A subtask lives in the main job's folder. With Projects & Sections it may use another folder of the
+ // same BB project; with File Gateway an employee with a workplace takes it in that folder.
+ const liveFolder=projects.find(item=>(item.recordId??item.id)===liveBinding);
+ const projectFolders=features.projectFolders&&liveFolder?.bbProjectId?projects.filter(item=>!item.archivedAt&&item.bbProjectId===liveFolder.bbProjectId):[];
+ const folderBinding=projectFolders.some(item=>(item.recordId??item.id)===childFolder)?childFolder:liveBinding;
+ const childDepartments=departmentsForBinding(departments,placementLinks,folderBinding);
  const childDepartmentId=childDepartments.some(item=>item.id===childDepartment)?childDepartment:(childDepartments.find(item=>item.id===liveDepartment)?.id??childDepartments[0]?.id??"");
  const childTeam=departments.find(item=>item.id===childDepartmentId);
  const childChoices=childTeam?.lead?withAutoAssignment(teamAssigneeOptions({id:childTeam.id,lead:childTeam.lead,members:childTeam.members??[],memberRoles:childTeam.memberRoles},agents),{id:childTeam.id,lead:childTeam.lead,members:childTeam.members??[],memberRoles:childTeam.memberRoles}):[];
  // In the job's own department a subtask goes to an executor; in another department to its lead.
  const childDefault=childTeam&&childDepartmentId===liveDepartment?(childChoices.find(item=>item.value!==childTeam.lead)?.value??childChoices[0]?.value):childChoices[0]?.value;
  const childAssigneeId=childChoices.some(item=>item.value===childAssignee)?childAssignee:(childDefault??"");
+ const childWorkplaceId=features.fileGateway?agents.find(item=>item.id===childAssigneeId)?.workplaceBindingId:undefined;
+ const childWorkplace=childWorkplaceId?projects.find(item=>(item.recordId??item.id)===childWorkplaceId):undefined;
+ const childBinding=childWorkplaceId??folderBinding;
+ // A connected folder's name already carries its machine.
+ const folderLabel=(item:{name:string})=>item.name;
  const jobClosed=job.state==="done"||job.state==="canceled";
  const canCreateChild=Boolean(childTitle.trim())&&!childPending&&(demoMode||Boolean(childDepartmentId&&childAssigneeId&&childBrief.trim()&&childAcceptance.trim()));
  const createChild=async()=>{
@@ -329,11 +340,11 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
   const childAuto=autoAssignmentOf(childAssigneeId);
   const assignee=childAuto?undefined:agents.find(item=>item.id===childAssigneeId);
   const childDept=departments.find(item=>item.id===childDepartmentId);
-  const created:Job={id:nextJobKey(jobs.map(item=>item.id)),title:childTitle.trim(),parentId:job.id,state:"backlog",project:job.project,department:childDept?.name??job.department,agent:childAuto?"":assignee?.name??job.agent,priority:job.priority,due:job.due,description:demoMode&&!childBrief.trim()?tr("Опишите ожидаемый результат и критерии приёмки."):composeJobDescription(childBrief.trim(),childAcceptance.trim()),comments:[],bindingId:job.bindingId,departmentId:childDepartmentId||job.departmentId,...(childAuto?{assignedAgentId:null,assignment:childAuto}:{assignedAgentId:assignee?.id??job.assignedAgentId}),...(childContract?{contract:childContract}:{})};
+  const created:Job={id:nextJobKey(jobs.map(item=>item.id)),title:childTitle.trim(),parentId:job.id,state:"backlog",project:job.project,department:childDept?.name??job.department,agent:childAuto?"":assignee?.name??job.agent,priority:job.priority,due:job.due,description:demoMode&&!childBrief.trim()?tr("Опишите ожидаемый результат и критерии приёмки."):composeJobDescription(childBrief.trim(),childAcceptance.trim()),comments:[],bindingId:childBinding||job.bindingId,departmentId:childDepartmentId||job.departmentId,...(childAuto?{assignedAgentId:null,assignment:childAuto}:{assignedAgentId:assignee?.id??job.assignedAgentId}),...(childContract?{contract:childContract}:{})};
   const ok=await Promise.resolve(addJob(created));
   setChildPending(false);
   if(ok===false)return;
-  setChildTitle("");setChildBrief("");setChildAcceptance("");setChildAssignee("");setChildDepartment("");setChildContract(undefined);
+  setChildTitle("");setChildBrief("");setChildAcceptance("");setChildAssignee("");setChildDepartment("");setChildFolder("");setChildContract(undefined);
   setChildForm(false);
  };
  useEffect(()=>{if(currentFile)publishDocument({jobId:documentJobId,file:currentFile,draft,onDraft:writeDraft,onSave:(content)=>{void saveFile(content);},close:()=>selectFile(null),select:selectFile,files,persisted:!demoMode,saving:fileSaving,error:fileSaveError});else publishDocument(null);});
@@ -455,12 +466,14 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
    </div>
   </JobEditDialog>
   <Dialog open={placing} onOpenChange={setPlacing}><DialogContent><DialogHeader><DialogTitle>{tr("Проект и отдел")}</DialogTitle><DialogDescription>{tr("Отдел должен быть доступен выбранному проекту: общий отдел доступен везде, ограниченный — только в своих проектах.")}</DialogDescription></DialogHeader><Choice label="Проект задачи" value={draftBinding} onChange={changeDraftBinding} options={projects.filter(item=>!item.archivedAt||item.id===liveBinding).map(item=>({value:item.id,label:item.name}))}/>{draftDepartments.length?<Choice label="Отдел задачи" value={draftDepartment} onChange={setDraftDepartment} options={draftDepartments.map(item=>({value:item.id,label:item.name}))}/>:<p className="text-xs text-muted-foreground">{draftBinding?tr(JOB_CREATE_NO_DEPARTMENTS):tr("Сначала выберите проект.")}</p>}<DialogFooter><Button variant="outline" onClick={()=>setPlacing(false)}>{tr("Отмена")}</Button><Button disabled={!canConfirmPlacement(draftBinding,draftDepartment,placementLinks,departments)} onClick={confirmPlacement}>{tr("Сохранить пару")}</Button></DialogFooter></DialogContent></Dialog>
-  <Dialog open={childForm} onOpenChange={open=>{if(!childPending)setChildForm(open);}}><DialogContent><DialogHeader><DialogTitle>{tr("Новая подзадача")}</DialogTitle><DialogDescription>{tr("Подзадача {id} в том же проекте. Работу другого отдела ставят подзадачей в тот отдел. Ключ назначит сервер.",{id:job.id})}</DialogDescription></DialogHeader>
+  <Dialog open={childForm} onOpenChange={open=>{if(!childPending)setChildForm(open);}}><DialogContent><DialogHeader><DialogTitle>{tr("Новая подзадача")}</DialogTitle><DialogDescription>{tr("Подзадача {id}. Работу другого отдела ставят подзадачей в тот отдел. Ключ назначит сервер.",{id:job.id})}</DialogDescription></DialogHeader>
    <div className="max-h-[65dvh] space-y-3 overflow-y-auto pr-1">
     <TextField label="Название подзадачи" value={childTitle} onChange={setChildTitle} maxLength={200} required/>
     {!demoMode&&<>
+     {projectFolders.length>1&&<Field label="Папка проекта" info={<><p>{tr("По умолчанию — папка главной задачи. Другая папка проекта нужна, когда работа идёт на другой машине.")}</p><p>{tr("Доступно с плагином Projects & Sections.")}</p></>}><Choice label="Папка подзадачи" value={folderBinding} onChange={value=>{setChildFolder(value);setChildDepartment("");setChildAssignee("");}} options={projectFolders.map(item=>({value:item.recordId??item.id,label:folderLabel(item)}))}/></Field>}
      <Field label="Отдел" required info={<><p>{tr("По умолчанию — отдел главной задачи. Если нужна работа другого отдела, выберите его: подзадачу получит его руководитель.")}</p></>}>{childDepartments.length?<Choice label="Отдел подзадачи" value={childDepartmentId} onChange={value=>{setChildDepartment(value);setChildAssignee("");}} options={childDepartments.map(item=>({value:item.id,label:item.name}))}/>:<p className="text-xs text-muted-foreground">{tr(JOB_CREATE_NO_DEPARTMENTS)}</p>}</Field>
      {childDepartmentId&&<AssigneeField value={childAssigneeId} onChange={setChildAssignee} options={childChoices}/>}
+     {childWorkplaceId&&<p className="text-xs text-muted-foreground" data-testid="child-workplace">{tr("Выполнится на рабочем месте сотрудника: {folder}.",{folder:childWorkplace?folderLabel(childWorkplace):childWorkplaceId})}</p>}
      <JobBriefFields brief={childBrief} acceptance={childAcceptance} onBrief={setChildBrief} onAcceptance={setChildAcceptance} templates={demoMode?undefined:childTemplates}/>
      {childForm&&<JobContractFields value={childContract} onChange={setChildContract}/>}
     </>}

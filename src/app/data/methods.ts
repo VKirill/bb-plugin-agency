@@ -76,6 +76,7 @@ export const STAGE1_RPC = {
   searchJobs: "searchJobs",
   listArchivedJobs: "listArchivedJobs",
   listSavedViews: "listSavedViews",
+  listPlugins: "listPlugins",
   saveSavedView: "saveSavedView",
   deleteSavedView: "deleteSavedView",
   dequeueLaunch: "dequeueLaunch",

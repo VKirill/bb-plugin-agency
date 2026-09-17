@@ -159,6 +159,7 @@ export function createRpcAgencyApi(rpc: RpcCaller): AgencyApi {
     searchJobs: (input) => mutate(rpc, STAGE1_RPC.searchJobs, input),
     listArchivedJobs: (input) => mutate(rpc, STAGE1_RPC.listArchivedJobs, input),
     listSavedViews: () => mutate(rpc, STAGE1_RPC.listSavedViews, null),
+    listPlugins: () => mutate(rpc, STAGE1_RPC.listPlugins, null),
     saveSavedView: (input) => mutate(rpc, STAGE1_RPC.saveSavedView, input),
     deleteSavedView: (input) => mutate(rpc, STAGE1_RPC.deleteSavedView, input),
     cancelLaunch: (input) => mutate(rpc, STAGE1_RPC.cancelLaunch, input),

@@ -21,6 +21,9 @@ export const REQUIRED_CREATE_KEYS = [
   "originPluginId",
 ] as const;
 
+/** Spawn fields that let a launch receive selected plugin tools and instructions. */
+export const CONTEXT_ALLOWLIST_KEYS = ["dynamicToolNames", "instructionPluginIds", "allowBridgeToolProxy"] as const;
+
 export const REQUIRED_LIST_KEYS = ["experimental_callerLaunchId", "originPluginId", "includeHidden"] as const;
 export const REQUIRED_RESPONSE_KEYS = [
   "experimental_callerLaunchId",
@@ -94,7 +97,14 @@ export function handshakeFromSpawnContract(value: unknown): IsolatedCapabilityHa
     forkDoesNotInheritIdentity: true,
     threadVisibilityHidden: true,
   };
-  return { protocol: HANDSHAKE_PROTOCOL, capabilities };
+  return {
+    protocol: HANDSHAKE_PROTOCOL,
+    capabilities,
+    extensions: {
+      contextAllowlists: hasAll(contract.createThreadRequestKeys, CONTEXT_ALLOWLIST_KEYS),
+      permissionMode: hasAll(contract.createThreadRequestKeys, ["permissionMode"]),
+    },
+  };
 }
 
 export function createCoreCapabilityHandshakePort(deps: {

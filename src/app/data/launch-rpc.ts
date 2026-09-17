@@ -65,6 +65,8 @@ export type RunAttemptView = {
   state: string;
   reportedState: string;
   revision: number;
+  /** Commands run outside the CLI sandbox; absent when none. */
+  outsideSandboxCommands?: number;
 };
 
 export function isKnownRunAttemptState(state: string): state is KnownRunAttemptState {
@@ -178,6 +180,9 @@ export function parseRunAttempt(value: unknown): RunAttemptView | null {
     revision: typeof row.revision === "number" ? row.revision : 0,
     threadId: text(row.threadId),
     launchId: text(row.launchId),
+    ...(typeof row.outsideSandboxCommands === "number" && row.outsideSandboxCommands > 0
+      ? { outsideSandboxCommands: row.outsideSandboxCommands }
+      : {}),
   };
 }
 

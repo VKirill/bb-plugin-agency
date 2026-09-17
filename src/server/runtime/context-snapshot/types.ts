@@ -15,6 +15,13 @@ export type CatalogSkillEntry = {
   name?: string;
 };
 
+/** One plugin granted to a launch, resolved from the installed plugin and the skill catalog. */
+export type PluginGrant = {
+  pluginId: string;
+  toolNames: readonly string[];
+  skillIds: readonly CatalogSkillId[];
+};
+
 export type CatalogMcpEntry = {
   id: CatalogMcpId;
   hash: string;
@@ -71,6 +78,16 @@ export type CompileContextSnapshotInput = {
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
   /** Accepted knowledge by scope, already cut to the launch limit. */
   knowledge?: { agency: string; project: string; department: string; ids: { id: string; hash: string }[] } | null;
+  /** "full" when the work rule «Запуск без песочницы» applies to this launch. */
+  permissionMode?: "full" | null;
+  /** Other folders of the project, workplaces and the main job's folder; absent when there are none. */
+  placement?: {
+    projectFolders: readonly { bindingId: string; hostId: string; root: string }[];
+    workplaces: readonly { agentId: string; name: string; bindingId: string; hostId: string; root: string }[];
+    parentFolder: { jobKey: string; bindingId: string; hostId: string; root: string } | null;
+  } | null;
+  /** Installed plugins the employee's profile selects: their tools and skills for this launch. */
+  pluginGrants?: readonly PluginGrant[];
 };
 
 export type SelectedSkill = {
@@ -200,9 +217,16 @@ export type ContextSnapshot = {
   handoff: HandoffPackage | null;
   exclusions: SnapshotExclusion[];
   providerLimits: ProviderLimits;
-  /** Frozen spawn execution. Omitted on legacy snapshots and when AgentVersion has no effort. */
+  /** Plugins delivered to the launch; present only when the profile selects some. */
+  plugins?: {
+    ids: string[];
+    toolNames: string[];
+  };
+  /** Frozen spawn execution. Omitted on legacy snapshots and when nothing is set explicitly. */
   execution?: {
-    reasoningLevel: ReasoningEffort;
+    reasoningLevel?: ReasoningEffort;
+    /** "full" when the owner's rule runs this launch without the CLI sandbox. */
+    permissionMode?: "full";
   };
   provenance: SnapshotProvenance;
   prompt: CompiledContextPrompt;

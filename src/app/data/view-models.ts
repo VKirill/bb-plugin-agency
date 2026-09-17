@@ -204,6 +204,8 @@ export function mapAgents(snapshot: WorkspaceSnapshot): Agent[] {
       instructions: version?.instructions || "Задайте инструкции сотрудника.",
       skills: version?.skillIds ?? [],
       mcps: version?.mcpIds ?? [],
+      plugins: version?.pluginIds ?? [],
+      ...(agent.workplaceBindingId ? { workplaceBindingId: agent.workplaceBindingId } : {}),
       selection: { providerId: version?.providerId || "", model: version?.model || "", reasoningLevel: version?.reasoningEffort ?? "medium" },
       permission: "auto",
       hostId: "",

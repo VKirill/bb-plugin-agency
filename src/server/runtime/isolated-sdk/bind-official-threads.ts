@@ -84,8 +84,13 @@ function officialSpawnArgs(args: IsolatedThreadSpawnArgs): OfficialThreadSpawnAr
       providerId: "explicit" as const,
       model: "explicit" as const,
       ...(args.reasoningLevel ? { reasoningLevel: "explicit" as const } : {}),
+      ...(args.permissionMode ? { permissionMode: "explicit" as const } : {}),
     },
     ...(args.reasoningLevel ? { reasoningLevel: args.reasoningLevel } : {}),
+    ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
+    ...(args.instructionPluginIds?.length ? { instructionPluginIds: args.instructionPluginIds } : {}),
+    ...(args.dynamicToolNames?.length ? { dynamicToolNames: args.dynamicToolNames } : {}),
+    ...(args.allowBridgeToolProxy ? { allowBridgeToolProxy: true } : {}),
   };
 }
 

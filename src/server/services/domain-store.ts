@@ -3,7 +3,7 @@ import { ISOLATION_PROVEN_PROVIDERS } from "../runtime/isolated-sdk/sdk-isolatio
 import { currentAgencyRules } from "../templates/store";
 import { handInCommentMissing } from "../runtime/hand-in/service";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
-import { foreignRuleKeys, readStoredRules, rulesForDepartment, workRulesView, writeStoredRules } from "../rules/work-rules";
+import { foreignRuleKeys, readStoredRules, rulesForDepartment, rulesForLaunch, workRulesView, writeStoredRules } from "../rules/work-rules";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCommand, type WorkRulesView } from "../../shared/contracts/work-rules";
 import {
   assertAcceptCurrentVersion,
@@ -71,6 +71,7 @@ import {
   createProjectBindingCommandSchema,
   saveAgentProfileCommandSchema,
   saveDepartmentProfileCommandSchema,
+  optionalPluginIds,
   optionalReasoningEffort,
   jobTransitionCommandSchema,
   publishArtifactVersionCommandSchema,
@@ -138,8 +139,145 @@ function withoutClaim<T extends { claimedBbProjectId?: string }>(input: T): Omit
   return command;
 }
 
-export function createDomainStore(db: SqlDatabase) {
+/** Agency features opened by installed BB plugins. */
+export type PluginFeatures = { projectFolders: boolean; fileGateway: boolean };
+
+/** Folders a launch may hand work to or read from, shown in the job prompt layer. */
+export type LaunchPlacement = {
+  projectFolders: { bindingId: string; hostId: string; root: string }[];
+  workplaces: { agentId: string; name: string; bindingId: string; hostId: string; root: string }[];
+  parentFolder: { jobKey: string; bindingId: string; hostId: string; root: string } | null;
+};
+
+export type DomainStoreOptions = {
+  /**
+   * Read on every check. Without it the store keeps the behaviour it had before plugin
+   * gating (tests, tools); the plugin server always passes the live plugin state.
+   */
+  features?: () => PluginFeatures;
+};
+
+export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions = {}) {
   const repos = createRepositories(db);
+  const features = (): PluginFeatures => options.features?.() ?? { projectFolders: true, fileGateway: true };
+
+  /** Workplace of an employee while File Gateway is installed; without the plugin it is ignored. */
+  function activeWorkplace(agentId: string | null | undefined): string | null {
+    if (!agentId || !features().fileGateway) return null;
+    return repos.agent.get(agentId)?.workplaceBindingId ?? null;
+  }
+
+  function rootJobId(jobId: string): string {
+    let current = repos.job.get(jobId);
+    const seen = new Set<string>();
+    while (current?.parentJobId && !seen.has(current.id)) {
+      seen.add(current.id);
+      current = repos.job.get(current.parentJobId);
+    }
+    return current?.id ?? jobId;
+  }
+
+  /** Jobs of one tree may reference each other across folders: placement rules admitted every subtask. */
+  function sameJobTree(left: string, right: string): boolean {
+    return rootJobId(left) === rootJobId(right);
+  }
+
+  /**
+   * Where the work of a launch can go besides its own folder, for the job prompt layer: other folders
+   * of the project, workplaces of the department's employees, and the main job's folder when it differs.
+   */
+  function placementForLaunch(job: Job): LaunchPlacement | null {
+    const current = repos.binding.get(job.bindingId);
+    if (!current) return null;
+    const active = (bindingId: string) => {
+      const row = repos.binding.get(bindingId);
+      return row && !row.archivedAt ? row : undefined;
+    };
+    const projectFolders = features().projectFolders
+      ? (db.prepare(`SELECT id FROM agency_project_binding WHERE bb_project_id = ? AND id != ?`).all(current.bbProjectId, current.id) as Array<{ id: string }>)
+          .map((row) => active(row.id))
+          .filter((row): row is ProjectBinding => Boolean(row))
+          .map((row) => ({ bindingId: row.id, hostId: row.hostId, root: row.canonicalRoot }))
+      : [];
+    const workplaces = features().fileGateway
+      ? repos.membership
+          .listByDepartment(job.departmentId)
+          .map((row) => repos.agent.get(row.agentId))
+          .filter((agent): agent is Agent => Boolean(agent?.workplaceBindingId && agent.workplaceBindingId !== job.bindingId && agent.state === "active"))
+          .flatMap((agent) => {
+            const folder = active(agent.workplaceBindingId!);
+            return folder ? [{ agentId: agent.id, name: agent.name, bindingId: folder.id, hostId: folder.hostId, root: folder.canonicalRoot }] : [];
+          })
+      : [];
+    const parent = job.parentJobId ? repos.job.get(job.parentJobId) : undefined;
+    const parentBinding = parent && parent.bindingId !== job.bindingId ? repos.binding.get(parent.bindingId) : undefined;
+    const parentFolder = parent && parentBinding ? { jobKey: parent.key, bindingId: parentBinding.id, hostId: parentBinding.hostId, root: parentBinding.canonicalRoot } : null;
+    if (!projectFolders.length && !workplaces.length && !parentFolder) return null;
+    return { projectFolders, workplaces, parentFolder };
+  }
+
+  /** A second active folder of one BB project needs Projects & Sections; folders connected earlier keep working. */
+  function assertSecondProjectFolder(bbProjectId: string, exceptBindingId: string | null): DomainResult<true> {
+    if (features().projectFolders) return ok(true);
+    // SELECT * keeps older schemas without archived_at readable.
+    const rows = db.prepare(`SELECT * FROM agency_project_binding WHERE bb_project_id = ?`).all(bbProjectId) as Array<{ id: string; archived_at?: string | null }>;
+    const other = rows.find((row) => !row.archived_at && row.id !== exceptBindingId);
+    return other
+      ? fail("integration_required", "У проекта уже подключена папка. Несколько папок одного проекта доступны с плагином Projects & Sections.")
+      : ok(true);
+  }
+
+  /** Sets or clears the workplace. Setting one needs File Gateway and an active folder; clearing always works. */
+  function applyWorkplace(agentId: string, current: string | undefined, next: string | null | undefined): DomainResult<string | undefined> {
+    if (next === undefined || next === (current ?? null)) return ok(current);
+    if (next === null) {
+      repos.agent.setWorkplace(agentId, null);
+      return ok(undefined);
+    }
+    if (!features().fileGateway) {
+      return fail("integration_required", "Рабочее место сотрудника доступно с плагином File Gateway.");
+    }
+    const binding = repos.binding.get(next);
+    if (!binding) return fail("not_found", `binding ${next} not found`);
+    const active = assertBindingActive(binding);
+    if (!active.ok) return active;
+    repos.agent.setWorkplace(agentId, next);
+    return ok(next);
+  }
+
+  /** An employee with a workplace takes work only in that folder. */
+  function assertWorkplace(agentId: string | null | undefined, bindingId: string): DomainResult<true> {
+    const workplace = activeWorkplace(agentId);
+    if (!workplace || workplace === bindingId) return ok(true);
+    const agent = agentId ? repos.agent.get(agentId) : undefined;
+    const folder = repos.binding.get(workplace);
+    return fail(
+      "workplace_binding_required",
+      `Сотрудник «${agent?.name ?? agentId}» работает на своём рабочем месте (${folder?.canonicalRoot ?? workplace}): задачу ему ставят в папку рабочего места, из другой папки — подзадачей.`,
+    );
+  }
+
+  /**
+   * Where a subtask may live. The parent's folder always; another folder when it is the assignee's
+   * workplace (File Gateway), another folder of the same BB project (Projects & Sections), or a folder
+   * the parent already has a subtask in (a review or rework next to that work).
+   */
+  function assertSubtaskPlacement(parent: Job, childBindingId: string, assigneeId: string | null): DomainResult<true> {
+    if (parent.bindingId === childBindingId) return ok(true);
+    if (activeWorkplace(assigneeId) === childBindingId) return ok(true);
+    const sibling = db
+      .prepare(`SELECT 1 FROM agency_job WHERE parent_job_id = ? AND binding_id = ? LIMIT 1`)
+      .get(parent.id, childBindingId);
+    if (sibling) return ok(true);
+    const parentBinding = repos.binding.get(parent.bindingId);
+    const childBinding = repos.binding.get(childBindingId);
+    if (parentBinding && childBinding && parentBinding.bbProjectId === childBinding.bbProjectId) {
+      return features().projectFolders
+        ? ok(true)
+        : fail("integration_required", "Подзадача в другой папке проекта доступна с плагином Projects & Sections.");
+    }
+    return fail("binding_mismatch", "parent job belongs to another binding");
+  }
 
   function remember<T>(
     ctx: ServiceContext,
@@ -500,6 +638,7 @@ export function createDomainStore(db: SqlDatabase) {
           mcpIds: input.version.mcpIds,
           policyVersionId: input.version.policyVersionId,
           ...optionalReasoningEffort(input.version.reasoningEffort),
+          ...optionalPluginIds(input.version.pluginIds),
         };
         const agent: Agent = {
           id: agentId,
@@ -538,6 +677,7 @@ export function createDomainStore(db: SqlDatabase) {
           mcpIds: parsed.data.mcpIds,
           policyVersionId: parsed.data.policyVersionId,
           ...optionalReasoningEffort(parsed.data.reasoningEffort),
+          ...optionalPluginIds(parsed.data.pluginIds),
         };
         try {
           repos.agentVersion.insert(version);
@@ -564,13 +704,17 @@ export function createDomainStore(db: SqlDatabase) {
             return fail("version_mismatch", "currentVersionId must belong to this agent");
           }
         }
+        const workplace = applyWorkplace(current.value.id, current.value.workplaceBindingId, parsed.data.workplaceBindingId);
+        if (!workplace.ok) return workplace;
+        const { workplaceBindingId: _previous, ...rest } = current.value;
         const next: Agent = {
-          ...current.value,
+          ...rest,
           name: parsed.data.name ?? current.value.name,
           state: parsed.data.state ?? current.value.state,
           currentVersionId: parsed.data.currentVersionId ?? current.value.currentVersionId,
           revision: revision.value.nextRevision,
           updatedAt: nowUtc(ctx),
+          ...(workplace.value ? { workplaceBindingId: workplace.value } : {}),
         };
         repos.agent.update(next);
         return ok(next);
@@ -718,7 +862,8 @@ export function createDomainStore(db: SqlDatabase) {
           currentVersion.policyVersionId === draft.policyVersionId &&
           currentVersion.reasoningEffort === draft.reasoningEffort &&
           sameTextList(currentVersion.skillIds, draft.skillIds) &&
-          sameTextList(currentVersion.mcpIds, draft.mcpIds);
+          sameTextList(currentVersion.mcpIds, draft.mcpIds) &&
+          sameTextList(currentVersion.pluginIds ?? [], draft.pluginIds ?? []);
         let version = currentVersion;
         if (!unchanged) {
           version = {
@@ -733,6 +878,7 @@ export function createDomainStore(db: SqlDatabase) {
             mcpIds: draft.mcpIds,
             policyVersionId: draft.policyVersionId,
             ...optionalReasoningEffort(draft.reasoningEffort),
+            ...optionalPluginIds(draft.pluginIds),
           };
           try {
             repos.agentVersion.insert(version);
@@ -740,13 +886,17 @@ export function createDomainStore(db: SqlDatabase) {
             return fail("version_immutable", error instanceof Error ? error.message : "agent version insert failed");
           }
         }
+        const workplace = applyWorkplace(current.value.id, current.value.workplaceBindingId, parsed.data.workplaceBindingId);
+        if (!workplace.ok) return workplace;
+        const { workplaceBindingId: _previous, ...rest } = current.value;
         const agent: Agent = {
-          ...current.value,
+          ...rest,
           name: parsed.data.name,
           state: parsed.data.state,
           currentVersionId: version.id,
           revision: revision.value.nextRevision,
           updatedAt: nowUtc(ctx),
+          ...(workplace.value ? { workplaceBindingId: workplace.value } : {}),
         };
         repos.agent.update(agent);
         return ok({ agent, version });
@@ -924,6 +1074,8 @@ export function createDomainStore(db: SqlDatabase) {
         if (existing) {
           return fail("binding_duplicate", `folder ${parsed.data.canonicalRoot} is already connected as ${existing.id}`);
         }
+        const folders = assertSecondProjectFolder(parsed.data.bbProjectId, null);
+        if (!folders.ok) return folders;
         const row: ProjectBinding = {
           id: newOpaqueId("binding"),
           bbProjectId: parsed.data.bbProjectId,
@@ -993,6 +1145,8 @@ export function createDomainStore(db: SqlDatabase) {
           if (existing && existing.id !== current.value.id) {
             return fail("binding_duplicate", `folder ${current.value.canonicalRoot} is already connected as ${existing.id}`);
           }
+          const folders = assertSecondProjectFolder(current.value.bbProjectId, current.value.id);
+          if (!folders.ok) return folders;
         }
         const now = nowUtc(ctx);
         const next: ProjectBinding = {
@@ -1154,17 +1308,18 @@ export function createDomainStore(db: SqlDatabase) {
         const picked = parsed.data.assignedAgentId
           ? ok(parsed.data.assignedAgentId)
           : parsed.data.assignment
-            ? pickAssignee(parsed.data.departmentId, parsed.data.assignment, parsed.data.reviewerAgentIds ?? [])
+            ? pickAssignee(parsed.data.departmentId, parsed.data.assignment, parsed.data.reviewerAgentIds ?? [], parsed.data.bindingId)
             : ok(null);
         if (!picked.ok) return picked;
         const assignedAgentId = picked.value;
         if (parsed.data.parentJobId) {
           const parent = requireJob(parsed.data.parentJobId);
           if (!parent.ok) return parent;
-          if (parent.value.bindingId !== parsed.data.bindingId) {
-            return fail("binding_mismatch", "parent job belongs to another binding");
-          }
+          const placed = assertSubtaskPlacement(parent.value, parsed.data.bindingId, assignedAgentId);
+          if (!placed.ok) return placed;
         }
+        const atWorkplace = assertWorkplace(assignedAgentId, parsed.data.bindingId);
+        if (!atWorkplace.ok) return atWorkplace;
         if (assignedAgentId) {
           const membership = repos.membership.get(parsed.data.departmentId, assignedAgentId);
           if (!membership) {
@@ -1259,6 +1414,10 @@ export function createDomainStore(db: SqlDatabase) {
           const active = assertAgentActive(assignedAgentId);
           if (!active.ok) return active;
         }
+        if (assignedAgentId !== scoped.value.job.assignedAgentId || nextBinding.value.id !== scoped.value.job.bindingId) {
+          const atWorkplace = assertWorkplace(assignedAgentId, nextBinding.value.id);
+          if (!atWorkplace.ok) return atWorkplace;
+        }
         // The card must name who actually works: no reassignment or department move under a live thread.
         if (
           (assignedAgentId !== scoped.value.job.assignedAgentId || departmentId !== scoped.value.job.departmentId) &&
@@ -1336,7 +1495,7 @@ export function createDomainStore(db: SqlDatabase) {
       }, () => {
         const dependsOn = requireJob(input.dependsOnJobId);
         if (!dependsOn.ok) return dependsOn;
-        if (dependsOn.value.bindingId !== scoped.value.job.bindingId) {
+        if (dependsOn.value.bindingId !== scoped.value.job.bindingId && !sameJobTree(dependsOn.value.id, scoped.value.job.id)) {
           return fail("binding_mismatch", "dependency must stay inside the same binding");
         }
         const edge: JobDependency = { jobId: input.jobId, dependsOnJobId: input.dependsOnJobId };
@@ -1500,7 +1659,7 @@ export function createDomainStore(db: SqlDatabase) {
    * launchable CLI with the fewest open jobs (ties by name). Team reviewers of
    * the job are skipped for an executor pick.
    */
-  function pickAssignee(departmentId: string, role: "lead" | "executor" | "reviewer", reviewerIds: readonly string[]): DomainResult<string> {
+  function pickAssignee(departmentId: string, role: "lead" | "executor" | "reviewer", reviewerIds: readonly string[], bindingId?: string): DomainResult<string> {
     if (role === "lead") {
       const department = repos.department.get(departmentId);
       return department ? ok(department.leadAgentId) : fail("not_found", `department ${departmentId} not found`);
@@ -1517,7 +1676,11 @@ export function createDomainStore(db: SqlDatabase) {
       )
       .all(departmentId, role) as { agent_id: string; provider_id: string | null; open_jobs: number }[];
     const pick = rows.find(
-      (row) => (ISOLATION_PROVEN_PROVIDERS as readonly string[]).includes(row.provider_id ?? "") && !(role === "executor" && reviewerIds.includes(row.agent_id)),
+      (row) =>
+        (ISOLATION_PROVEN_PROVIDERS as readonly string[]).includes(row.provider_id ?? "") &&
+        !(role === "executor" && reviewerIds.includes(row.agent_id)) &&
+        // An employee with a workplace elsewhere is not picked for this folder.
+        (!bindingId || (activeWorkplace(row.agent_id) ?? bindingId) === bindingId),
     );
     if (!pick) {
       return fail(
@@ -1627,6 +1790,8 @@ export function createDomainStore(db: SqlDatabase) {
     addMembership,
     removeMembership,
     createProjectBinding,
+    sameJobTree,
+    placementForLaunch,
     updateProjectBinding,
     archiveProjectBinding,
     restoreProjectBinding,
@@ -1676,6 +1841,7 @@ export function createDomainStore(db: SqlDatabase) {
     memberRole,
     saveWorkRules,
     rulesForDepartment: (departmentId: string) => rulesForDepartment(db, departmentId),
+    rulesForLaunch: (departmentId: string, agentId: string) => rulesForLaunch(db, departmentId, agentId),
     resolveRework: (jobId: string) => resolveRework(db, jobId, new Date().toISOString()),
     scopedJob,
   };

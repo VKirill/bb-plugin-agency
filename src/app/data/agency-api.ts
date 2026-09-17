@@ -1,4 +1,4 @@
-import type { AgentMetricsView, BackupFileView, GoalViewRecord, JobSearchHitView, KnowledgeItemView, SavedViewRecord } from "../../shared/rpc-contract";
+import type { AgentMetricsView, BackupFileView, GoalViewRecord, JobSearchHitView, KnowledgeItemView, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
 import type { RuleScheduleView, WebhookSourceView } from "../../shared/rpc-contract";
 import type { AgencyRulesView, TemplateView } from "../../shared/rpc-contract";
 import type { BudgetStatusView } from "../../shared/rpc-contract";
@@ -158,6 +158,7 @@ export interface AgencyApi {
   searchJobs(input: { query: string; limit?: number }): Promise<MutationOutcome<JobSearchHitView[]>>;
   listArchivedJobs(input: { limit?: number; offset?: number }): Promise<MutationOutcome<{ total: number; jobs: Job[] }>>;
   listSavedViews(): Promise<MutationOutcome<SavedViewRecord[]>>;
+  listPlugins(): Promise<MutationOutcome<PluginDirectoryView>>;
   saveSavedView(input: { id?: string; name: string; filters: Record<string, string> }): Promise<MutationOutcome<SavedViewRecord>>;
   deleteSavedView(input: { id: string }): Promise<MutationOutcome<{ removed: boolean }>>;
   cancelLaunch(input: { requestId: string; jobId: string; attemptId: string; expectedJobRevision: number; expectedAttemptRevision: number; launchId: string; threadId: string; reason: string }): Promise<MutationOutcome<{ jobId: string; jobState: string; attemptState: string }>>;

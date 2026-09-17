@@ -55,6 +55,7 @@ type AgentRow = {
   current_version_id: string;
   revision: number;
   updated_at: string;
+  workplace_binding_id?: string | null;
 };
 
 type DepartmentRow = {
@@ -143,6 +144,7 @@ export function listStoredAgents(db: SqlDatabase): Agent[] {
     currentVersionId: row.current_version_id,
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.workplace_binding_id ? { workplaceBindingId: row.workplace_binding_id } : {}),
   }));
 }
 

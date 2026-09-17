@@ -2,6 +2,7 @@ import {
   AGENCY_ONLY_RULE_KEYS,
   DEFAULT_WORK_RULES,
   INHERITED_RULE_KEYS,
+  AGENT_OVERRIDE_RULE_KEYS,
   LIMIT_RULE_KEYS,
   allowedRuleKeys,
   storedWorkRulesSchema,
@@ -66,6 +67,11 @@ export function workRulesView(db: SqlDatabase, scope: string): WorkRulesView {
     if (department[key] !== undefined) set(key, department[key], "department");
   }
   const ownSource: RuleSource = scope === "agency" ? "agency" : scope.startsWith("department:") ? "department" : "agent";
+  if (scope.startsWith("agent:")) {
+    for (const key of AGENT_OVERRIDE_RULE_KEYS) {
+      if (own.rules[key] !== undefined) set(key, own.rules[key], "agent");
+    }
+  }
   for (const key of LIMIT_RULE_KEYS) {
     if (own.rules[key] !== undefined) set(key, own.rules[key], ownSource);
     else set(key, null, "default");
@@ -77,6 +83,16 @@ export function workRulesView(db: SqlDatabase, scope: string): WorkRulesView {
     effective: workRulesSchema.parse(effective),
     sources,
   };
+}
+
+/** Rules of one launch: the department's rules with the employee's own overrides. */
+export function rulesForLaunch(db: SqlDatabase, departmentId: string, agentId: string): WorkRules {
+  const rules = { ...rulesForDepartment(db, departmentId) };
+  const own = readStoredRules(db, `agent:${agentId}`).rules;
+  for (const key of AGENT_OVERRIDE_RULE_KEYS) {
+    if (own[key] !== undefined) (rules as Record<string, unknown>)[key] = own[key];
+  }
+  return rules;
 }
 
 /** Rules a job works by: its department's view. */

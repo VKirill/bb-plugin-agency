@@ -290,6 +290,24 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     selectedIds.add(entry.value.id);
   }
 
+  // Plugins: only ones the profile selects; their skills join the method skills.
+  const grants = input.pluginGrants ?? [];
+  const selectedPlugins = new Set(agentVersion.pluginIds ?? []);
+  for (const grant of grants) {
+    if (!selectedPlugins.has(grant.pluginId)) {
+      return fail("plugin_not_selected", `plugin ${grant.pluginId} is not selected in agentVersion.pluginIds`);
+    }
+    for (const id of grant.skillIds) {
+      const entry = requireSkill(skillIndex, id, "method");
+      if (!entry.ok) return entry;
+      if (selectedIds.has(entry.value.id)) continue;
+      selected.push({ id: entry.value.id, hash: entry.value.hash, role: "method" });
+      selectedIds.add(entry.value.id);
+    }
+  }
+  const pluginIds = sortedUnique(grants.map((grant) => grant.pluginId));
+  const pluginToolNames = sortedUnique(grants.flatMap((grant) => [...grant.toolNames]));
+
   const selectedMcps: SelectedMcp[] = [];
   const selectedMcpIds = new Set<string>();
   for (const mcpId of agentVersion.mcpIds) {
@@ -373,6 +391,9 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     selectedMcps,
     inputArtifacts,
     handoff: handoff.value,
+    plugins: { ids: pluginIds, toolNames: pluginToolNames },
+    placement: input.placement ?? null,
+    withoutSandbox: input.permissionMode === "full",
   });
   const promptDigest = sha256Hex(canonicalizeJson(levels));
 
@@ -441,8 +462,14 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       ...(input.providerLimits.contextWindow !== undefined ? { contextWindow: input.providerLimits.contextWindow } : {}),
       ...(input.providerLimits.maxOutputTokens !== undefined ? { maxOutputTokens: input.providerLimits.maxOutputTokens } : {}),
     },
-    ...(agentVersion.reasoningEffort
-      ? { execution: { reasoningLevel: agentVersion.reasoningEffort } }
+    ...(pluginIds.length ? { plugins: { ids: pluginIds, toolNames: pluginToolNames } } : {}),
+    ...(agentVersion.reasoningEffort || input.permissionMode === "full"
+      ? {
+          execution: {
+            ...(agentVersion.reasoningEffort ? { reasoningLevel: agentVersion.reasoningEffort } : {}),
+            ...(input.permissionMode === "full" ? { permissionMode: "full" as const } : {}),
+          },
+        }
       : {}),
     provenance: {
       recordsVerifiedBy: "caller",
@@ -474,6 +501,9 @@ function buildPromptLevels(args: {
   selectedMcps: SelectedMcp[];
   inputArtifacts: InputArtifactRef[];
   handoff: HandoffPackage | null;
+  plugins: { ids: string[]; toolNames: string[] };
+  placement: CompileContextSnapshotInput["placement"] | null;
+  withoutSandbox: boolean;
 }): ContextPromptLevels {
   const {
     binding,
@@ -488,6 +518,9 @@ function buildPromptLevels(args: {
     selectedMcps,
     inputArtifacts,
     handoff,
+    plugins,
+    placement,
+    withoutSandbox,
   } = args;
   const selectedLines = selected.map((skill) => `${skill.role} ${skill.id} hash=${skill.hash}`).join("\n");
   const mcpLines =
@@ -564,6 +597,14 @@ function buildPromptLevels(args: {
       "Selected skills (explicit IDs only; catalog bodies are not injected):",
       selectedLines || "none",
       mcpLines,
+      ...(plugins.ids.length
+        ? [
+            `BB plugins for this launch: ${plugins.ids.join(", ")}. Allowed tools: ${plugins.toolNames.join(", ") || "none"}. If a tool is not in this session, use the plugin's \`bb <plugin>\` command from its skill. Other BB plugins are not part of this launch.`,
+          ]
+        : []),
+      ...(withoutSandbox
+        ? ["This launch runs with full permissions, without the CLI sandbox (owner's work rule). Stay inside the job's folder unless the brief names another path."]
+        : []),
     ].join("\n"),
     job: [
       `job ${job.id} key=${job.key} revision=${job.revision} department=${job.departmentId}`,
@@ -578,9 +619,36 @@ function buildPromptLevels(args: {
         : []),
       "Input artifacts:",
       artifactLines,
+      ...placementLines(placement ?? null),
     ].join("\n"),
     handoff: handoffLevel,
   };
+}
+
+/** Folders beyond the job's own: where a subtask may go and where the main job's files are. */
+function placementLines(placement: CompileContextSnapshotInput["placement"] | null): string[] {
+  if (!placement) return [];
+  const lines: string[] = [];
+  if (placement.projectFolders.length) {
+    lines.push(
+      "Other folders of this project (a subtask may run there; pass that folder's bindingId):",
+      ...placement.projectFolders.map((folder) => `folder bindingId=${folder.bindingId} host=${folder.hostId} root=${folder.root}`),
+    );
+  }
+  if (placement.workplaces.length) {
+    lines.push(
+      "Employees of this department with their own workplace (a subtask for them goes to the workplace bindingId):",
+      ...placement.workplaces.map((row) => `workplace ${row.name} agent=${row.agentId} bindingId=${row.bindingId} host=${row.hostId} root=${row.root}`),
+    );
+  }
+  if (placement.parentFolder) {
+    const parent = placement.parentFolder;
+    lines.push(
+      `Main job ${parent.jobKey} lives in another folder: bindingId=${parent.bindingId} host=${parent.hostId} root=${parent.root}.`,
+      "You work in this job's folder. Files of the main job come as input versions; any other file from that machine is copied with File Gateway (`bb file-gateway copy <host> <absolute path> <this host>`) when that plugin is in this launch, otherwise ask the lead to attach it.",
+    );
+  }
+  return lines;
 }
 
 export function computeHandoffHash(handoff: Omit<HandoffPackage, "hash">): string {

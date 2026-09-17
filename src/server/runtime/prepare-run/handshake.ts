@@ -8,6 +8,12 @@ export const HANDSHAKE_PROTOCOL = "agency-isolated-capability-v1" as const;
 export type IsolatedCapabilityHandshake = {
   protocol: typeof HANDSHAKE_PROTOCOL;
   capabilities: ExperimentalIsolatedCapability;
+  /** Optional spawn fields the loaded core accepts; absent on older cores. */
+  extensions?: {
+    /** `dynamicToolNames`, `instructionPluginIds`, `allowBridgeToolProxy`. */
+    contextAllowlists: boolean;
+    permissionMode: boolean;
+  };
 };
 
 export type IsolatedCapabilityHandshakePort = {

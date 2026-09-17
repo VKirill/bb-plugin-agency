@@ -1,4 +1,6 @@
 import { WAIT_CODES } from "../runtime/launch-queue/service";
+import { sandboxEscapeCounts } from "../runtime/sandbox-escape/service";
+import type { PluginDirectory } from "../integrations/plugin-directory";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { fail, ok, type DomainResult } from "../../domain";
 import { createSdkHostFilePortFromBinding, type HostFileRpcClient } from "../../host";
@@ -115,6 +117,27 @@ function officialCancelPorts(threads: BbPluginApi["sdk"]["threads"]): {
   };
 }
 
+/** Tools of the selected plugins; a plugin that is not installed or not running stops the launch. */
+export function pluginToolsFrom(plugins: PluginDirectory) {
+  return async (pluginIds: readonly string[]): Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>> => {
+    let installed;
+    try {
+      installed = await plugins.list();
+    } catch (error) {
+      return fail("plugins_unavailable", `Не удалось прочитать список плагинов BB: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const grants: { pluginId: string; toolNames: string[] }[] = [];
+    for (const pluginId of pluginIds) {
+      const plugin = installed.find((item) => item.id === pluginId);
+      if (!plugin || !plugin.running) {
+        return fail("plugin_unavailable", `Плагин «${plugin?.name ?? pluginId}» выбран в профиле сотрудника, но ${plugin ? "выключен" : "не установлен"} в BB. Включите плагин или уберите его в профиле.`);
+      }
+      grants.push({ pluginId, toolNames: [...plugin.toolNames] });
+    }
+    return ok(grants);
+  };
+}
+
 export function createIsolatedLaunchRpc(deps: {
   bb: BbPluginApi;
   store: DomainStore;
@@ -126,6 +149,8 @@ export function createIsolatedLaunchRpc(deps: {
   checkHost?: (input: { hostId: string; providerId: string }) => Promise<DomainResult<void>>;
   /** Concurrency and budget limits from the work rules; warnings do not stop the launch. */
   checkLimits?: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
+  /** Installed BB plugins: tools of the plugins an employee profile selects. */
+  plugins?: PluginDirectory;
   onChanged?: () => void;
   send?: IsolatedSendPort;
 }): LaunchHandlers {
@@ -241,6 +266,7 @@ export function createIsolatedLaunchRpc(deps: {
           handshake,
           runs,
           jobInputs: createJobInputPort({ store: deps.store, db: deps.db, files: files.value }),
+          ...(deps.plugins ? { pluginTools: pluginToolsFrom(deps.plugins) } : {}),
           server: {
             applicable: DEFAULT_APPLICABLE,
             catalogRoles: roles.value,
@@ -441,6 +467,7 @@ export function createIsolatedLaunchRpc(deps: {
         }
         const listed = reads.listAttempts(ctx, input.jobId);
         if (!listed.ok) return listed;
+        const escapes = sandboxEscapeCounts(deps.db, listed.value.map((attempt) => attempt.attemptId));
         return ok({
           jobId: input.jobId,
           attempts: listed.value.map((attempt) => ({
@@ -455,6 +482,7 @@ export function createIsolatedLaunchRpc(deps: {
             revision: attempt.revision,
             createdAt: attempt.createdAt,
             updatedAt: attempt.updatedAt,
+            ...(escapes.get(attempt.attemptId) ? { outsideSandboxCommands: escapes.get(attempt.attemptId) } : {}),
           })),
         });
       });

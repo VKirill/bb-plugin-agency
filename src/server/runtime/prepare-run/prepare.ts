@@ -5,7 +5,7 @@ import type { Job } from "../../../shared/contracts/job.js";
 import { assertBindingScope, type ServiceContext } from "../../services/context.js";
 import type { DomainStore } from "../../services/domain-store.js";
 import { compileContextSnapshot } from "../context-snapshot/compile.js";
-import type { CatalogSkillEntry, ContextSnapshot } from "../context-snapshot/types.js";
+import type { CatalogSkillEntry, ContextSnapshot, PluginGrant } from "../context-snapshot/types.js";
 import type { ReservedPreparedRun, RunStore } from "../run-store/types.js";
 import { selectCatalogRoles } from "./catalog-roles.js";
 import {
@@ -57,7 +57,12 @@ export type PrepareRunDeps = {
   server: VerifiedPrepareConfig;
   ruleFiles?: ProjectRulesFilePorts;
   jobInputs?: JobInputPort;
+  /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
+  pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
 };
+
+/** BB accepts at most 32 skills, tools and instruction plugins per isolated thread. */
+const ISOLATED_LIST_LIMIT = 32;
 
 function jobReady(job: Job): DomainResult<true> {
   if (!PREPARE_JOB_STATES.has(job.state)) {
@@ -145,11 +150,41 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       const roles = selectCatalogRoles(listed.value, agentVersion.skillIds, deps.server.catalogRoles);
       if (!roles.ok) return roles;
 
+      const withoutSandbox = deps.store.rulesForLaunch?.(job.departmentId, agent.id).runWithoutSandbox === true;
+      if (withoutSandbox && !handshake.value.extensions?.permissionMode) {
+        return fail("sandbox_mode_unsupported", "Эта версия BB не принимает режим прав при запуске: правило «Запуск без песочницы» не выполняется. Выключите правило или обновите BB.");
+      }
+      const pluginIds = agentVersion.pluginIds ?? [];
+      const pluginGrants: PluginGrant[] = [];
+      if (pluginIds.length) {
+        if (!handshake.value.extensions?.contextAllowlists) {
+          return fail("plugin_delivery_unsupported", "Эта версия BB не передаёт инструменты и инструкции плагинов в запуск. Уберите плагины в профиле сотрудника или обновите BB.");
+        }
+        if (!deps.pluginTools) return fail("plugin_delivery_unsupported", "Каталог плагинов недоступен: запуск с плагинами не выполняется.");
+        const tools = await deps.pluginTools(pluginIds);
+        if (!tools.ok) return tools;
+        for (const pluginId of pluginIds) {
+          const toolNames = tools.value.find((item) => item.pluginId === pluginId)?.toolNames ?? [];
+          const skillIds = listed.value
+            .filter((skill) => skill.pluginId === pluginId || skill.source === `plugin:${pluginId}`)
+            .map((skill) => skill.id);
+          pluginGrants.push({ pluginId, toolNames, skillIds });
+        }
+        const toolCount = new Set(pluginGrants.flatMap((grant) => grant.toolNames)).size;
+        if (toolCount > ISOLATED_LIST_LIMIT) {
+          return fail("too_many_plugin_tools", `У выбранных плагинов ${toolCount} инструментов, BB передаёт в запуск не больше ${ISOLATED_LIST_LIMIT}.`);
+        }
+      }
+
       const neededIds = new Set<string>([
         ...roles.value.coreSkillIds,
         ...roles.value.helperSkillIds,
         ...agentVersion.skillIds,
+        ...pluginGrants.flatMap((grant) => grant.skillIds),
       ]);
+      if (neededIds.size > ISOLATED_LIST_LIMIT) {
+        return fail("too_many_skills", `Запуску нужно ${neededIds.size} навыков с учётом плагинов, BB передаёт не больше ${ISOLATED_LIST_LIMIT}.`);
+      }
       const catalogSkills: CatalogSkillEntry[] = [];
       for (const skill of listed.value) {
         if (!neededIds.has(skill.id)) continue;
@@ -189,6 +224,9 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         handoff: persistedInputs.value.handoff,
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
         knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id) ?? null,
+        ...(pluginGrants.length ? { pluginGrants } : {}),
+        placement: deps.store.placementForLaunch?.(job) ?? null,
+        permissionMode: withoutSandbox ? "full" : null,
       });
       if (!compiled.ok) return fail(compiled.error.code, compiled.error.message);
 

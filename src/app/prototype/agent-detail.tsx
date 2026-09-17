@@ -1,4 +1,6 @@
 import { AgentMetricsPanel } from "./agent-metrics";
+import { AgentPluginsPanel } from "./agent-plugins";
+import { usePluginFeatures } from "./use-plugin-features";
 import { useTemplates } from "./use-templates";
 import { useEffect, useState } from "react";
 import {
@@ -18,7 +20,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { LAUNCH_PROVIDER_ID, REASONING_OPTIONS, type ReasoningLevel } from "../data/role-types";
 import { providerLaunchNote, useLaunchableProviders } from "./use-launchable-providers";
 import { JOB_DESCRIPTION_LABEL, jobDescriptionKind, jobDescriptionTemplate } from "../data/instruction-templates";
-import { LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
+import { AGENT_SANDBOX_RULE_GROUP, LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
 import { tr } from "../i18n";
 
 export function AgentDetail({
@@ -32,7 +34,10 @@ export function AgentDetail({
   commit,
   policies = [],
   primaryHostId = null,
+  folders = [],
 }: {
+  /** Connected project folders an employee's workplace can be. */
+  folders?: { id: string; label: string }[];
   /** The machine BB runs on: the model picker reads its catalog. */
   primaryHostId?: string | null;
   agent: Agent;
@@ -53,6 +58,7 @@ export function AgentDetail({
   const [pending, setPending] = useState(false);
   const [confirmPause, setConfirmPause] = useState(false);
   const launchableProviders = useLaunchableProviders();
+  const features = usePluginFeatures(live);
   const templates = useTemplates();
   const dirty = persistedAgentDirty(baseline, draft);
   const ownEcho = isOwnProfileEcho(draft, agent, baseline);
@@ -130,7 +136,7 @@ export function AgentDetail({
           setTab(value);
           setQ("");
         }}
-        tabs={live ? ["Обзор", "Инструкции", "Исполнение", "Навыки", "Показатели"] : ["Обзор", "Инструкции", "Исполнение", "Возможности", "История"]}
+        tabs={live ? ["Обзор", "Инструкции", "Исполнение", "Навыки", "Плагины", "Показатели"] : ["Обзор", "Инструкции", "Исполнение", "Возможности", "История"]}
       />
       <div className="max-w-4xl space-y-4">
         {tab === "Обзор" && (
@@ -165,6 +171,7 @@ export function AgentDetail({
           </>
         )}
         {tab === "Показатели" && live && <AgentMetricsPanel agentId={agent.id} notice={notice} />}
+        {tab === "Плагины" && live && <AgentPluginsPanel selected={draft.plugins ?? []} onChange={(plugins) => set({ plugins })} notice={notice} />}
         {tab === "Инструкции" && (
           <Panel title="Должностная инструкция">
             <TextField
@@ -220,8 +227,32 @@ export function AgentDetail({
               )}
               <p className="mt-2 text-xs text-muted-foreground">{tr("Права при запуске — пересечение прав сотрудника и проекта: сотрудник не получит больше, чем разрешено проекту.")}</p>
             </Panel>
-            <p className="pt-2 text-xs text-muted-foreground">{tr("Лимиты сотрудника сохраняются своей кнопкой и не меняют версию профиля.")}</p>
-            <WorkRulesEditor key={agent.id} scope={`agent:${agent.id}`} inheritable={false} notice={notice} groups={[LIMIT_RULE_GROUP("сотрудника", false)]} saveLabel="Сохранить лимиты" />
+            {(features.fileGateway || draft.workplaceBindingId) && (
+              <Panel title="Рабочее место">
+                <Field
+                  label="Где работает сотрудник"
+                  info={<><p>{tr("По умолчанию сотрудник запускается на машине папки задачи.")}</p><p>{tr("Рабочее место закрепляет его за одной папкой, например на Mac mini с браузером: подзадачи ему ставятся туда, файлы главной задачи он берёт через File Gateway.")}</p></>}
+                >
+                  <Choice
+                    label="Рабочее место сотрудника"
+                    value={draft.workplaceBindingId ?? "none"}
+                    onChange={(value) => set({ workplaceBindingId: value === "none" ? undefined : value })}
+                    options={[
+                      { value: "none", label: "Папка задачи" },
+                      ...folders.map((folder) => ({ value: folder.id, label: folder.label })),
+                      ...(draft.workplaceBindingId && !folders.some((folder) => folder.id === draft.workplaceBindingId)
+                        ? [{ value: draft.workplaceBindingId, label: tr("Папка отключена: {id}", { id: draft.workplaceBindingId }) }]
+                        : []),
+                    ]}
+                  />
+                </Field>
+                {!features.fileGateway && draft.workplaceBindingId && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{tr("File Gateway не установлен: рабочее место не действует. Его можно только убрать.")}</p>
+                )}
+              </Panel>
+            )}
+            <p className="pt-2 text-xs text-muted-foreground">{tr("Правила сотрудника — лимиты и песочница — сохраняются своей кнопкой и не меняют версию профиля.")}</p>
+            <WorkRulesEditor key={agent.id} scope={`agent:${agent.id}`} inheritable notice={notice} groups={[LIMIT_RULE_GROUP("сотрудника", false), AGENT_SANDBOX_RULE_GROUP]} saveLabel="Сохранить правила сотрудника" inheritLabel="Как в отделе" />
           </>
         )}
         {tab === "Исполнение" && !live && (

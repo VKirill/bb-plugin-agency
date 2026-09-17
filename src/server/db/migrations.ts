@@ -1,4 +1,5 @@
 import { SAVED_VIEWS_MIGRATION } from "../insights/archive";
+import { SANDBOX_ESCAPE_MIGRATION } from "../runtime/sandbox-escape/service";
 import { GOALS_MIGRATION } from "../organization/goals";
 import { HIERARCHY_MIGRATION } from "../organization/hierarchy";
 import { KNOWLEDGE_MIGRATION } from "../knowledge/store";
@@ -613,6 +614,9 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   GOALS_MIGRATION,
   HIERARCHY_MIGRATION,
   SAVED_VIEWS_MIGRATION,
+  `ALTER TABLE agency_agent_version ADD COLUMN plugin_ids TEXT`,
+  `ALTER TABLE agency_agent ADD COLUMN workplace_binding_id TEXT`,
+  SANDBOX_ESCAPE_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

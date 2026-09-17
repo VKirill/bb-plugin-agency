@@ -29,6 +29,8 @@ export const agentSchema = revisionedRecordSchema
     name: displayNameSchema,
     state: agentStateSchema,
     currentVersionId: opaqueIdSchema,
+    /** Folder where this employee always works (File Gateway). Absent means the job's folder. */
+    workplaceBindingId: opaqueIdSchema.optional(),
   })
   .strict();
 
@@ -72,6 +74,8 @@ export const updateAgentCommandSchema = changeCommandSchema
     name: displayNameSchema.optional(),
     state: agentStateSchema.optional(),
     currentVersionId: opaqueIdSchema.optional(),
+    /** Null clears the workplace. */
+    workplaceBindingId: opaqueIdSchema.nullable().optional(),
   })
   .strict();
 

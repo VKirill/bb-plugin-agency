@@ -109,7 +109,14 @@ export function createDashboardUsageReader(deps: {
       if (input.rootJobId && !scopedJobs.some((job) => job.id === input.rootJobId)) {
         return fail("not_found", `job ${input.rootJobId} not found in trusted scope`);
       }
-      const treeJobs = collectJobSubtree(scopedJobs, input.rootJobId);
+      // A job tree may span folders (another folder of the project, an employee's workplace):
+      // the root decides the scope, its subtasks count wherever they run.
+      let treeJobs = collectJobSubtree(scopedJobs, input.rootJobId);
+      if (input.rootJobId) {
+        const allowedBindings = deps.catalog.listBindings().filter((binding) => ctx.allowedBindingIds.includes(binding.id));
+        for (const binding of allowedBindings) bindingById.set(binding.id, binding);
+        treeJobs = collectJobSubtree(deps.catalog.listJobs(allowedBindings.map((binding) => binding.id)), input.rootJobId);
+      }
 
       type PreparedAttempt = {
         attemptId: string;

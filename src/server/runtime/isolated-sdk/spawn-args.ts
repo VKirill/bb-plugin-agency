@@ -65,10 +65,22 @@ export function spawnArgsFromContract(
     experimental_callerLaunchId: contract.launchId,
     experimental_callerAttemptId: contract.attemptId,
     ...(jobId ? { experimental_callerJobId: jobId } : {}),
-    ...(snapshot.execution?.reasoningLevel
+    ...(snapshot.execution?.reasoningLevel || snapshot.execution?.permissionMode
       ? {
-          reasoningLevel: snapshot.execution.reasoningLevel,
-          executionInputSources: { reasoningLevel: "explicit" as const },
+          ...(snapshot.execution.reasoningLevel ? { reasoningLevel: snapshot.execution.reasoningLevel } : {}),
+          ...(snapshot.execution.permissionMode ? { permissionMode: snapshot.execution.permissionMode } : {}),
+          executionInputSources: {
+            ...(snapshot.execution.reasoningLevel ? { reasoningLevel: "explicit" as const } : {}),
+            ...(snapshot.execution.permissionMode ? { permissionMode: "explicit" as const } : {}),
+          },
+        }
+      : {}),
+    ...(snapshot.plugins?.ids.length
+      ? {
+          instructionPluginIds: [...snapshot.plugins.ids],
+          ...(snapshot.plugins.toolNames.length
+            ? { dynamicToolNames: [...snapshot.plugins.toolNames], allowBridgeToolProxy: true }
+            : {}),
         }
       : {}),
   });

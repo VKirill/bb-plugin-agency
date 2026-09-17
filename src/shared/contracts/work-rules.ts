@@ -19,6 +19,8 @@ export const workRulesSchema = z
     minorDefectsWithoutRound: z.boolean(),
     /** An executor's hand-in creates and queues an independent review subtask by itself. */
     autoReview: z.boolean(),
+    /** Launches run with full permissions and without the CLI sandbox. Off by default. */
+    runWithoutSandbox: z.boolean(),
     watchQuietMinutes: z.number().int().min(1).max(240),
     watchStallMinutes: z.number().int().min(2).max(720),
     watchStartMinutes: z.number().int().min(1).max(120),
@@ -49,6 +51,7 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   reworkLimit: 3,
   minorDefectsWithoutRound: false,
   autoReview: false,
+  runWithoutSandbox: false,
   watchQuietMinutes: 10,
   watchStallMinutes: 30,
   watchStartMinutes: 10,
@@ -73,6 +76,7 @@ export const INHERITED_RULE_KEYS = [
   "reworkLimit",
   "minorDefectsWithoutRound",
   "autoReview",
+  "runWithoutSandbox",
   "watchQuietMinutes",
   "watchStallMinutes",
   "watchStartMinutes",
@@ -83,6 +87,9 @@ export const INHERITED_RULE_KEYS = [
   "escalateAfterHours",
   "budgetWarnPercent",
 ] as const satisfies readonly WorkRuleKey[];
+
+/** Inherited keys an employee may override for their own launches. */
+export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox"] as const satisfies readonly WorkRuleKey[];
 
 /** Limits of the scope itself. */
 export const LIMIT_RULE_KEYS = ["budgetMonthlyUsd", "concurrencyLimit"] as const satisfies readonly WorkRuleKey[];
@@ -107,7 +114,7 @@ export type WorkRulesScope = z.infer<typeof workRulesScopeSchema>;
 export function allowedRuleKeys(scope: string): readonly WorkRuleKey[] {
   if (scope === "agency") return [...INHERITED_RULE_KEYS, ...LIMIT_RULE_KEYS, ...AGENCY_ONLY_RULE_KEYS];
   if (scope.startsWith("department:")) return [...INHERITED_RULE_KEYS, ...LIMIT_RULE_KEYS];
-  return [...LIMIT_RULE_KEYS];
+  return [...LIMIT_RULE_KEYS, ...AGENT_OVERRIDE_RULE_KEYS];
 }
 
 export const storedWorkRulesSchema = workRulesSchema.partial().strict();

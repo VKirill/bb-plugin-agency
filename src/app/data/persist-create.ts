@@ -177,11 +177,21 @@ export function policyVersionIdForCreate(policyId: string): string {
 }
 
 /** Folders already connected are left out; a disconnected one is marked, because it is restored rather than connected again. */
+/** Without Projects & Sections a BB project connects one folder: its other folders are not offered. */
+export function projectHasActiveFolder(
+  projectId: string,
+  bindings: readonly { bbProjectId?: string; archivedAt?: string }[],
+): boolean {
+  return bindings.some((binding) => !binding.archivedAt && binding.bbProjectId === projectId);
+}
+
 export function catalogEnvironmentOptions(
   catalog: BbCatalog,
   projectId: string,
-  bindings: readonly { environmentId?: string; root?: string; archivedAt?: string }[] = [],
+  bindings: readonly { environmentId?: string; root?: string; archivedAt?: string; bbProjectId?: string }[] = [],
+  oneFolderPerProject = false,
 ) {
+  if (oneFolderPerProject && projectHasActiveFolder(projectId, bindings)) return [];
   return catalog.environments
     .filter((item) => item.projectId === projectId)
     .filter((item) => !bindings.some((binding) => !binding.archivedAt && binding.environmentId === item.id && binding.root === item.path))

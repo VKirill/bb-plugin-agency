@@ -489,3 +489,54 @@ describe("runLauncherAdapter contract", () => {
     ).rejects.toMatchObject({ code: "run_launcher_not_implemented" });
   });
 });
+
+describe("compileContextSnapshot plugins", () => {
+  const withPlugin = { ...agentVersion, pluginIds: ["file-gateway"] };
+
+  it("keeps snapshots without plugins unchanged", () => {
+    const snapshot = compileOk();
+    expect(snapshot.plugins).toBeUndefined();
+    expect(snapshot.prompt.levels.agent).not.toContain("BB plugins for this launch");
+  });
+
+  it("delivers a selected plugin's tools and skills and names them in the agent layer", () => {
+    const snapshot = compileOk(
+      baseInput({
+        agentVersion: withPlugin,
+        pluginGrants: [{ pluginId: "file-gateway", toolNames: ["bb_file_gateway"], skillIds: [EXTRA_SKILL] }],
+      }),
+    );
+    expect(snapshot.plugins).toEqual({ ids: ["file-gateway"], toolNames: ["bb_file_gateway"] });
+    expect(snapshot.selectedSkills.map((skill) => skill.id)).toContain(EXTRA_SKILL);
+    expect(snapshot.prompt.levels.agent).toContain("BB plugins for this launch: file-gateway. Allowed tools: bb_file_gateway.");
+    expect(snapshot.digest).not.toBe(compileOk(baseInput({ agentVersion: withPlugin })).digest);
+  });
+
+  it("refuses a plugin the profile does not select", () => {
+    const result = compileContextSnapshot(
+      baseInput({ pluginGrants: [{ pluginId: "env-catalog", toolNames: ["env_get"], skillIds: [] }] }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("plugin_not_selected");
+  });
+});
+
+describe("compileContextSnapshot placement", () => {
+  it("writes other folders, workplaces and the main job's folder into the job layer", () => {
+    const plain = compileOk();
+    expect(plain.prompt.levels.job).not.toContain("Other folders of this project");
+    const snapshot = compileOk(
+      baseInput({
+        placement: {
+          projectFolders: [{ bindingId: "bnd_mini0001", hostId: "host_mini", root: "/Users/me/site" }],
+          workplaces: [{ agentId: "agt_tester01", name: "Тестировщик", bindingId: "bnd_desk0001", hostId: "host_mini", root: "/Users/me/desk" }],
+          parentFolder: { jobKey: "AG-10", bindingId: "bnd_ovh00001", hostId: "host_ovh", root: "/home/app" },
+        },
+      }),
+    );
+    expect(snapshot.prompt.levels.job).toContain("folder bindingId=bnd_mini0001 host=host_mini root=/Users/me/site");
+    expect(snapshot.prompt.levels.job).toContain("workplace Тестировщик agent=agt_tester01 bindingId=bnd_desk0001");
+    expect(snapshot.prompt.levels.job).toContain("Main job AG-10 lives in another folder: bindingId=bnd_ovh00001 host=host_ovh root=/home/app.");
+    expect(snapshot.digest).not.toBe(plain.digest);
+  });
+});
