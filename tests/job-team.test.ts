@@ -111,7 +111,7 @@ async function seed() {
     bbProjectId: "proj_trusted",
     environmentId: "env_ucx7sb57rs",
     hostId: "host_mini",
-    canonicalRoot: "/Users/vechkasov/Documents/SelfyStudio",
+    canonicalRoot: "/work/SelfyStudio",
     policyVersionId: policy.value.id,
     sectionId: null,
   });

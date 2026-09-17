@@ -29,7 +29,7 @@ const binding: ProjectBinding = {
   bbProjectId: "proj_trusted",
   environmentId: "env_ucx7sb57rs",
   hostId: "host_mini",
-  canonicalRoot: "/Users/vechkasov/Documents/SelfyStudio",
+  canonicalRoot: "/work/SelfyStudio",
   policyVersionId: "pol_bind0001",
   sectionId: null,
   revision: 2,

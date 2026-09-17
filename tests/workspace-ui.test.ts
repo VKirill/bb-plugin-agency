@@ -380,12 +380,12 @@ describe("workspace view models", () => {
     expect(environmentPlacementLabel({
       label: "локально",
       hostName: "Mac mini",
-      path: "/Users/vechkasov/Documents/SelfyStudio",
+      path: "/work/SelfyStudio",
     })).toBe("локально · SelfyStudio · Mac mini");
     expect(environmentPlacementLabel({
       label: "локально",
       hostName: "Mac mini",
-      path: "/Users/vechkasov/Documents/SelfyStudio",
+      path: "/work/SelfyStudio",
     })).not.toMatch(/host_/);
     expect(environmentPlacementLabel({
       label: "SelfyStudio · OVH Server",
@@ -412,13 +412,13 @@ describe("workspace view models", () => {
     const plugins = bindingPlacementLabel({
       bbProjectName: "BB-сервис",
       bbProjectId: "proj_ejbam66722",
-      canonicalRoot: "/Users/vechkasov/Documents/BB-сервис/plugins",
+      canonicalRoot: "/work/BB-сервис/plugins",
       hostName: "MAC Mini",
     });
     const root = bindingPlacementLabel({
       bbProjectName: "BB-сервис",
       bbProjectId: "proj_ejbam66722",
-      canonicalRoot: "/Users/vechkasov/Documents/BB-сервис",
+      canonicalRoot: "/work/BB-сервис",
       hostName: "MAC Mini",
     });
     expect(plugins).toBe("BB-сервис · plugins · MAC Mini");
@@ -429,8 +429,8 @@ describe("workspace view models", () => {
     const mapped = mapProjects({
       ...snapshot,
       bindings: [
-        { ...snapshot.bindings[0]!, bbProjectName: "BB-сервис", canonicalRoot: "/Users/vechkasov/Documents/BB-сервис/plugins", hostName: "MAC Mini" },
-        { ...snapshot.bindings[0]!, id: "bnd_root0001", bbProjectName: "BB-сервис", canonicalRoot: "/Users/vechkasov/Documents/BB-сервис", hostName: "MAC Mini" },
+        { ...snapshot.bindings[0]!, bbProjectName: "BB-сервис", canonicalRoot: "/work/BB-сервис/plugins", hostName: "MAC Mini" },
+        { ...snapshot.bindings[0]!, id: "bnd_root0001", bbProjectName: "BB-сервис", canonicalRoot: "/work/BB-сервис", hostName: "MAC Mini" },
       ],
     });
     expect(mapped.map((item) => item.name)).toEqual([

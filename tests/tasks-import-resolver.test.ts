@@ -24,7 +24,7 @@ const PROCESS_ID = "prc_ffffffffffff";
 const AGENT_VERSION = "avr_111111111111";
 const BATCH_ID = "3d5c9a10-2b7e-4f11-8c4a-9e0d1b2a3c4d";
 const HOST_ID = "host_7sea4qaad8";
-const ROOT = "/Users/vechkasov/Documents/BB-сервис";
+const ROOT = "/work/bb-service";
 const BB_PROJECT = "proj_ejbam66722";
 const STAMP = "2026-09-14T10:00:00.000Z";
 

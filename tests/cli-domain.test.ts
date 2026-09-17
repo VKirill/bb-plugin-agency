@@ -12,7 +12,7 @@ import { helpText } from "../src/server/cli/schema-help";
 import { FILE_SOURCE_REQUIRED } from "../src/server/cli/payload";
 import { redactCliValue } from "../src/server/cli/format";
 
-const ROOT = "/Users/vechkasov/Documents/SelfyStudio";
+const ROOT = "/work/SelfyStudio";
 
 type DomainEnvelope<T = unknown> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 

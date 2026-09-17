@@ -78,7 +78,7 @@ const binding: ProjectBinding = {
   bbProjectId: "proj_trusted",
   environmentId: "env_ucx7sb57rs",
   hostId: "host_mini",
-  canonicalRoot: "/Users/vechkasov/Documents/SelfyStudio",
+  canonicalRoot: "/work/SelfyStudio",
   policyVersionId: "pol_00000001",
   sectionId: null,
   revision: 2,
@@ -116,7 +116,7 @@ const createBindingCommand = {
   bbProjectId: "proj_trusted",
   environmentId: "custom-environment",
   hostId: "host_mini",
-  canonicalRoot: "/Users/vechkasov/Documents/SelfyStudio",
+  canonicalRoot: "/work/SelfyStudio",
   policyVersionId: "pol_00000001",
   sectionId: null,
 };

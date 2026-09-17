@@ -41,8 +41,10 @@ const AGENCY_SKILL =
   "skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff" as CatalogSkillId;
 const HELPER_SKILL = `skill_${createHash("sha256").update("agency-artifacts").digest("hex")}` as CatalogSkillId;
 const DECOY_SKILL = `skill_${createHash("sha256").update("decoy-agency-name").digest("hex")}` as CatalogSkillId;
-const ROOT_AGENTS = readFileSync("/Users/vechkasov/Documents/BB-сервис/AGENTS.md", "utf8");
-const PLUGINS_AGENTS = readFileSync("/Users/vechkasov/Documents/BB-сервис/plugins/.bb/AGENTS.md", "utf8");
+// Real project rules, copied into the repo: the test must run on any checkout, not only ours.
+const FIXTURES = join(import.meta.dirname, "fixtures");
+const ROOT_AGENTS = readFileSync(join(FIXTURES, "agents-root.md"), "utf8");
+const PLUGINS_AGENTS = readFileSync(join(FIXTURES, "agents-plugins.md"), "utf8");
 
 const CATALOG_ROLES: ExplicitCatalogRoles = {
   core: { id: AGENCY_SKILL, source: "plugin:agency" },
@@ -327,7 +329,7 @@ describe("prepare-run", () => {
   });
 
   it("does not treat backticks or <filename>.meta.json examples as package references", async () => {
-    const canonical = readFileSync("/Users/vechkasov/Projects/bb-toolkit/skills/agency-artifacts/SKILL.md", "utf8");
+    const canonical = readFileSync(join(FIXTURES, "agency-artifacts-skill.md"), "utf8");
     expect(canonical).toContain("`<filename>.meta.json`");
     expect(referencedSkillPaths(canonical)).toEqual(["assets/metadata.schema.json", "references/standard.md"]);
     expect(referencedSkillPaths("# See `ghost.json` and `<filename>.meta.json`")).toEqual([]);

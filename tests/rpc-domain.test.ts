@@ -15,8 +15,8 @@ import { rpcContract } from "../src/shared/rpc-contract";
 import { artifactVersionSchema } from "../src/shared/contracts";
 
 const signal = { projectId: "proj_test", eventId: "research-1", topic: "research.delivered", reference: "artifact-1" };
-const ROOT = "/Users/vechkasov/Documents/SelfyStudio";
-const OTHER_ROOT = "/Users/vechkasov/Documents/OtherStudio";
+const ROOT = "/work/SelfyStudio";
+const OTHER_ROOT = "/work/OtherStudio";
 
 function requestId() {
   return randomUUID();

@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 const AGENCY_SKILL =
   "skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff" as CatalogSkillId;
 const HELPER_SKILL = `skill_${createHash("sha256").update("agency-artifacts").digest("hex")}` as CatalogSkillId;
-const PLUGINS_AGENTS = readFileSync("/Users/vechkasov/Documents/BB-сервис/plugins/.bb/AGENTS.md", "utf8");
+const PLUGINS_AGENTS = readFileSync(join(import.meta.dirname, "fixtures", "agents-plugins.md"), "utf8");
 
 const tempDirs: string[] = [];
 

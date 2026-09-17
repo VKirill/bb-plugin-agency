@@ -88,7 +88,7 @@ async function seedProject(db: SqlDatabase, options?: { canonicalRoot?: string }
     bbProjectId: "proj_trusted",
     environmentId: "env_ucx7sb57rs",
     hostId: "host_mini",
-    canonicalRoot: options?.canonicalRoot ?? "/Users/vechkasov/Documents/SelfyStudio",
+    canonicalRoot: options?.canonicalRoot ?? "/work/SelfyStudio",
     policyVersionId: policy.value.id,
     sectionId: null,
   });
@@ -136,7 +136,7 @@ function reservation(
     jobId,
     bindingId,
     hostId: extra.hostId ?? "host_mini",
-    canonicalRoot: extra.canonicalRoot ?? "/Users/vechkasov/Documents/SelfyStudio",
+    canonicalRoot: extra.canonicalRoot ?? "/work/SelfyStudio",
     bindingRevision: extra.bindingRevision ?? 1,
     relativePath: extra.relativePath ?? "card.md",
     mime: extra.mime ?? "text/markdown",
@@ -204,7 +204,7 @@ describe("agency domain storage", () => {
           bbProjectId: "proj_other",
           environmentId: "env_other0001",
           hostId: "host_mini",
-          canonicalRoot: "/Users/vechkasov/Documents/Other",
+          canonicalRoot: "/work/Other",
           policyVersionId: seeded.policy.id,
           sectionId: null,
         },
@@ -296,7 +296,7 @@ describe("agency domain storage", () => {
           bbProjectId: "proj_other",
           environmentId: "env_other01aaaa",
           hostId: "host_mini",
-          canonicalRoot: "/Users/vechkasov/Documents/OtherStudio",
+          canonicalRoot: "/work/OtherStudio",
           policyVersionId: seeded.policy.id,
           sectionId: null,
         },
@@ -492,7 +492,7 @@ describe("agency domain storage", () => {
       expect(pending.value.version).toBe(1);
       expect(pending.value.state).toBe("pending");
       expect(pending.value.hostId).toBe("host_mini");
-      expect(pending.value.canonicalRoot).toBe("/Users/vechkasov/Documents/SelfyStudio");
+      expect(pending.value.canonicalRoot).toBe("/work/SelfyStudio");
       expect(pending.value.bindingRevision).toBe(1);
       const version = {
         artifactId: artifact.value.id,
@@ -583,7 +583,7 @@ describe("agency domain storage", () => {
           bbProjectId: "proj_scope2",
           environmentId: "env_scope0002",
           hostId: "host_mini",
-          canonicalRoot: "/Users/vechkasov/Documents/OtherScope",
+          canonicalRoot: "/work/OtherScope",
           policyVersionId: seeded.policy.id,
           sectionId: null,
         },
