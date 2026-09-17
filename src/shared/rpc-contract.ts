@@ -701,6 +701,8 @@ export const installedPluginSchema = z
     running: z.boolean(),
     toolNames: z.array(z.string()),
     hasSkill: z.boolean(),
+    /** The plugin adds a section to thread instructions (read from its server bundle). */
+    hasInstructions: z.boolean().optional(),
     cliCommand: z.string().nullable(),
   })
   .strict();

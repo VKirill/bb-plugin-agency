@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { fail, ok, type DomainResult } from "../../domain";
-import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, type TemplateKey } from "../../shared/templates";
+import { defaultTemplates, TEMPLATE_KEYS, type TemplateKey } from "../../shared/templates";
+import { agencyLanguage } from "../i18n/language";
 import type { SqlDatabase } from "../db/sql";
 import { charterAccepts } from "../delegation/instructions";
 
@@ -32,12 +33,14 @@ export const AGENCY_RULES_MIGRATION = `CREATE TABLE agency_rules_version (
 
 export type TemplateView = { key: TemplateKey; text: string; custom: boolean; revision: number };
 
-export function listTemplates(db: SqlDatabase): TemplateView[] {
+/** Templates with the standard texts in the Agency language where the owner kept the standard. */
+export function listTemplates(db: SqlDatabase, language = agencyLanguage()): TemplateView[] {
+  const standard = defaultTemplates(language);
   const rows = db.prepare(`SELECT key, text, revision FROM agency_template`).all() as { key: string; text: string; revision: number }[];
   const byKey = new Map(rows.map((row) => [row.key, row]));
   return TEMPLATE_KEYS.map((key) => {
     const row = byKey.get(key);
-    return row ? { key, text: row.text, custom: true, revision: row.revision } : { key, text: DEFAULT_TEMPLATES[key], custom: false, revision: 0 };
+    return row ? { key, text: row.text, custom: true, revision: row.revision } : { key, text: standard[key], custom: false, revision: 0 };
   });
 }
 
@@ -53,12 +56,16 @@ export function saveTemplate(
   }
   if (input.text === null) {
     db.prepare(`DELETE FROM agency_template WHERE key = ?`).run(input.key);
-    return ok({ key: input.key, text: DEFAULT_TEMPLATES[input.key], custom: false, revision: 0 });
+    return ok({ key: input.key, text: defaultTemplates(agencyLanguage())[input.key], custom: false, revision: 0 });
   }
   const text = input.text.trim();
-  if (!text) return fail("template_empty", "Шаблон не может быть пустым: сбросьте его к стандартному.");
+  const en = agencyLanguage() === "en";
+  if (!text) return fail("template_empty", en ? "A template cannot be empty: reset it to the standard one." : "Шаблон не может быть пустым: сбросьте его к стандартному.");
   if (input.key === "charter" && !charterAccepts(text)) {
-    return fail("template_invalid", "В шаблоне регламента нужен раздел «## Принимаем»: по нему агенты выбирают отдел.");
+    return fail(
+      "template_invalid",
+      en ? "The charter template needs an «## Accepts» section: agents choose the department by it." : "В шаблоне регламента нужен раздел «## Принимаем»: по нему агенты выбирают отдел.",
+    );
   }
   const revision = current.revision + 1;
   db.prepare(

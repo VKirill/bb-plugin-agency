@@ -62,6 +62,9 @@ type Record = {
   blocked_at: string | null;
 };
 
+/** Messages into an employee thread are English like the launch prompt; the Language line sets the reply language. */
+export const AGENT_MESSAGE_LANGUAGE: AgencyLanguage = "en";
+
 export function completionReminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage = agencyLanguage(), limit: number = COMPLETION_REMINDER_LIMIT): string {
   const COMPLETION_REMINDER_LIMIT = limit;
   if (lang === "en") {
@@ -178,8 +181,8 @@ export async function remindIncompleteWorker(
   const count = current.count + 1;
   const text =
     reading.missing === "comment"
-      ? handInCommentReminderText(job.key, attempt.id, count, agencyLanguage(), limit)
-      : completionReminderText(job.key, attempt.id, count, agencyLanguage(), limit);
+      ? handInCommentReminderText(job.key, attempt.id, count, AGENT_MESSAGE_LANGUAGE, limit)
+      : completionReminderText(job.key, attempt.id, count, AGENT_MESSAGE_LANGUAGE, limit);
   const outcome = await ports.send(row.threadId, text);
   if (outcome.kind === "rejected") return "skipped";
   upsert(ports.db, { ...current, count, idle_since: null, awaiting_turn: 1, last_sent_at: now }, now);

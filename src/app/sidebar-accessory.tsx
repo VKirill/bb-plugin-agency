@@ -5,7 +5,7 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../shared/rpc-contract";
-import { tr } from "./i18n";
+import { ruSkipProps, tr } from "./i18n";
 
 export const EXECUTING_ACTIVITY_POLL_MS = 5_000;
 
@@ -73,7 +73,7 @@ export function AgencySidebarAccessory() {
   if (count === null || count === 0) return null;
   const label = inProgressLabel(count);
   return (
-    <span className="text-muted-foreground tabular-nums" title={label} aria-label={label}>
+    <span {...ruSkipProps()} className="text-muted-foreground tabular-nums" title={label} aria-label={label}>
       {count}
     </span>
   );

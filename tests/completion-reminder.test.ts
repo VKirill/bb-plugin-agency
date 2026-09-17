@@ -67,10 +67,10 @@ describe("completion reminder", () => {
     expect(await remindIncompleteWorker(h.ports, h.row, idle)).toBe("waiting");
     h.tick(COMPLETION_REMINDER_IDLE_MS);
     expect(await remindIncompleteWorker(h.ports, h.row, idle)).toBe("sent");
-    expect(h.sent[0]).toContain("AG-501 не сдано");
+    expect(h.sent[0]).toContain("job AG-501 is not handed in");
     expect(h.sent[0]).toContain(".agency/jobs/AG-501/report.md");
     expect(h.sent[0]).toContain("bb agency job comment");
-    expect(h.sent[0]).toContain("напоминание 1 из 2");
+    expect(h.sent[0]).toContain("reminder 1 of 2");
 
     // Still idle right after the reminder: no second message until the worker takes a turn.
     h.tick(30_000);

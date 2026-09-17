@@ -333,7 +333,7 @@ export async function flushParentWakes(deps: {
       if (item.sendNow) {
         outcome = await deps.send.send({
           threadId: row.parent_thread_id,
-          text: formatParentWakeText({ key: row.child_key, state: row.child_state }, row.activity_id),
+          text: formatParentWakeText({ key: row.child_key, state: row.child_state }, row.activity_id, "en"),
         });
       } else {
         const presence = await deps.send.recoverContinuation(

@@ -11,6 +11,7 @@ const plugins = [
   { id: "file-gateway", name: "File Gateway", description: null, version: "1", running: true, toolNames: ["bb_file_gateway"], hasSkill: true, cliCommand: "file-gateway" },
   { id: "provider-codex", name: "Codex", description: null, version: "1", running: true, toolNames: [], hasSkill: false, cliCommand: null },
   { id: "voice-input", name: "Voice", description: null, version: "1", running: false, toolNames: [], hasSkill: true, cliCommand: null },
+  { id: "office-viewer", name: "Office Viewer", description: null, version: "1", running: true, toolNames: [], hasSkill: false, hasInstructions: false, cliCommand: null },
 ];
 const rpc = { call: async (method: string) => (method === "listPlugins" ? { ok: true, value: { plugins, features: { projectFolders: true, fileGateway: true } } } : { ok: true, value: null }) };
 vi.mock("@get-bb/plugin-sdk/app", () => ({ useRpc: () => rpc }));
@@ -38,7 +39,9 @@ describe("employee plugins tab", () => {
     };
     await render([]);
     expect(container.textContent).toContain("File Gateway");
-    expect(container.textContent).toContain("инструменты: bb_file_gateway");
+    expect(container.querySelector('[data-testid="plugin-tags-file-gateway"]')?.textContent).toBe("навыкинструментыbb_file_gatewaybb file-gateway");
+    expect(container.textContent).toContain("Навыки · 2");
+    expect(container.textContent).toContain("Не показаны плагины, которые меняют только интерфейс BB");
     expect(container.textContent).not.toContain("Codex");
     const box = container.querySelector('[aria-label="File Gateway"]') as HTMLElement;
     await act(async () => box.click());

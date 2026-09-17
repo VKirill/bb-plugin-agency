@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AgencyApi } from "../data/agency-api";
-import { DEFAULT_TEMPLATES, type TemplateKey } from "../../shared/templates";
+import { defaultTemplates, type TemplateKey } from "../../shared/templates";
+import { uiLanguage } from "../i18n";
 
 type TemplatesState = { templates: Record<TemplateKey, string>; reload: () => void };
 
-const TemplatesContext = createContext<TemplatesState>({ templates: DEFAULT_TEMPLATES, reload: () => undefined });
+const TemplatesContext = createContext<TemplatesState | null>(null);
 
 /**
  * Loads the owner's form templates («Настройки → Шаблоны») once for the whole
@@ -12,14 +13,14 @@ const TemplatesContext = createContext<TemplatesState>({ templates: DEFAULT_TEMP
  * the standard texts apply.
  */
 export function TemplatesProvider({ api, enabled, children }: { api: Pick<AgencyApi, "listTemplates">; enabled: boolean; children: ReactNode }) {
-  const [templates, setTemplates] = useState<Record<TemplateKey, string>>(DEFAULT_TEMPLATES);
+  const [templates, setTemplates] = useState<Record<TemplateKey, string>>(() => defaultTemplates(uiLanguage()));
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     void api.listTemplates().then(
       (result) => {
-        if (live && result.ok) setTemplates({ ...DEFAULT_TEMPLATES, ...Object.fromEntries(result.value.map((row) => [row.key, row.text])) });
+        if (live && result.ok) setTemplates({ ...defaultTemplates(uiLanguage()), ...Object.fromEntries(result.value.map((row) => [row.key, row.text])) });
       },
       () => undefined,
     );
@@ -33,9 +34,11 @@ export function TemplatesProvider({ api, enabled, children }: { api: Pick<Agency
 }
 
 export function useTemplates(): Record<TemplateKey, string> {
-  return useContext(TemplatesContext).templates;
+  return useContext(TemplatesContext)?.templates ?? defaultTemplates(uiLanguage());
 }
 
 export function useReloadTemplates(): () => void {
-  return useContext(TemplatesContext).reload;
+  return useContext(TemplatesContext)?.reload ?? noop;
 }
+
+const noop = () => undefined;

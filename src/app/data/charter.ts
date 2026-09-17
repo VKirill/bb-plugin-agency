@@ -45,6 +45,12 @@ const TEMPLATE_LINES = [
   "- Материал, доступ или решение владельца.",
   "2. Этап — роль, выход.",
   "Когда решение вне полномочий отдела.",
+  "What result the department delivers to the company.",
+  "- Type of job: signs, example.",
+  '- Type of job → department "…".',
+  "- Material, access or the owner's decision.",
+  "2. Stage — role, output.",
+  "When a decision is outside the department's authority.",
 ];
 
 /** What stops chat routing from understanding the department: missing «Принимаем», template lines left as is. */

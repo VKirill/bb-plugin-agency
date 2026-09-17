@@ -32,9 +32,30 @@ const listed = {
 describe("plugin directory", () => {
   it("maps tools, skills, command and running state", () => {
     const view = toPluginView(listed.plugins[0]);
-    expect(view).toEqual({ id: "file-gateway", name: "File Gateway", description: null, version: "0.1.0", running: true, toolNames: ["bb_file_gateway"], hasSkill: true, cliCommand: "file-gateway" });
+    expect(view).toEqual({ id: "file-gateway", name: "File Gateway", description: null, version: "0.1.0", running: true, toolNames: ["bb_file_gateway"], hasSkill: true, hasInstructions: false, cliCommand: "file-gateway" });
     expect(toPluginView(listed.plugins[1]).running).toBe(false);
-    expect(listed.plugins.map(toPluginView).filter((plugin) => isEmployeePluginCandidate(plugin)).map((plugin) => plugin.id)).toEqual(["file-gateway", "env-catalog"]);
+    expect(listed.plugins.map((plugin) => toPluginView(plugin)).filter((plugin) => isEmployeePluginCandidate(plugin)).map((plugin) => plugin.id)).toEqual(["file-gateway", "env-catalog"]);
+  });
+
+  it("reads thread instructions from the server bundle and offers instruction-only plugins", async () => {
+    const { bundleAddsInstructions, createInstructionDetector } = await import("../src/server/integrations/plugin-directory");
+    expect(bundleAddsInstructions("bb.agents.contributeInstructions(() => null)")).toBe(true);
+    expect(bundleAddsInstructions("e.agents.configure(t => ({ tools: [], skills: [], instructions: 'x' }))")).toBe(true);
+    expect(bundleAddsInstructions("e.agents.configure(t => ({ tools: [], skills: ['a'] }))")).toBe(false);
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "agency-plugin-"));
+    mkdirSync(join(root, "dist"));
+    writeFileSync(join(root, "dist", "server.js"), "bb.agents.contributeInstructions(() => 'Use me')");
+    const detect = createInstructionDetector();
+    expect(detect(root)).toBe(true);
+    expect(detect(join(root, "missing"))).toBe(false);
+    const viewer = toPluginView({ id: "office-viewer", name: "Office Viewer", version: "1", status: "running", enabled: true, capabilities: [], cliCommand: null });
+    expect(isEmployeePluginCandidate(viewer)).toBe(false);
+    const guide = toPluginView({ id: "custom-instructions", name: "Custom instructions", version: "1", status: "running", enabled: true, capabilities: [], cliCommand: null, rootDir: root }, detect);
+    expect(guide.hasInstructions).toBe(true);
+    expect(isEmployeePluginCandidate(guide)).toBe(true);
   });
 
   it("caches the list and answers synchronously after the first read", async () => {

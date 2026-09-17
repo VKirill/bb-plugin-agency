@@ -185,7 +185,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   let outcome: IsolatedSendOutcome | { kind: "recovered" };
   if (row.send_state === "pending") {
     try {
-      outcome = await deps.send.send({ threadId: row.thread_id, text: reworkText(job.key, row.comment, row.returned_hash, row.request_id) });
+      outcome = await deps.send.send({ threadId: row.thread_id, text: reworkText(job.key, row.comment, row.returned_hash, row.request_id, "en") });
     } catch {
       outcome = { kind: "unknown", code: "send_transport", message: "send failed" };
     }

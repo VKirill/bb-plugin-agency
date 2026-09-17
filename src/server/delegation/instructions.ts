@@ -333,8 +333,8 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "4. Check each subtask against its acceptance criteria. A defect means a rework subtask and another independent review, not a fix by your own hands. Accept (`bb agency artifact accept`) only versions of subtasks you assigned; the server blocks accepting your own work.",
       ...leadRuleLines(worker.rules),
       "5. Finish with a summary report .agency/jobs/<main job key>/report.md published as a version and a final job comment. Do not accept your own result: acceptance belongs to the owner. Comments are Markdown: first line the outcome, details as a list, no run_/thr_/job_ ids unless needed.",
-      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not take it. `bb agency job comment` \"Возврат: why it is not ours; which department fits\", then `bb agency job transition` to blocked.",
-      "A subtask returned to you as blocked with \"Возврат\": reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
+      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not take it. `bb agency job comment` \"Return: why it is not ours; which department fits\", then `bb agency job transition` to blocked.",
+      "A subtask returned to you as blocked with \"Return\" (or \"Возврат\"): reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
       workLanguageLine(),
     ];
     return fit(head, list, tail);
@@ -356,7 +356,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "- Review the input versions of this job (`bb agency job get` → inputs, then `bb agency artifact open` with the hash), not working files on trust. No input version or no criteria: return it to the lead.",
       "- Do not edit the reviewed result. Describe defects (criterion → place → how to reproduce → severity: blocking / important / minor); the executor fixes them.",
       ...(worker.rules?.minorDefectsWithoutRound ? ["- In this department minor defects do not open a new round: the verdict is \"accept with remarks\" when only minor defects remain."] : []),
-      "- The job turns out to be a review of your own work, or an implementation: do not take it. `bb agency job comment` \"Возврат: reason\", then `bb agency job transition` to blocked and end your turn.",
+      "- The job turns out to be a review of your own work, or an implementation: do not take it. `bb agency job comment` \"Return: reason\", then `bb agency job transition` to blocked and end your turn.",
       "- Hand in: verdict report .agency/jobs/<key>/report.md (verdict, criteria table, defects, commands and output) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` with the verdict → end your turn. Do not accept the result: the lead or the owner decides.",
       ...common,
     ].join("\n");
@@ -364,7 +364,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
   return [
     `## Your role: executor of ${worker.jobKey}`,
     `Job "${worker.title}" of the "${worker.departmentName}" department. Do the work yourself within the brief.`,
-    "- First compare the job with your job description. Not your kind of work, or required inputs are missing: do not start. `bb agency job comment` \"Возврат: reason; who fits; what is missing\", then `bb agency job transition` to blocked and end your turn. The lead is notified.",
+    "- First compare the job with your job description. Not your kind of work, or required inputs are missing: do not start. `bb agency job comment` \"Return: reason; who fits; what is missing\", then `bb agency job transition` to blocked and end your turn. The lead is notified.",
     "- Hand in: report .agency/jobs/<key>/report.md (outcome, what was done and where, how it was checked, what was not done) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` for the lead with a link to the version → end your turn. Saying \"done\" is not acceptance.",
     ...common,
   ].join("\n");

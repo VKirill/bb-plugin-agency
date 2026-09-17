@@ -41,7 +41,7 @@ import { receiveNotification } from "./triggers/notify";
 import { STATUS_REQUIRES_READINESS_REASON } from "../shared/schemas";
 import { machineDirectory } from "./runtime/machines";
 import { telegramAdapter } from "./triggers/telegram";
-import { createPluginDirectory, FILE_GATEWAY_PLUGIN_ID, PROJECT_FOLDERS_PLUGIN_ID } from "./integrations/plugin-directory";
+import { createInstructionDetector, createPluginDirectory, FILE_GATEWAY_PLUGIN_ID, PROJECT_FOLDERS_PLUGIN_ID } from "./integrations/plugin-directory";
 import { documentHostContract } from "../shared/document-contract";
 import { createDomainStore } from "./services";
 import { createDomainRpc } from "./api/domain-rpc";
@@ -95,7 +95,7 @@ export function registerAgency(bb: BbPluginApi) {
   const machines=machineDirectory(bb);
   const db = openDatabase(bb);
   const inbox = createInbox(db);
-  const plugins = createPluginDirectory({ listPlugins: () => bb.sdk.plugins.list() });
+  const plugins = createPluginDirectory({ listPlugins: () => bb.sdk.plugins.list(), addsInstructions: createInstructionDetector() });
   // Rules ask synchronously; the cache is filled at start and refreshed by the dispatcher loop.
   void plugins.list().catch(() => undefined);
   const store = createDomainStore(db, {

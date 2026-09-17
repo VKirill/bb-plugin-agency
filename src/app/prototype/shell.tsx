@@ -1,7 +1,7 @@
 import { GoalsPage } from "./goals";
 import { useArchivedJobs } from "./use-archived-job";
 import { KnowledgeLivePage } from "./knowledge-live";
-import { setUiLanguage, tr, uiLanguage, type UiLanguage } from "../i18n";
+import { rememberUiLanguage, ruSkipProps, setUiLanguage, tr, uiLanguage, type UiLanguage } from "../i18n";
 import { AGENCY_LANGUAGE_EVENT } from "./agency-language";
 import { TemplatesProvider } from "./use-templates";
 import { policySummary } from "../data/role-types";
@@ -46,7 +46,7 @@ export function AgencyPrototype(props: PluginNavPanelProps) {
  const [language,setLanguage]=useState<UiLanguage>(uiLanguage());
  useEffect(()=>{
   let live=true;
-  const load=()=>{void Promise.resolve(rpc.call("agencyLanguage",null)).then((value)=>{if(!live)return;const next=(value as {language:UiLanguage}).language==="en"?"en":"ru";setUiLanguage(next);setLanguage(next);},()=>undefined);};
+  const load=()=>{void Promise.resolve(rpc.call("agencyLanguage",null)).then((value)=>{if(!live)return;const next=(value as {language:UiLanguage}).language==="en"?"en":"ru";setUiLanguage(next);rememberUiLanguage(next);setLanguage(next);},()=>undefined);};
   load();
   window.addEventListener(AGENCY_LANGUAGE_EVENT,load);
   return()=>{live=false;window.removeEventListener(AGENCY_LANGUAGE_EVENT,load);};
@@ -142,7 +142,7 @@ function AgencyShell({ subPath }: PluginNavPanelProps) {
  else if(section==="knowledge")page=demoMode?<KnowledgePage items={materials} setItems={setMaterials} scopes={[...projects.map(p=>p.name),...departments.map(d=>d.name)]} live={!demoMode} notice={workspace.setMessage}/>:<KnowledgeLivePage departments={departments.map(item=>({id:item.recordId??item.id,name:item.name}))} projects={projects.filter(item=>!item.archivedAt).map(item=>({id:item.recordId??item.id,name:item.name}))} notice={workspace.setMessage}/>;
  else if(section==="settings")page=<SettingsPage settings={settings} setSettings={setSettings} hosts={hosts} primaryHostId={primaryHostId} notice={workspace.setMessage} reset={()=>setResetOpen(true)} live={!demoMode}/>;
  else page=<Empty title="Страница не найдена" description="Выберите раздел в навигации."/>;
- return <TemplatesProvider api={dispatcherApi} enabled={!demoMode}><div className="flex h-full min-h-0 min-w-0 flex-col bg-background text-foreground">
+ return <TemplatesProvider api={dispatcherApi} enabled={!demoMode}><div {...ruSkipProps()} className="flex h-full min-h-0 min-w-0 flex-col bg-background text-foreground">
  <div className="flex min-h-0 min-w-0 flex-1"><nav aria-label={tr("Разделы агентства")} className="hidden w-40 shrink-0 flex-col border-r border-border lg:flex"><div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-2">{[{name:"Работа",keys:["jobs","inbox","goals"]},{name:"Команда",keys:["projects","departments","agents"]},{name:"Управление",keys:["automations","knowledge","runs","usage","settings"]}].map(group=><div key={group.name} className="pb-4"><p className="px-2 pb-2 pt-2 text-xs font-medium text-muted-foreground">{tr(group.name)}</p>{group.keys.map(key=>{const item=sections.find(s=>s[0]===key)!;return <button key={key} aria-current={section===key?"page":undefined} onClick={()=>go(key)} className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-muted ${section===key?"bg-muted font-medium":"text-muted-foreground"}`}><Icon name={item[2]} className="size-4"/>{tr(item[1])}{!demoMode&&PILOT_SECTIONS.has(key)&&<span title={tr("Раздел ещё не работает на данных: пример интерфейса")} className="ml-auto rounded border border-border px-1 text-[10px] leading-4 text-muted-foreground">{tr("пилот")}</span>}</button>;})}</div>)}</div>
  <details className="relative border-t border-border px-2 py-2"><summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground hover:bg-muted [&::-webkit-details-marker]:hidden"><Icon name="MoreHorizontal" className="size-4"/>{tr("Действия")}</summary><div className="absolute bottom-full left-2 right-2 z-20 mb-1 rounded-md border border-border bg-background shadow-md">{actions()}</div></details></nav>
  <div className="min-w-0 flex-1 overflow-y-auto"><div className="flex items-center gap-2 border-b border-border p-3 lg:hidden"><div className="min-w-0 flex-1"><Choice label="Раздел агентства" value={section} onChange={s=>go(s)} options={sections.map(([value,label])=>({value,label}))}/></div><details className="relative shrink-0"><summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-md hover:bg-muted [&::-webkit-details-marker]:hidden" aria-label={tr("Действия агентства")}><Icon name="MoreHorizontal" className="size-4"/></summary><div className="absolute right-0 z-20 mt-1 w-48 rounded-md border border-border bg-background shadow-md">{actions()}</div></details></div>

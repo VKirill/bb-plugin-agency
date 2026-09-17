@@ -108,3 +108,100 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
   brief: BRIEF_TEMPLATE,
   acceptance: ACCEPTANCE_TEMPLATE,
 };
+
+/**
+ * The same templates for an English-speaking Agency. Section headings keep their
+ * meaning: routing reads «## Accepts» the way it reads «## Принимаем».
+ */
+export const DEFAULT_TEMPLATES_EN: Record<TemplateKey, string> = {
+  charter: `## Purpose
+What result the department delivers to the company.
+
+## Accepts
+- Type of job: signs, example.
+
+## Does not accept
+- Type of job → department "…".
+
+## Inputs we need before starting
+- Material, access or the owner's decision.
+
+## Process
+1. The lead assesses the job: fit, inputs, size, risk.
+2. Stage — role, output.
+3. Review — a reviewer, not the executor.
+4. The lead assembles the result as a version of the main job.
+
+## On a defect
+A rework subtask and another review; after three rounds, a question to the owner.
+
+## Escalation to the owner
+When a decision is outside the department's authority.`,
+  jobDescriptionLead: `## Position
+Lead of the "…" department. Responsible for how the department's jobs are done, reviewed and wrapped up. Does not implement.
+
+## My work
+- Assessing incoming jobs: fit, inputs, size, risk.
+- Splitting work into subtasks with one result and a checkable criterion.
+- Assigning by role; the executor and the reviewer are different employees.
+- The final report of the main job.
+
+## Not my work
+- Doing subtasks by hand → assign an employee.
+- Jobs outside the charter's "Accepts" → return to the owner with a suggested department.
+
+## Reacting to Agency messages
+- review — check it or assign a review.
+- blocked with "Return" — reassign, move to another department or cancel.
+- done / canceled — reconcile open subtasks and assemble the result.`,
+  jobDescriptionExecutor: `## Position
+Role in the "…" department. Lead: ….
+
+## My work
+- Type of job: signs, for example "…".
+
+## Not my work — return to the lead
+- Type of job → likely role or department.
+- Any job without a required input.
+
+## Before starting
+1. Compare the brief with my work. Not mine — return it, do not start.
+2. Check the inputs. Something missing — return it with the list of what is missing.
+
+## How I work
+Methods and skills.
+
+## Result
+Format and file. Published as a version of the job's artifact.
+
+## Self-check before handing in
+- Check: command or criterion.`,
+  jobDescriptionReviewer: `## Position
+Reviewer of the "…" department. Independent of the executor: I do not fix the result I review.
+
+## My work
+- Reviewing a result version against the acceptance criteria and the department charter.
+
+## Not my work — return to the lead
+- Fixing defects → the executor.
+- A review without a published result version.
+
+## How I review
+For every criterion: passed / failed / not checked — with the command or place.
+
+## Result
+A verdict as a version: "no defects" or a list of defects. I do not accept the result.`,
+  brief: `Goal: what to get and why.
+Context: links, files, decisions.
+Do: …
+Do not: boundaries.
+Result: the file and where it will be.`,
+  acceptance: `- report.md published as a version
+- checkable sign 1
+- checkable sign 2`,
+};
+
+/** Standard templates in the Agency language. */
+export function defaultTemplates(language: "ru" | "en"): Record<TemplateKey, string> {
+  return language === "en" ? DEFAULT_TEMPLATES_EN : DEFAULT_TEMPLATES;
+}

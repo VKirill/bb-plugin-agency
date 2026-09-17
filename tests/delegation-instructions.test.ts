@@ -248,7 +248,7 @@ describe("instructions inside Agency job threads", () => {
     expect(text).toContain("## Your role: executor of AG-2202");
     expect(text).toContain("do not hand this work on");
     expect(text).toContain("report-needs-input");
-    expect(text).toContain('"Возврат: reason; who fits; what is missing"');
+    expect(text).toContain('"Return: reason; who fits; what is missing"');
     expect(text).toContain("transition` to blocked");
   });
 

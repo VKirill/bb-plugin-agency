@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useBbNavigate, useRpc, type PluginFileOpenerProps } from "@get-bb/plugin-sdk/app";
 import { FileWorkspace } from "./file-workspace";
-import { tr } from "../i18n";
+import { ruSkipProps, tr } from "../i18n";
 import "./job-detail.css";
 import type { TaskFile } from "./data";
 import { rpcContract } from "../../shared/rpc-contract";
@@ -172,7 +172,7 @@ export function DocumentPanel({ path, source, Original }: PluginFileOpenerProps)
 
   if (matches && doc) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden p-3">
+      <div {...ruSkipProps()} className="flex h-full min-h-0 flex-col overflow-hidden p-3">
         <FileWorkspace
           key={doc.file.id}
           file={doc.file}
@@ -198,7 +198,7 @@ export function DocumentPanel({ path, source, Original }: PluginFileOpenerProps)
   if (useOriginal || !restored) return <Original />;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden p-3">
+    <div {...ruSkipProps()} className="flex h-full min-h-0 flex-col overflow-hidden p-3">
       <FileWorkspace
         key={restored.file.id}
         file={restored.file}

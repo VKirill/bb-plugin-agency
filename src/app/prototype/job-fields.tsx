@@ -1,9 +1,9 @@
-import { ACCEPTANCE_TEMPLATE, BRIEF_TEMPLATE } from "../../shared/templates";
+import { ACCEPTANCE_TEMPLATE, BRIEF_TEMPLATE, defaultTemplates } from "../../shared/templates";
 import { useState, type ReactNode } from "react";
 import type { JobContract } from "../../shared/contracts/job";
 import { ROLE_TYPE_LABELS, type Agent, type Group } from "./data";
 import { Button, Choice, Field, TextField } from "./shared";
-import { tr } from "../i18n";
+import { tr, uiLanguage } from "../i18n";
 import { Tr } from "../i18n/tr";
 
 /** Stored description keeps the brief and the criteria apart with this marker; the UI edits them as two fields. */
@@ -49,8 +49,8 @@ export function JobBriefFields({
   /** Owner's templates («Настройки → Шаблоны»); placeholders and «Вставить шаблон» use them. */
   templates?: { brief: string; acceptance: string };
 }) {
-  const briefTemplate = templates?.brief ?? BRIEF_PLACEHOLDER;
-  const acceptanceTemplate = templates?.acceptance ?? ACCEPTANCE_PLACEHOLDER;
+  const briefTemplate = templates?.brief ?? defaultTemplates(uiLanguage()).brief;
+  const acceptanceTemplate = templates?.acceptance ?? defaultTemplates(uiLanguage()).acceptance;
   return (
     <>
       <TextField label="Что нужно сделать" value={brief} onChange={onBrief} multiline rows={5} placeholder={briefTemplate} info={BRIEF_HINT} maxLength={40_000} required />

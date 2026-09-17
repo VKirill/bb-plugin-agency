@@ -20,7 +20,10 @@ export type UiLanguage = "ru" | "en";
 
 const EN: Record<string, string> = { ...EN_CORE, ...EN_JOBS, ...EN_TEAM, ...EN_PROJECTS, ...EN_AUTOMATIONS, ...EN_SETTINGS, ...EN_DATA, ...EN_INSIGHTS, ...EN_PLUGINS };
 
-let current: UiLanguage = "ru";
+const STORED_LANGUAGE_KEY = "bb-agency:ui-language";
+
+// Starts from the remembered language: panels mounted before the shell (sidebar, file opener) match it.
+let current: UiLanguage = storedUiLanguage();
 
 export function setUiLanguage(language: UiLanguage): void {
   current = language;
@@ -48,6 +51,31 @@ export function tr(text: string, vars?: Record<string, string | number | null | 
 /** Translates only strings; anything else (elements, numbers) passes through. */
 export function trNode<T>(value: T): T {
   return (typeof value === "string" ? tr(value) : value) as T;
+}
+
+/** Keeps the language for the next app load: the BB sidebar title is set before any server call. */
+export function rememberUiLanguage(language: UiLanguage): void {
+  try {
+    if (typeof window !== "undefined") window.localStorage?.setItem(STORED_LANGUAGE_KEY, language);
+  } catch {
+    // Storage may be unavailable (private mode, tests): the title falls back to Russian.
+  }
+}
+
+export function storedUiLanguage(): UiLanguage {
+  try {
+    return typeof window !== "undefined" && window.localStorage?.getItem(STORED_LANGUAGE_KEY) === "en" ? "en" : "ru";
+  } catch {
+    return "ru";
+  }
+}
+
+/**
+ * The BB Russifier translates English words anywhere in the page, ours too. In English
+ * the Agency marks its roots and overlays so the English text stays as written.
+ */
+export function ruSkipProps(): { "data-bb-ru-skip"?: "" } {
+  return current === "en" ? { "data-bb-ru-skip": "" } : {};
 }
 
 export function hasTranslation(text: string): boolean {

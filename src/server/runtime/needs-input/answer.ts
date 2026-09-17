@@ -119,18 +119,19 @@ export function formatContinuationText(
   const byId = new Map(answers.map((item) => [item.questionId, item.text]));
   const lines = questions.map((question, index) => {
     const text = byId.get(question.id) ?? "";
-    return `${index + 1}. ${question.text}\nОтвет: ${text}`;
+    return `${index + 1}. ${question.text}\nAnswer: ${text}`;
   });
   const processChanged = amendment.process_version_id !== amendment.snapshot_process_version_id;
+  // Agent-facing text is English like the launch prompt; the owner's answers stay as written.
   return [
-    "Продолжение той же работы. Вопросы закрыты владельцем.",
+    "Continue the same work. The owner answered your questions.",
     "",
     lines.join("\n\n"),
     "",
     processChanged
-      ? `Поправка процесса (текущая ProcessVersion ${amendment.process_version_id}; снимок запуска был ${amendment.snapshot_process_version_id}):`
-      : `Текущий процесс (ProcessVersion ${amendment.process_version_id}, совпадает со снимком запуска):`,
-    `Инструкции:\n${amendment.process_instructions}`,
+      ? `Process amendment (current ProcessVersion ${amendment.process_version_id}; the launch snapshot had ${amendment.snapshot_process_version_id}):`
+      : `Current process (ProcessVersion ${amendment.process_version_id}, same as the launch snapshot):`,
+    `Instructions:\n${amendment.process_instructions}`,
     `Acceptance:\n${amendment.process_acceptance}`,
     `Job.brief:\n${amendment.job_brief}`,
     `Job.acceptance:\n${amendment.job_acceptance}`,

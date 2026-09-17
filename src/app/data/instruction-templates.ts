@@ -3,7 +3,8 @@
  * texts live in src/shared/templates.ts; the owner's versions come from the
  * server (useTemplates) and fall back to these.
  */
-import { DEFAULT_TEMPLATES, DEPARTMENT_CHARTER_TEMPLATE, type TemplateKey } from "../../shared/templates";
+import { defaultTemplates, DEPARTMENT_CHARTER_TEMPLATE, type TemplateKey } from "../../shared/templates";
+import { uiLanguage } from "../i18n";
 
 export { DEPARTMENT_CHARTER_TEMPLATE };
 
@@ -27,10 +28,10 @@ export const JOB_DESCRIPTION_TEMPLATE_KEY: Record<JobDescriptionKind, TemplateKe
  * agent has no department yet. `templates` are the owner's texts; missing keys
  * use the standard ones.
  */
-export function jobDescriptionTemplate(roleOrKind: string, templates: Partial<Record<TemplateKey, string>> = DEFAULT_TEMPLATES): string {
+export function jobDescriptionTemplate(roleOrKind: string, templates: Partial<Record<TemplateKey, string>> = defaultTemplates(uiLanguage())): string {
   const kind = roleOrKind === "lead" || roleOrKind === "reviewer" || roleOrKind === "executor" ? roleOrKind : jobDescriptionKind(roleOrKind);
   const key = JOB_DESCRIPTION_TEMPLATE_KEY[kind];
-  return templates[key] ?? DEFAULT_TEMPLATES[key];
+  return templates[key] ?? defaultTemplates(uiLanguage())[key];
 }
 
 export const JOB_DESCRIPTION_LABEL: Record<JobDescriptionKind, string> = {
