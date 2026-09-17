@@ -1298,6 +1298,9 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       }, () => {
         const active = assertBindingActive(binding.value);
         if (!active.ok) return active;
+        if (repos.department.get(parsed.data.departmentId)?.archivedAt) {
+          return fail("department_archived", "the department is archived: restore it before giving it new jobs");
+        }
         const linked = assertDepartmentOnBinding(
           parsed.data.bindingId,
           parsed.data.departmentId,

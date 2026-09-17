@@ -4,6 +4,8 @@ import { NEXT_STEP_MIGRATION } from "../flow/service";
 import { NIGHTLY_RECHECK_MIGRATION } from "../runtime/nightly-recheck/service";
 import { OWNER_MESSAGE_MIGRATION } from "../owner-messages/service";
 import { REMARK_PATTERN_MIGRATION } from "../knowledge/remark-patterns";
+import { DEPARTMENT_ARCHIVE_MIGRATION } from "../organization/lifecycle";
+import { KIT_RECORD_MIGRATION } from "../organization/starter-kit";
 import { GOALS_MIGRATION } from "../organization/goals";
 import { HIERARCHY_MIGRATION } from "../organization/hierarchy";
 import { KNOWLEDGE_MIGRATION } from "../knowledge/store";
@@ -625,6 +627,8 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   NIGHTLY_RECHECK_MIGRATION,
   OWNER_MESSAGE_MIGRATION,
   REMARK_PATTERN_MIGRATION,
+  DEPARTMENT_ARCHIVE_MIGRATION,
+  KIT_RECORD_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

@@ -26,13 +26,16 @@ import { createSdkSkillCatalogPort } from "./runtime/isolated-sdk";
 import { withCallerThread } from "./api/caller";
 import { attachDashboardUsageCollector, USAGE_CHANGED_CHANNEL } from "./api/dashboard-usage-rpc";
 import { createDashboardUsageReader, dashboardUsageCatalogFromSql } from "./runtime/dashboard-usage";
-import { listStoredBindings, listStoredDepartments } from "./api/catalog";
+import { listStoredBindings, listStoredDepartments, listStoredPolicies } from "./api/catalog";
 import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
 import { acceptedVersions, assertDependenciesDone, sweepNextSteps, type NextStepPorts } from "./flow/service";
 import { recheckJobText, sweepNightlyRecheck, type NightlyRecheckPorts } from "./runtime/nightly-recheck/service";
 import { buildDigest, listOwnerMessages, markOwnerMessagesRead, readOwnerMessage, recordOwnerMessage, scriptTemplates, setTelegramState } from "./owner-messages/service";
 import { serverDay } from "./runtime/nightly-recheck/service";
 import { sweepRemarkPatterns } from "./knowledge/remark-patterns";
+import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, departmentArchivedAt, departmentDeleteBlocker, restoreDepartment } from "./organization/lifecycle";
+import { installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "./organization/starter-kit";
+import { workRulesView } from "./rules/work-rules";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
@@ -69,6 +72,7 @@ import { resolveRpcAccess } from "./api/auth";
 import { createHash, randomUUID } from "node:crypto";
 import { remindIncompleteWorker, type ReminderPorts } from "./runtime/completion-reminder/service";
 import type { Job } from "../shared/contracts";
+import type { ServiceContext } from "./services/context";
 import { agencyLanguage, setAgencyLanguage } from "./i18n/language";
 import {
   DEFAULT_MODEL_PRICES,
@@ -408,7 +412,102 @@ export function registerAgency(bb: BbPluginApi) {
     onChanged();
     return { ok: true as const, value: { message: readOwnerMessage(db, id)!, duplicate: false } };
   };
+  /** Starter departments act as the owner: the same store commands as the forms. */
+  const starterKitPorts = (ctx: ServiceContext): StarterKitPorts => ({
+    db,
+    now: () => new Date().toISOString(),
+    newRequestId: () => randomUUID(),
+    policyVersionId: () => {
+      const standard = listStoredPolicies(db).find(
+        (policy) =>
+          policy.cliHostConstraints.providerIds.length === 1 &&
+          policy.cliHostConstraints.providerIds[0] === "claude-code" &&
+          policy.cliHostConstraints.hostIds.length === 0 &&
+          policy.secretRefs.length === 0 &&
+          [...policy.allowedCapabilities].sort().join(",") === "read.files,write.files",
+      );
+      if (standard) return { ok: true, value: standard.id };
+      const created = store.createPolicyVersion(ctx, {
+        requestId: randomUUID(),
+        allowedCapabilities: ["read.files", "write.files"],
+        cliHostConstraints: { providerIds: ["claude-code"], hostIds: [] },
+        secretRefs: [],
+      });
+      return created.ok ? { ok: true, value: created.value.id } : created;
+    },
+    defaults: (roleType) => {
+      const rules = workRulesView(db, "agency").effective;
+      return roleType === "lead"
+        ? { model: rules.defaultModelLead, reasoningEffort: rules.defaultReasoningLead }
+        : roleType === "reviewer"
+          ? { model: rules.defaultModelReviewer, reasoningEffort: rules.defaultReasoningReviewer }
+          : { model: rules.defaultModelExecutor, reasoningEffort: rules.defaultReasoningExecutor };
+    },
+    provisionAgent: (input) => store.provisionAgent(ctx, input as Parameters<typeof store.provisionAgent>[1]),
+    provisionDepartment: (input) => store.provisionDepartment(ctx, input),
+    addMembership: (input) => store.addMembership(ctx, input),
+    saveAgentProfile: (input) => store.saveAgentProfile(ctx, input as Parameters<typeof store.saveAgentProfile>[1]),
+    saveDepartmentProfile: (input) => store.saveDepartmentProfile(ctx, input),
+  });
+  const kitLanguage = (language?: "ru" | "en") => language ?? agencyLanguage();
   const organization = {
+    starterKit: async (input: { language?: "ru" | "en" }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: starterKitView(db, kitLanguage(input.language), new Date().toISOString()) };
+    },
+    installStarterKit: async (input: { keys: string[]; language?: "ru" | "en" }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = installStarterKit(starterKitPorts(access.value.ctx), { keys: input.keys, language: kitLanguage(input.language) }, agencyLanguage() === "en");
+      if (result.ok && result.value.installed.length) onChanged();
+      return result;
+    },
+    translateStarterKit: async (input: { language?: "ru" | "en" }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = translateStarterKit(starterKitPorts(access.value.ctx), kitLanguage(input.language));
+      if (result.ok && result.value.translated) onChanged();
+      return result;
+    },
+    recordLifecycle: async (input: { kind: "department" | "agent"; id: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const en = agencyLanguage() === "en";
+      const reason = input.kind === "department" ? departmentDeleteBlocker(db, input.id, en) : agentDeleteBlocker(db, input.id, en);
+      return { ok: true as const, value: { deletable: reason === null, reason, archivedAt: input.kind === "department" ? departmentArchivedAt(db, input.id) : null } };
+    },
+    archiveDepartment: async (input: { departmentId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = archiveDepartment(db, input.departmentId, new Date().toISOString(), agencyLanguage() === "en");
+      if (result.ok) onChanged();
+      return result;
+    },
+    restoreDepartment: async (input: { departmentId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = restoreDepartment(db, input.departmentId);
+      if (!result.ok) return result;
+      onChanged();
+      return { ok: true as const, value: { restored: true as const } };
+    },
+    deleteDepartment: async (input: { departmentId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = deleteDepartment(db, input.departmentId, agencyLanguage() === "en");
+      if (!result.ok) return result;
+      onChanged();
+      return { ok: true as const, value: { deleted: true as const } };
+    },
+    deleteAgent: async (input: { agentId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = deleteAgent(db, input.agentId, agencyLanguage() === "en");
+      if (!result.ok) return result;
+      onChanged();
+      return { ok: true as const, value: { deleted: true as const } };
+    },
     notifyOwner: async (input: { text: string; level?: "info" | "warning"; jobId?: string; dedupeKey?: string }) => {
       const access = readOnly();
       if (!access.ok) return access;
@@ -668,6 +767,14 @@ export function registerAgency(bb: BbPluginApi) {
     | "listSavedViews"
     | "listPlugins"
     | "notifyOwner"
+    | "starterKit"
+    | "installStarterKit"
+    | "translateStarterKit"
+    | "recordLifecycle"
+    | "archiveDepartment"
+    | "restoreDepartment"
+    | "deleteDepartment"
+    | "deleteAgent"
     | "listOwnerMessages"
     | "markOwnerMessagesRead"
     | "ownerDigest"

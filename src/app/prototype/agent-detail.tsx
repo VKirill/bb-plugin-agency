@@ -1,4 +1,5 @@
 import { AgentMetricsPanel } from "./agent-metrics";
+import { RecordLifecyclePanel } from "./organization-kit";
 import { AgentPluginsPanel } from "./agent-plugins";
 import { usePluginFeatures } from "./use-plugin-features";
 import { useTemplates } from "./use-templates";
@@ -164,10 +165,22 @@ export function AgentDetail({
                   )}
                 </Field>
                 <Field label="Статус" info={<><p>{tr("Статус меняется кнопкой «Приостановить» / «Активировать» вверху.")}</p><p>{tr("Приостановленному нельзя назначить задачу и нельзя запустить его.")}</p></>}>
-                  <p className="text-sm">{agent.enabled ? tr("Профиль включён") : tr("Приостановлен")}</p>
+                  <p className="text-sm">{agent.archived ? tr("В архиве") : agent.enabled ? tr("Профиль включён") : tr("Приостановлен")}</p>
                 </Field>
               </div>
             </Panel>
+            {live && agent.recordId && (
+              <RecordLifecyclePanel
+                kind="agent"
+                id={agent.recordId}
+                name={agent.name}
+                archived={Boolean(agent.archived)}
+                notice={notice}
+                onArchive={async () => (commit ? (await Promise.resolve(commit({ ...agent, archived: true, enabled: false }))) !== false : false)}
+                onRestore={async () => (commit ? (await Promise.resolve(commit({ ...agent, archived: false, enabled: true }))) !== false : false)}
+                onDeleted={back}
+              />
+            )}
           </>
         )}
         {tab === "Показатели" && live && <AgentMetricsPanel agentId={agent.id} notice={notice} />}

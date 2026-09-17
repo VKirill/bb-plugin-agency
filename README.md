@@ -142,6 +142,14 @@ rules — the top prompt layer, charter and job description templates, the langu
 columns. The interface and the standard templates switch between Russian and
 English.
 
+The Agency creates nothing by itself. An empty Agency offers starter departments —
+development, research and writing, each with a lead, executors, reviewers, a charter
+and job descriptions, in Russian or English — or you create your own departments,
+employees and rules from scratch. Starter records are ordinary data: edit, archive
+or delete them; untouched ones switch language with one button. A department or an
+employee goes to the archive with its history kept, and is deleted only when it
+never worked.
+
 A job's work order is in its card: which jobs must be done before it launches, and
 a "next step" for another department that the Agency creates by itself after
 acceptance. Messages from scripts and watchdogs (`bb agency notify-owner`,

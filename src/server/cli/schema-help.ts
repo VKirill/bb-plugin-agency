@@ -20,6 +20,8 @@ bb agency notify <project-id> <event-id> <topic> <reference> [--json]
 bb agency notify-owner --input-json '{"text":"…","jobId":"AG-12"}'
 bb agency digest --input-json '{"kind":"summary|watchdog","notify":true}'
 bb agency scripts | owner messages|read
+bb agency kit list|install|translate
+bb agency department archive|restore|delete · agent delete
 bb agency event definition-save|definition-list|source-save|source-list|ingest --input-json '...' [--json]
 bb agency rule save|list --input-json '...' [--json]
 bb agency dispatch tick --input-json '...' [--json]
@@ -42,8 +44,8 @@ export const CLI_COMMAND_SPECS = [
   { name: "catalog", summary: "Каталог BB и capabilities", usage: "bb agency catalog [--json]" },
   { name: "workspace", summary: "Снимок сущностей и PolicyVersion", usage: "bb agency workspace [--binding-id <id>]" },
   { name: "policy", summary: "Неизменяемые политики", usage: "bb agency policy create --input-json '<payload>'" },
-  { name: "agent", summary: "Сотрудник", usage: "bb agency agent create|get|save" },
-  { name: "department", summary: "Отдел и membership", usage: "bb agency department create|get|save|membership" },
+  { name: "agent", summary: "Сотрудник", usage: "bb agency agent create|get|save|delete|metrics" },
+  { name: "department", summary: "Отдел и membership", usage: "bb agency department create|get|save|availability|archive|restore|delete|membership" },
   { name: "project", summary: "Привязка существующего каталога", usage: "bb agency project bind|get|link-department" },
   { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|attempts|comment|usage|return" },
   { name: "rules", summary: "Правила работы: лимиты, пороги, модели по умолчанию", usage: "bb agency rules get|save --input-json '<payload>'" },
@@ -54,6 +56,7 @@ export const CLI_COMMAND_SPECS = [
   { name: "notify", summary: "Сохранить уведомление без запуска", usage: "bb agency notify <project-id> <event-id> <topic> <reference> [--json]" },
   { name: "notify-owner", summary: "Сообщение владельцу во «Входящие» и Telegram", usage: "bb agency notify-owner --input-json '{\"text\":\"…\",\"level\":\"warning\",\"jobId\":\"AG-12\",\"dedupeKey\":\"…\"}'" },
   { name: "digest", summary: "Сводка или сторож; notify:true отправляет владельцу", usage: "bb agency digest --input-json '{\"kind\":\"summary\",\"sinceHours\":24,\"notify\":true}'" },
+  { name: "kit", summary: "Стартовые отделы и сотрудники: список, установка, перевод", usage: "bb agency kit list|install|translate" },
   { name: "scripts", summary: "Шаблоны скриптов для cron и launchd", usage: "bb agency scripts" },
   { name: "owner", summary: "Сообщения владельцу", usage: "bb agency owner messages|read" },
   { name: "event", summary: "Definition/source/typed ingest; не replay notify", usage: "bb agency event definition-save|definition-list|source-save|source-list|ingest" },

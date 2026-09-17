@@ -66,6 +66,7 @@ type DepartmentRow = {
   revision: number;
   updated_at: string;
   availability?: string | null;
+  archived_at?: string | null;
 };
 
 function mapBinding(row: BindingRow): ProjectBinding {
@@ -157,6 +158,7 @@ export function listStoredDepartments(db: SqlDatabase): Department[] {
     revision: row.revision,
     updatedAt: row.updated_at,
     ...(row.availability === "selected" ? { availability: "selected" as const } : {}),
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
   }));
 }
 

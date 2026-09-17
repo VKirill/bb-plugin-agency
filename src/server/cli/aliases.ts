@@ -15,6 +15,11 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
   if (head === "catalog" && rest[0] === "capabilities" && rest.length === 1) return "listCapabilityCatalog";
   if (head === "workspace" && rest.length === 0) return "listWorkspace";
   if (head === "notify-owner" && rest.length === 0) return "notifyOwner";
+  if (head === "kit" && rest.length === 1) {
+    if (rest[0] === "list") return "starterKit";
+    if (rest[0] === "install") return "installStarterKit";
+    if (rest[0] === "translate") return "translateStarterKit";
+  }
   if (head === "digest" && rest.length === 0) return "ownerDigest";
   if (head === "scripts" && rest.length === 0) return "listScriptTemplates";
   if (head === "owner" && rest.length === 1) {
@@ -49,6 +54,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "create") return "provisionAgent";
     if (rest[0] === "get") return "getAgent";
     if (rest[0] === "save") return "saveAgentProfile";
+    if (rest[0] === "delete") return "deleteAgent";
   }
   if (head === "department" && rest[0] === "membership" && rest.length === 2) {
     if (rest[1] === "add") return "addMembership";
@@ -59,6 +65,9 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "get") return "getDepartment";
     if (rest[0] === "save") return "saveDepartmentProfile";
     if (rest[0] === "availability") return "setDepartmentAvailability";
+    if (rest[0] === "archive") return "archiveDepartment";
+    if (rest[0] === "restore") return "restoreDepartment";
+    if (rest[0] === "delete") return "deleteDepartment";
   }
   if (head === "project") {
     if (rest[0] === "create") return { unsupported: "creating a BB project is unsupported; bind an existing catalog" };

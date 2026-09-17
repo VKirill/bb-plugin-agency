@@ -232,6 +232,42 @@ export const getJobInputSchema = z
   .strict()
   .refine((value) => Boolean(value.jobId || value.key), "jobId or key is required");
 
+const kitLanguageSchema = z.enum(["ru", "en"]);
+export const starterKitViewSchema = z
+  .object({
+    departments: z.array(
+      z
+        .object({
+          key: z.string(),
+          name: z.string(),
+          purpose: z.string(),
+          agents: z.array(z.object({ key: z.string(), name: z.string(), role: z.string(), roleType: z.enum(["lead", "executor", "reviewer"]) }).strict()),
+          installed: z.object({ departmentId: z.string(), language: kitLanguageSchema.nullable() }).strict().nullable(),
+        })
+        .strict(),
+    ),
+    translatable: z.number().int(),
+    edited: z.number().int(),
+  })
+  .strict();
+export type StarterKitViewRecord = z.infer<typeof starterKitViewSchema>;
+export const installStarterKitInputSchema = z.object({ keys: z.array(z.string().max(40)).min(1).max(20), language: kitLanguageSchema.optional() }).strict();
+export const installStarterKitOutputSchema = z
+  .object({
+    installed: z.array(z.object({ key: z.string(), departmentId: z.string(), agents: z.number().int() }).strict()),
+    skipped: z.array(z.object({ key: z.string(), reason: z.string() }).strict()),
+  })
+  .strict();
+export const translateStarterKitOutputSchema = z
+  .object({
+    translated: z.number().int(),
+    unchanged: z.number().int(),
+    edited: z.array(z.object({ kind: z.enum(["department", "agent"]), name: z.string() }).strict()),
+  })
+  .strict();
+export const recordLifecycleInputSchema = z.object({ kind: z.enum(["department", "agent"]), id: z.string().max(80) }).strict();
+export const recordLifecycleSchema = z.object({ deletable: z.boolean(), reason: z.string().nullable(), archivedAt: z.string().nullable() }).strict();
+
 /** A message to the owner from a script, watchdog or employee. */
 export const ownerMessageSchema = z
   .object({
@@ -918,6 +954,14 @@ export const rpcContract = defineRpcContract({
   listSavedViews: { input: z.null(), output: domainResultSchema(z.array(savedViewSchema)) },
   listPlugins: { input: z.null(), output: domainResultSchema(pluginDirectorySchema) },
   notifyOwner: { input: notifyOwnerInputSchema, output: domainResultSchema(notifyOwnerOutputSchema) },
+  starterKit: { input: z.object({ language: kitLanguageSchema.optional() }).strict(), output: domainResultSchema(starterKitViewSchema) },
+  installStarterKit: { input: installStarterKitInputSchema, output: domainResultSchema(installStarterKitOutputSchema) },
+  translateStarterKit: { input: z.object({ language: kitLanguageSchema.optional() }).strict(), output: domainResultSchema(translateStarterKitOutputSchema) },
+  recordLifecycle: { input: recordLifecycleInputSchema, output: domainResultSchema(recordLifecycleSchema) },
+  archiveDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), output: domainResultSchema(z.object({ archivedAt: z.string() }).strict()) },
+  restoreDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), output: domainResultSchema(z.object({ restored: z.literal(true) }).strict()) },
+  deleteDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), output: domainResultSchema(z.object({ deleted: z.literal(true) }).strict()) },
+  deleteAgent: { input: z.object({ agentId: z.string().max(80) }).strict(), output: domainResultSchema(z.object({ deleted: z.literal(true) }).strict()) },
   listOwnerMessages: { input: z.object({ limit: z.number().int().min(1).max(500).optional() }).strict(), output: domainResultSchema(ownerMessagesSchema) },
   markOwnerMessagesRead: { input: z.object({ ids: z.array(z.string().max(80)).max(500).optional() }).strict(), output: domainResultSchema(z.object({ marked: z.number().int() }).strict()) },
   ownerDigest: { input: ownerDigestInputSchema, output: domainResultSchema(ownerDigestSchema) },

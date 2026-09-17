@@ -218,6 +218,7 @@ export function readProjectRoutes(
        FROM agency_department d
        JOIN agency_agent lead ON lead.id = d.lead_agent_id
        LEFT JOIN agency_process_version pv ON pv.id = d.process_version_id
+       WHERE d.archived_at IS NULL
        ORDER BY d.name`,
     )
     .all(...ids) as Array<{

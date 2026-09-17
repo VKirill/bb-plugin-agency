@@ -248,7 +248,7 @@ export async function persistAgentPatch(
     expectedRevision: next.revision!,
     agentId: record.id,
     name: next.name,
-    state: next.enabled ? "active" : "paused",
+    state: next.archived ? "archived" : next.enabled ? "active" : "paused",
     workplaceBindingId: next.workplaceBindingId ?? null,
     version: {
       version: (currentVersion?.version ?? 0) + 1,

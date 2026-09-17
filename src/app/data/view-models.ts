@@ -211,6 +211,7 @@ export function mapAgents(snapshot: WorkspaceSnapshot): Agent[] {
       hostId: "",
       concurrency: 1,
       enabled: agent.state === "active",
+      ...(agent.state === "archived" ? { archived: true } : {}),
     };
   });
 }
@@ -237,6 +238,7 @@ export function mapDepartments(snapshot: WorkspaceSnapshot): Group[] {
       parentDepartmentId: snapshot.departmentParents?.[department.id] ?? null,
       enabled: true,
       ...(department.availability === "selected" ? { availability: "selected" as const } : {}),
+      ...(department.archivedAt ? { archivedAt: department.archivedAt } : {}),
     };
   });
 }

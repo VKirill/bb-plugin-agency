@@ -1,4 +1,4 @@
-import type { OwnerMessageView } from "../../shared/rpc-contract";
+import type { OwnerMessageView, StarterKitViewRecord } from "../../shared/rpc-contract";
 import type { AgentMetricsView, BackupFileView, DependencyLinkRecord, GoalViewRecord, JobNextStepRecord, JobSearchHitView, KnowledgeItemView, NextStepViewRecord, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
 import type { RuleScheduleView, WebhookSourceView } from "../../shared/rpc-contract";
 import type { AgencyRulesView, TemplateView } from "../../shared/rpc-contract";
@@ -163,6 +163,14 @@ export interface AgencyApi {
   listArchivedJobs(input: { limit?: number; offset?: number }): Promise<MutationOutcome<{ total: number; jobs: Job[] }>>;
   listSavedViews(): Promise<MutationOutcome<SavedViewRecord[]>>;
   listPlugins(): Promise<MutationOutcome<PluginDirectoryView>>;
+  starterKit(input: { language?: "ru" | "en" }): Promise<MutationOutcome<StarterKitViewRecord>>;
+  installStarterKit(input: { keys: string[]; language?: "ru" | "en" }): Promise<MutationOutcome<{ installed: { key: string; departmentId: string; agents: number }[]; skipped: { key: string; reason: string }[] }>>;
+  translateStarterKit(input: { language?: "ru" | "en" }): Promise<MutationOutcome<{ translated: number; unchanged: number; edited: { kind: "department" | "agent"; name: string }[] }>>;
+  recordLifecycle(input: { kind: "department" | "agent"; id: string }): Promise<MutationOutcome<{ deletable: boolean; reason: string | null; archivedAt: string | null }>>;
+  archiveDepartment(input: { departmentId: string }): Promise<MutationOutcome<{ archivedAt: string }>>;
+  restoreDepartment(input: { departmentId: string }): Promise<MutationOutcome<{ restored: true }>>;
+  deleteDepartment(input: { departmentId: string }): Promise<MutationOutcome<{ deleted: true }>>;
+  deleteAgent(input: { agentId: string }): Promise<MutationOutcome<{ deleted: true }>>;
   listOwnerMessages(input: { limit?: number }): Promise<MutationOutcome<{ messages: OwnerMessageView[]; unread: number }>>;
   markOwnerMessagesRead(input: { ids?: string[] }): Promise<MutationOutcome<{ marked: number }>>;
   addJobDependency(input: { requestId: string; jobId: string; dependsOnJobId: string }): Promise<MutationOutcome<{ jobId: string; dependsOnJobId: string }>>;

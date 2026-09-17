@@ -42,6 +42,8 @@ export const departmentSchema = revisionedRecordSchema
     processVersionId: opaqueIdSchema,
     /** Omitted means all. */
     availability: departmentAvailabilitySchema.optional(),
+    /** Archived: out of routing, forms and pickers; history stays. */
+    archivedAt: z.string().optional(),
   })
   .strict();
 

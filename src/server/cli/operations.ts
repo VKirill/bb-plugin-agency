@@ -1,3 +1,4 @@
+import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../shared/rpc-contract";
 import { addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
 import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
@@ -100,6 +101,14 @@ export const CLI_OPERATIONS = {
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
   agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },
+  starterKit: { input: z.object({ language: z.enum(["ru", "en"]).optional() }).strict(), summary: "Стартовые отделы и сотрудники: что есть в наборе, что установлено, сколько записей можно перевести" },
+  installStarterKit: { input: installStarterKitInputSchema, summary: "Установить выбранные стартовые отделы с сотрудниками; language по умолчанию — язык Агентства" },
+  translateStarterKit: { input: z.object({ language: z.enum(["ru", "en"]).optional() }).strict(), summary: "Перевести стартовые отделы и сотрудников, которых владелец не менял, на язык; изменённые остаются" },
+  recordLifecycle: { input: recordLifecycleInputSchema, summary: "Можно ли удалить отдел или сотрудника и почему нет; дата архива отдела" },
+  archiveDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), summary: "Отдел в архив: уходит из маршрута и форм, история остаётся; нужны закрытые задачи" },
+  restoreDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), summary: "Вернуть отдел из архива" },
+  deleteDepartment: { input: z.object({ departmentId: z.string().max(80) }).strict(), summary: "Удалить отдел без истории задач; сотрудники остаются" },
+  deleteAgent: { input: z.object({ agentId: z.string().max(80) }).strict(), summary: "Удалить сотрудника без истории работы; иначе — архив через agent save со state archived" },
   notifyOwner: {
     input: notifyOwnerInputSchema,
     summary: "Сообщение владельцу: «Входящие → Сообщения» и Telegram, если включён; dedupeKey доставляет одно сообщение один раз",

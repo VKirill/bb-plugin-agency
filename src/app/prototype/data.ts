@@ -111,6 +111,8 @@ export interface Agent {
   hostId: string;
   concurrency: number;
   enabled: boolean;
+  /** In the archive: kept with its history, not offered for new work. */
+  archived?: boolean;
   recordId?: string;
   revision?: number;
 }
