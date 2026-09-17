@@ -418,10 +418,10 @@ export function registerAgency(bb: BbPluginApi) {
     now: () => new Date().toISOString(),
     newRequestId: () => randomUUID(),
     policyVersionId: () => {
+      // The profile names the CLI; the standard policy allows any, so the owner may switch it later.
       const standard = listStoredPolicies(db).find(
         (policy) =>
-          policy.cliHostConstraints.providerIds.length === 1 &&
-          policy.cliHostConstraints.providerIds[0] === "claude-code" &&
+          policy.cliHostConstraints.providerIds.length === 0 &&
           policy.cliHostConstraints.hostIds.length === 0 &&
           policy.secretRefs.length === 0 &&
           [...policy.allowedCapabilities].sort().join(",") === "read.files,write.files",
@@ -430,7 +430,7 @@ export function registerAgency(bb: BbPluginApi) {
       const created = store.createPolicyVersion(ctx, {
         requestId: randomUUID(),
         allowedCapabilities: ["read.files", "write.files"],
-        cliHostConstraints: { providerIds: ["claude-code"], hostIds: [] },
+        cliHostConstraints: { providerIds: [], hostIds: [] },
         secretRefs: [],
       });
       return created.ok ? { ok: true, value: created.value.id } : created;
@@ -438,10 +438,10 @@ export function registerAgency(bb: BbPluginApi) {
     defaults: (roleType) => {
       const rules = workRulesView(db, "agency").effective;
       return roleType === "lead"
-        ? { model: rules.defaultModelLead, reasoningEffort: rules.defaultReasoningLead }
+        ? { providerId: rules.defaultProviderLead, model: rules.defaultModelLead, reasoningEffort: rules.defaultReasoningLead, serviceTier: rules.defaultServiceTierLead }
         : roleType === "reviewer"
-          ? { model: rules.defaultModelReviewer, reasoningEffort: rules.defaultReasoningReviewer }
-          : { model: rules.defaultModelExecutor, reasoningEffort: rules.defaultReasoningExecutor };
+          ? { providerId: rules.defaultProviderReviewer, model: rules.defaultModelReviewer, reasoningEffort: rules.defaultReasoningReviewer, serviceTier: rules.defaultServiceTierReviewer }
+          : { providerId: rules.defaultProviderExecutor, model: rules.defaultModelExecutor, reasoningEffort: rules.defaultReasoningExecutor, serviceTier: rules.defaultServiceTierExecutor };
     },
     provisionAgent: (input) => store.provisionAgent(ctx, input as Parameters<typeof store.provisionAgent>[1]),
     provisionDepartment: (input) => store.provisionDepartment(ctx, input),

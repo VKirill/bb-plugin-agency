@@ -1,22 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
+import type { ExperimentalProviderModelPickerValue } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../../shared/rpc-contract";
 import { DEFAULT_WORK_RULES, type WorkRules } from "../../shared/contracts/work-rules";
 import { createRpcAgencyApi, type RpcCaller } from "../data/rpc-agency-api";
-import type { ReasoningLevel, RoleType } from "../data/role-types";
+import type { RoleType } from "../data/role-types";
 
-export type RoleDefaults = { model: Record<RoleType, string>; reasoning: Record<RoleType, ReasoningLevel> };
+/** Provider, model, reasoning and fast mode a new employee of each role type starts with. */
+export type RoleDefaults = Record<RoleType, ExperimentalProviderModelPickerValue>;
 
 export function roleDefaultsFromRules(rules: WorkRules): RoleDefaults {
+  const pick = (providerId: string, model: string, reasoningLevel: WorkRules["defaultReasoningLead"], serviceTier: WorkRules["defaultServiceTierLead"]): ExperimentalProviderModelPickerValue => ({
+    providerId,
+    model,
+    reasoningLevel,
+    ...(serviceTier ? { serviceTier } : {}),
+  });
   return {
-    model: { lead: rules.defaultModelLead, executor: rules.defaultModelExecutor, reviewer: rules.defaultModelReviewer },
-    reasoning: { lead: rules.defaultReasoningLead, executor: rules.defaultReasoningExecutor, reviewer: rules.defaultReasoningReviewer },
+    lead: pick(rules.defaultProviderLead, rules.defaultModelLead, rules.defaultReasoningLead, rules.defaultServiceTierLead),
+    executor: pick(rules.defaultProviderExecutor, rules.defaultModelExecutor, rules.defaultReasoningExecutor, rules.defaultServiceTierExecutor),
+    reviewer: pick(rules.defaultProviderReviewer, rules.defaultModelReviewer, rules.defaultReasoningReviewer, rules.defaultServiceTierReviewer),
   };
 }
 
 export const FALLBACK_ROLE_DEFAULTS = roleDefaultsFromRules(DEFAULT_WORK_RULES);
 
-/** Models and reasoning a new employee starts with, from «Настройки → Правила работы». */
+/** What a new employee starts with, from «Настройки → Правила работы». */
 export function useRoleDefaults(enabled: boolean): RoleDefaults {
   const rpc = useRpc<typeof rpcContract>();
   const api = useMemo(() => createRpcAgencyApi(rpc as unknown as RpcCaller), [rpc]);

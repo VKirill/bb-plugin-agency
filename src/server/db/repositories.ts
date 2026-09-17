@@ -23,7 +23,7 @@ import { parseJson, toJson, type SqlDatabase } from "./sql";
 function isClosedJobState(state: JobState): boolean {
   return state === "done" || state === "canceled";
 }
-import { optionalPluginIds, optionalReasoningEffort, reasoningEffortSchema } from "../../shared/contracts/versions";
+import { optionalPluginIds, optionalReasoningEffort, optionalServiceTier, reasoningEffortSchema, serviceTierSchema } from "../../shared/contracts/versions";
 
 type AgentRow = {
   id: string;
@@ -92,6 +92,7 @@ type AgentVersionRow = {
   policy_version_id: string;
   reasoning_effort?: string | null;
   plugin_ids?: string | null;
+  service_tier?: string | null;
 };
 
 export function mapStoredAgentVersion(row: AgentVersionRow): AgentVersion {
@@ -109,6 +110,7 @@ export function mapStoredAgentVersion(row: AgentVersionRow): AgentVersion {
     policyVersionId: row.policy_version_id,
     ...optionalReasoningEffort(parsed.success ? parsed.data : undefined),
     ...optionalPluginIds(row.plugin_ids ? parseJson<string[]>(row.plugin_ids) : undefined),
+    ...optionalServiceTier(serviceTierSchema.safeParse(row.service_tier).data),
   };
 }
 
@@ -278,33 +280,25 @@ export function createRepositories(db: SqlDatabase) {
     },
     agentVersion: {
       insert(row: AgentVersion): void {
-        const values = [
-          row.id,
-          row.agentId,
-          row.version,
-          row.role,
-          row.instructions,
-          row.providerId,
-          row.model,
-          toJson(row.skillIds),
-          toJson(row.mcpIds),
-          row.policyVersionId,
-          row.reasoningEffort ?? null,
+        const columns: [string, unknown][] = [
+          ["id", row.id],
+          ["agent_id", row.agentId],
+          ["version", row.version],
+          ["role", row.role],
+          ["instructions", row.instructions],
+          ["provider_id", row.providerId],
+          ["model", row.model],
+          ["skill_ids", toJson(row.skillIds)],
+          ["mcp_ids", toJson(row.mcpIds)],
+          ["policy_version_id", row.policyVersionId],
+          ["reasoning_effort", row.reasoningEffort ?? null],
         ];
-        // plugin_ids is written only when set, so a profile without plugins stays valid on an older schema.
-        if (row.pluginIds?.length) {
-          db.prepare(
-            `INSERT INTO agency_agent_version
-              (id, agent_id, version, role, instructions, provider_id, model, skill_ids, mcp_ids, policy_version_id, reasoning_effort, plugin_ids)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(...values, toJson(row.pluginIds));
-          return;
-        }
+        // Optional columns are written only when set, so a plain profile stays valid on an older schema.
+        if (row.pluginIds?.length) columns.push(["plugin_ids", toJson(row.pluginIds)]);
+        if (row.serviceTier) columns.push(["service_tier", row.serviceTier]);
         db.prepare(
-          `INSERT INTO agency_agent_version
-            (id, agent_id, version, role, instructions, provider_id, model, skill_ids, mcp_ids, policy_version_id, reasoning_effort)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(...values);
+          `INSERT INTO agency_agent_version (${columns.map(([name]) => name).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+        ).run(...columns.map(([, value]) => value));
       },
       get(id: string): AgentVersion | undefined {
         const row = db.prepare(`SELECT * FROM agency_agent_version WHERE id = ?`).get(id) as AgentVersionRow | undefined;

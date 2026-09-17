@@ -5,7 +5,8 @@ import { Switch } from "../../../components/ui/switch";
 import type { BudgetStatusView, rpcContract } from "../../shared/rpc-contract";
 import { DEFAULT_WORK_RULES, type RuleSource, type StoredWorkRules, type WorkRuleKey, type WorkRulesView } from "../../shared/contracts/work-rules";
 import { failureNotice } from "../data/persist";
-import { LAUNCH_PROVIDER_ID, REASONING_OPTIONS, type ReasoningLevel } from "../data/role-types";
+import { DEFAULT_PROVIDER_ID, providerName } from "../data/role-types";
+import type { ExperimentalProviderModelPickerValue } from "@get-bb/plugin-sdk/app";
 import { createRpcAgencyApi, type RpcCaller } from "../data/rpc-agency-api";
 import { tr } from "../i18n";
 import { Button, Choice, InfoHint, Input, Panel } from "./shared";
@@ -20,8 +21,10 @@ type FieldSpec = {
   min?: number;
   max?: number;
   step?: number;
-  /** For a model field: the reasoning key the same picker sets. */
+  /** For a model field: the provider, reasoning and fast mode keys the same picker sets. */
+  providerKey?: WorkRuleKey;
   reasoningKey?: WorkRuleKey;
+  serviceTierKey?: WorkRuleKey;
   hint: ReactNode;
 };
 
@@ -114,20 +117,36 @@ export const LIMIT_RULE_GROUP = (scopeLabel: string, withWarn = true): RuleGroup
 
 export const DEFAULTS_RULE_GROUP: RuleGroup = {
   title: "Новые сотрудники по умолчанию",
-  hint: <p><Tr text={"Модель и уровень рассуждения, которые подставляются в форму «Создать сотрудника» для каждого типа роли. В форме всё можно поменять."}/></p>,
+  hint: <p><Tr text={"CLI, модель, уровень рассуждения и быстрый режим, которые подставляются в форму «Создать сотрудника» и в стартовые отделы для каждого типа роли. Подходит любой CLI, подключённый в BB. В форме всё можно поменять."}/></p>,
   fields: [
-    { key: "defaultModelLead", reasoningKey: "defaultReasoningLead", label: "Руководитель", kind: "model", hint: <p><Tr text={"Руководитель планирует, раздаёт работу и принимает решения: сильная модель и высокий уровень рассуждения окупаются."}/></p> },
-    { key: "defaultModelExecutor", reasoningKey: "defaultReasoningExecutor", label: "Исполнитель", kind: "model", hint: <p><Tr text={"Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения."}/></p> },
-    { key: "defaultModelReviewer", reasoningKey: "defaultReasoningReviewer", label: "Проверяющий", kind: "model", hint: <p><Tr text={"Поиск дефектов требует внимательности: сильная модель и высокий уровень рассуждения."}/></p> },
+    { key: "defaultModelLead", providerKey: "defaultProviderLead", reasoningKey: "defaultReasoningLead", serviceTierKey: "defaultServiceTierLead", label: "Руководитель", kind: "model", hint: <p><Tr text={"Руководитель планирует, раздаёт работу и принимает решения: сильная модель и высокий уровень рассуждения окупаются."}/></p> },
+    { key: "defaultModelExecutor", providerKey: "defaultProviderExecutor", reasoningKey: "defaultReasoningExecutor", serviceTierKey: "defaultServiceTierExecutor", label: "Исполнитель", kind: "model", hint: <p><Tr text={"Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения."}/></p> },
+    { key: "defaultModelReviewer", providerKey: "defaultProviderReviewer", reasoningKey: "defaultReasoningReviewer", serviceTierKey: "defaultServiceTierReviewer", label: "Проверяющий", kind: "model", hint: <p><Tr text={"Поиск дефектов требует внимательности: сильная модель и высокий уровень рассуждения."}/></p> },
   ],
 };
 
-function formatValue(value: unknown, spec: FieldSpec, reasoning?: unknown): string {
+/** Keys a model field sets together with its model key. */
+function companionKeys(spec: FieldSpec): WorkRuleKey[] {
+  return [spec.providerKey, spec.reasoningKey, spec.serviceTierKey].filter((key): key is WorkRuleKey => Boolean(key));
+}
+
+/** The picker value of a model field read from a rules record. */
+function modelSelection(spec: FieldSpec, read: (key: WorkRuleKey) => unknown): ExperimentalProviderModelPickerValue {
+  const tier = spec.serviceTierKey ? read(spec.serviceTierKey) : null;
+  return {
+    providerId: String((spec.providerKey && read(spec.providerKey)) || DEFAULT_PROVIDER_ID),
+    model: String(read(spec.key) ?? ""),
+    reasoningLevel: ((spec.reasoningKey && read(spec.reasoningKey)) || "medium") as ExperimentalProviderModelPickerValue["reasoningLevel"],
+    ...(tier === "fast" || tier === "default" ? { serviceTier: tier } : {}),
+  };
+}
+
+function formatValue(value: unknown, spec: FieldSpec, source?: Record<string, unknown>): string {
   if (value === null || value === undefined) return tr("не задано");
   if (typeof value === "boolean") return value ? tr("да") : tr("нет");
-  if (spec.kind === "model") {
-    const level = REASONING_OPTIONS.find((option) => option.value === reasoning)?.label;
-    return level ? `${value} · ${tr("рассуждение")} ${tr(level).toLowerCase()}` : String(value);
+  if (spec.kind === "model" && source) {
+    const selection = modelSelection(spec, (key) => source[key]);
+    return [providerName(selection.providerId), selection.model, `${tr("рассуждение")} ${selection.reasoningLevel}`, ...(selection.serviceTier === "fast" ? [tr("быстрый режим")] : [])].join(" · ");
   }
   return `${value}${spec.unit ? ` ${tr(spec.unit)}` : ""}`;
 }
@@ -208,10 +227,10 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
           <div className="divide-y divide-border rounded-lg border border-border">
             {group.fields.map((spec) => {
               const stored = draft as Record<string, unknown>;
-              const own = stored[spec.key] !== undefined || (spec.reasoningKey !== undefined && stored[spec.reasoningKey] !== undefined);
+              const own = stored[spec.key] !== undefined || companionKeys(spec).some((key) => stored[key] !== undefined);
               const pick = (key: WorkRuleKey) => (stored[key] !== undefined ? stored[key] : view.effective[key]);
               const value = pick(spec.key);
-              const reasoning = spec.reasoningKey ? pick(spec.reasoningKey) : undefined;
+              const selection = spec.kind === "model" ? modelSelection(spec, pick) : undefined;
               // Limits belong to the scope itself: empty means no limit here, nothing is inherited.
               const limit = spec.kind === "optionalNumber";
               const inherited = inheritable && !limit && !own;
@@ -222,7 +241,7 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
                   <div className="min-w-0">
                     <div className="flex items-center gap-1 text-sm font-medium">{tr(spec.label)}<InfoHint title={spec.label}>{spec.hint}</InfoHint></div>
                     <p className="text-xs text-muted-foreground">
-                      {spec.key === "budgetMonthlyUsd" && budget && own ? tr("в этом месяце: ${amount} ({percent}%)", { amount: (budget.spendUsdCents / 100).toFixed(2), percent: budget.percent }) : limit ? (own ? tr("лимит этого уровня") : tr("без лимита на этом уровне")) : inherited ? `${tr(SOURCE_LABEL[view.sources[spec.key] ?? "default"])}: ${formatValue(view.effective[spec.key], spec, spec.reasoningKey && view.effective[spec.reasoningKey])}` : own ? tr("своё значение") : `${tr(SOURCE_LABEL.default)}: ${formatValue(DEFAULT_WORK_RULES[spec.key], spec, spec.reasoningKey && DEFAULT_WORK_RULES[spec.reasoningKey])}`}
+                      {spec.key === "budgetMonthlyUsd" && budget && own ? tr("в этом месяце: ${amount} ({percent}%)", { amount: (budget.spendUsdCents / 100).toFixed(2), percent: budget.percent }) : limit ? (own ? tr("лимит этого уровня") : tr("без лимита на этом уровне")) : inherited ? `${tr(SOURCE_LABEL[view.sources[spec.key] ?? "default"])}: ${formatValue(view.effective[spec.key], spec, view.effective)}` : own ? tr("своё значение") : `${tr(SOURCE_LABEL.default)}: ${formatValue(DEFAULT_WORK_RULES[spec.key], spec, DEFAULT_WORK_RULES)}`}
                     </p>
                   </div>
                   <div className="flex items-center justify-end gap-2">
@@ -242,21 +261,27 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
                     )}
                     {inheritable && !limit && !tristate && (
                       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Switch checked={own} onCheckedChange={(next) => (next ? set(spec.key, view.effective[spec.key] ?? DEFAULT_WORK_RULES[spec.key]) : unset(spec.key, spec.reasoningKey))} aria-label={tr("{label}: своё значение", { label: tr(spec.label) })} />
+                        <Switch checked={own} onCheckedChange={(next) => (next ? set(spec.key, view.effective[spec.key] ?? DEFAULT_WORK_RULES[spec.key]) : unset(spec.key, ...companionKeys(spec)))} aria-label={tr("{label}: своё значение", { label: tr(spec.label) })} />
                         {tr("своё")}
                       </label>
                     )}
                     {!tristate && <FieldInput
                       spec={spec}
                       value={value}
-                      reasoning={reasoning}
+                      selection={selection}
                       disabled={inherited}
                       routingHostId={routingHostId}
                       onChange={(next) => (limit && next === null ? unset(spec.key) : set(spec.key, next))}
-                      onReasoning={(next) => spec.reasoningKey && set(spec.reasoningKey, next)}
+                      onSelection={(next) => {
+                        set(spec.key, next.model);
+                        if (spec.providerKey) set(spec.providerKey, next.providerId);
+                        if (spec.reasoningKey) set(spec.reasoningKey, next.reasoningLevel);
+                        // Providers without service tiers leave it empty.
+                        if (spec.serviceTierKey) set(spec.serviceTierKey, next.serviceTier ?? null);
+                      }}
                     />}
                     {!inheritable && !limit && own && spec.kind !== "bool" && (
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => unset(spec.key, spec.reasoningKey)}>{tr("Сбросить")}</Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => unset(spec.key, ...companionKeys(spec))}>{tr("Сбросить")}</Button>
                     )}
                   </div>
                 </div>
@@ -273,20 +298,18 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
   );
 }
 
-function FieldInput({ spec, value, reasoning, disabled, onChange, onReasoning, routingHostId }: { spec: FieldSpec; value: unknown; reasoning?: unknown; disabled: boolean; onChange: (value: unknown) => void; onReasoning: (value: string) => void; routingHostId?: string }) {
+function FieldInput({ spec, value, selection, disabled, onChange, onSelection, routingHostId }: { spec: FieldSpec; value: unknown; selection?: ExperimentalProviderModelPickerValue; disabled: boolean; onChange: (value: unknown) => void; onSelection: (value: ExperimentalProviderModelPickerValue) => void; routingHostId?: string }) {
   if (spec.kind === "bool") {
     return <Switch checked={Boolean(value)} disabled={disabled} onCheckedChange={(next) => onChange(next)} aria-label={tr(spec.label)} />;
   }
-  if (spec.kind === "model") {
+  if (spec.kind === "model" && selection) {
     return (
       <div className="flex w-56 justify-end" aria-label={tr(spec.label)}>
         <ProviderModelPicker
-          value={{ providerId: LAUNCH_PROVIDER_ID, model: String(value ?? ""), reasoningLevel: (reasoning as ReasoningLevel | undefined) ?? "medium" }}
-          onChange={(next) => {
-            onChange(next.model);
-            if (REASONING_OPTIONS.some((option) => option.value === next.reasoningLevel)) onReasoning(next.reasoningLevel as ReasoningLevel);
-          }}
+          value={selection}
+          onChange={onSelection}
           routing={routingHostId ? { kind: "host", hostId: routingHostId } : undefined}
+          allowProviderChange
           disabled={disabled}
           align="end"
         />

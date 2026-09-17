@@ -19,6 +19,9 @@ export const reasoningEffortSchema = z.enum([
   "ultracode",
 ]);
 
+/** Same values as SDK `threads.spawn` `serviceTier`: `fast` is the provider's fast mode. */
+export const serviceTierSchema = z.enum(["default", "fast"]);
+
 /** BB plugin id (`file-gateway`, `env-catalog`). */
 export const pluginIdSchema = z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/);
 /** Plugins whose tools, instructions and skills a launch of this employee receives. */
@@ -40,6 +43,8 @@ export const agentVersionSchema = z
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    /** Stored only when the provider supports service tiers. */
+    serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
@@ -80,6 +85,8 @@ export const createAgentVersionCommandSchema = createCommandSchema
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    /** Stored only when the provider supports service tiers. */
+    serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
@@ -117,6 +124,8 @@ export const agentVersionDraftSchema = z
     mcpIds: z.array(catalogMcpIdSchema),
     policyVersionId: opaqueIdSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
+    /** Stored only when the provider supports service tiers. */
+    serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
   })
   .strict();
@@ -153,6 +162,7 @@ export const saveDepartmentProfileCommandSchema = changeCommandSchema
   .strict();
 
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+export type ServiceTier = z.infer<typeof serviceTierSchema>;
 export type AgentVersion = z.infer<typeof agentVersionSchema>;
 export type PolicyVersion = z.infer<typeof policyVersionSchema>;
 export type ProcessVersion = z.infer<typeof processVersionSchema>;
@@ -172,4 +182,8 @@ export function optionalReasoningEffort(
   value: ReasoningEffort | undefined,
 ): { reasoningEffort: ReasoningEffort } | Record<string, never> {
   return value ? { reasoningEffort: value } : {};
+}
+
+export function optionalServiceTier(value: ServiceTier | undefined): { serviceTier: ServiceTier } | Record<string, never> {
+  return value ? { serviceTier: value } : {};
 }

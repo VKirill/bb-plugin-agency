@@ -23,13 +23,13 @@ describe("public launch reason codes", () => {
     ).toBe("assignee_not_member");
     expect(
       publicLaunchReasonCode({
-        assignedErrorCode: "provider_isolation_unproven",
+        assignedErrorCode: "provider_unavailable",
         handshakeReady: true,
         sdkTypedSpawnReady: true,
         launchAllowed: false,
         hasJobId: true,
       }),
-    ).toBe("isolation_unproven");
+    ).toBe("launch_not_authorized");
     expect(
       publicLaunchReasonCode({
         handshakeReady: false,
@@ -71,7 +71,6 @@ describe("public launch reason codes", () => {
       isolationReady: false,
       isolatedSpawnFields: false,
       sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
       assignedProvider: null,
       launchAllowedForAssigned: false,
       reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",

@@ -1,6 +1,7 @@
 import { fail, ok, type DomainResult } from "../../domain";
 import { STARTER_KIT, kitDepartment, type KitAgent, type KitDepartment, type KitLanguage } from "../../shared/starter-kit";
 import type { SqlDatabase } from "../db/sql";
+import type { ReasoningEffort, ServiceTier } from "../../shared/contracts/versions";
 
 /**
  * Starter departments and employees. Installed records are remembered with their
@@ -192,10 +193,11 @@ export type StarterKitPorts = {
   db: SqlDatabase;
   now: () => string;
   newRequestId: () => string;
-  /** Standard employee permissions: the launch CLI on any machine the binding allows. */
+  /** Standard employee permissions: project files, any CLI, any machine the binding allows. */
   policyVersionId: () => DomainResult<string>;
-  defaults: (roleType: KitAgent["roleType"]) => { model: string; reasoningEffort: "low" | "medium" | "high" | "xhigh" | "max" };
-  provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: string; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
+  /** CLI, model, reasoning and fast mode for a role type from the agency work rules. */
+  defaults: (roleType: KitAgent["roleType"]) => { providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier: ServiceTier | null };
+  provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
   provisionDepartment: (input: { requestId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<{ department: { id: string } }>;
   addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" }) => DomainResult<unknown>;
   saveAgentProfile: (input: { requestId: string; expectedRevision: number; agentId: string; name: string; state: string; version: AgentState["version"] }) => DomainResult<unknown>;
@@ -239,9 +241,10 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
           version: 1,
           role: agent.text[input.language].role,
           instructions: agent.text[input.language].instructions,
-          providerId: "claude-code",
+          providerId: defaults.providerId,
           model: defaults.model,
           reasoningEffort: defaults.reasoningEffort,
+          ...(defaults.serviceTier ? { serviceTier: defaults.serviceTier } : {}),
           skillIds: [],
           mcpIds: [],
           policyVersionId: policy.value,

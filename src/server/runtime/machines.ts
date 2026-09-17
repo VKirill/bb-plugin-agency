@@ -43,6 +43,12 @@ export function machineDirectory(bb:BbPluginApi) {
   if(host.status!=='connected')return fail('host_offline',`Машина «${name}» не в сети: сотрудник не запустится. Включите её или поставьте задачу в проект на другой машине.`);
   const saved=cliPolicySchema.safeParse(await bb.storage.kv.get(key(input.hostId,input.providerId)));
   if(saved.success&&saved.data==='disabled')return fail('provider_disabled',`CLI ${input.providerId} выключен для машины «${name}» в разделе «Машины».`);
+  // Any provider connected in BB launches; one the machine does not know or cannot use is named before the launch.
+  try{
+   const provider=(await bb.sdk.providers.list({hostId:input.hostId,signal:AbortSignal.timeout(12000)})).find(p=>p.id===input.providerId);
+   if(!provider)return fail('provider_unavailable',`CLI ${input.providerId} не подключён в BB на машине «${name}». Подключите его в настройках BB или выберите сотруднику другой CLI.`);
+   if(!provider.available)return fail('provider_unavailable',`CLI ${provider.displayName||input.providerId} на машине «${name}» сейчас недоступен. ${provider.strings?.signInHint??''}`.trim());
+  }catch{/* catalog unknown: the CLI status below and the run watch still report a thread that never starts */}
   try{
    const cli=(await bb.sdk.hosts.providerCliStatus({hostId:input.hostId,signal:AbortSignal.timeout(12000)}))[input.providerId];
    if(cli&&cli.installed===false)return fail('provider_cli_missing',`На машине «${name}» не установлен CLI ${cli.displayName||input.providerId}.`);

@@ -10,9 +10,10 @@
 **1. Постоянные данные и UI.** CRUD, revision/CAS, список/карточка на RPC,
 артефакты на host binding, preview, published ≠ accepted. Деморежим отделён.
 
-**2. Изоляция (частично).** Proven только `claude-code` + GET spawn-contract.
-Обычный host 0.4.87 без контракта: spawn unavailable. Codex/OpenCode и обходы
-shell — не закрыты.
+**2. Запуск на любом CLI (готово).** GET spawn-contract; CLI, модель, рассуждение и
+быстрый режим из профиля. Claude Code, Codex, Cursor, OpenCode и Antigravity проверены
+живым запуском. Обычный host 0.4.87 без контракта: spawn unavailable. Файловая
+песочница и обходы shell — не закрыты.
 
 **3. Ручной цикл (частично).** prepare → spawn (isolated) → bind → watch
 (`idle`+hash → review / `awaiting_review`) или `reportNeedsInput` → `waiting_input`

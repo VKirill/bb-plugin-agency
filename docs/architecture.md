@@ -35,7 +35,7 @@ src/server/db                 append-only миграции, в т.ч. run/needs_
 src/server/services           CRUD, facts, accept
 src/server/artifacts          publish/open
 src/server/runtime
-  isolation.ts                отказ без proven provider
+  isolation.ts                отказ без spawn-contract
   context-snapshot            compile schema 2
   prepare-run                 reserve + attachJobInput
   run-store                   snapshot, attempt, receipt

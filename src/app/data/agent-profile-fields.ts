@@ -3,13 +3,12 @@ import type { Agent } from "../prototype/data";
 
 /** Fields `saveAgentProfile` / AgentVersion draft persist (AGY-17). */
 export const AGENT_PROFILE_SAVED_HINT =
-  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, модель, уровень рассуждения и навыки. Идущие запуски работают по прежней версии.";
+  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, CLI, модель, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.";
 
 export const AGENT_PROFILE_UNSUPPORTED = {
   department: "Отдел задаётся в составе отдела, в версии профиля не хранится.",
   host: "Машина в версии профиля не хранится. Запуск идёт в окружении проекта задачи.",
   reasoning: "Уровень рассуждения в версии профиля не хранится.",
-  serviceTier: "Тариф модели в версии профиля не хранится.",
   permission: "Режим разрешений в версии профиля не хранится.",
   concurrency: "Число одновременных задач в версии профиля не хранится.",
   shell: "Доступ к терминалу в версии профиля не хранится.",
@@ -45,6 +44,7 @@ export function persistedAgentDirty(current: Agent, next: Agent): boolean {
     current.selection.providerId !== next.selection.providerId ||
     current.selection.model !== next.selection.model ||
     (current.reasoningEffort ?? "") !== (next.reasoningEffort ?? "") ||
+    (current.selection.serviceTier ?? "") !== (next.selection.serviceTier ?? "") ||
     (current.policyVersionId ?? "") !== (next.policyVersionId ?? "") ||
     !sameIds(current.skills, next.skills) ||
     !sameIds(current.mcps, next.mcps) ||
@@ -57,7 +57,6 @@ export function unsupportedAgentFieldChanges(current: Agent, next: Agent): strin
   const labels: string[] = [];
   if ((current.department || "") !== (next.department || "")) labels.push("отдел");
   if ((current.hostId || "") !== (next.hostId || "")) labels.push("машина");
-  if ((current.selection.serviceTier || "") !== (next.selection.serviceTier || "")) labels.push("тариф модели");
   if (current.permission !== next.permission) labels.push("режим разрешений");
   if (current.concurrency !== next.concurrency) labels.push("одновременные задачи");
   if (Boolean(current.shell) !== Boolean(next.shell)) labels.push("терминал");

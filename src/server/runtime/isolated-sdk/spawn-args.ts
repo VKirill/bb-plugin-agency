@@ -65,12 +65,14 @@ export function spawnArgsFromContract(
     experimental_callerLaunchId: contract.launchId,
     experimental_callerAttemptId: contract.attemptId,
     ...(jobId ? { experimental_callerJobId: jobId } : {}),
-    ...(snapshot.execution?.reasoningLevel || snapshot.execution?.permissionMode
+    ...(snapshot.execution?.reasoningLevel || snapshot.execution?.serviceTier || snapshot.execution?.permissionMode
       ? {
           ...(snapshot.execution.reasoningLevel ? { reasoningLevel: snapshot.execution.reasoningLevel } : {}),
+          ...(snapshot.execution.serviceTier ? { serviceTier: snapshot.execution.serviceTier } : {}),
           ...(snapshot.execution.permissionMode ? { permissionMode: snapshot.execution.permissionMode } : {}),
           executionInputSources: {
             ...(snapshot.execution.reasoningLevel ? { reasoningLevel: "explicit" as const } : {}),
+            ...(snapshot.execution.serviceTier ? { serviceTier: "explicit" as const } : {}),
             ...(snapshot.execution.permissionMode ? { permissionMode: "explicit" as const } : {}),
           },
         }

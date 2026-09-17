@@ -1,7 +1,7 @@
 import { usePluginFeatures } from "./use-plugin-features";
 import { useEffect, useRef, useState } from "react";
 import { experimental_ProviderModelPicker as ProviderModelPicker, type ExperimentalProviderModelPickerValue } from "@get-bb/plugin-sdk/app";
-import { LAUNCH_PROVIDER_ID, REASONING_OPTIONS, ROLE_TYPE_OPTIONS, TITLE_PLACEHOLDER, type ReasoningLevel, type RoleType } from "../data/role-types";
+import { ROLE_TYPE_OPTIONS, TITLE_PLACEHOLDER, type RoleType } from "../data/role-types";
 import { jobDescriptionTemplate } from "../data/instruction-templates";
 import { useTemplates } from "./use-templates";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
@@ -9,7 +9,6 @@ import type { BbCatalog } from "../data/store-commands";
 import { advancedCatalogPolicies, catalogEnvironmentOptions, projectHasActiveFolder, DEFAULT_AGENT_POLICY_HINT, DEFAULT_BINDING_POLICY_HINT, DEFAULT_CATALOG_POLICY, environmentPlacementLabel, policyVersionIdForCreate } from "../data/persist-create";
 import { Button, Checks, Choice, Field, HintedChoice, TextField } from "./shared";
 import { charterIssues } from "../data/charter";
-import { providerLaunchNote, useLaunchableProviders } from "./use-launchable-providers";
 import { FALLBACK_ROLE_DEFAULTS, useRoleDefaults } from "./use-role-defaults";
 import { tr } from "../i18n";
 
@@ -49,16 +48,16 @@ export function AgencyCreateDialogs({
     policyVersionId?: string;
     providerId?: string;
     model?: string;
-    reasoningEffort?: ReasoningLevel;
+    reasoningEffort?: ExperimentalProviderModelPickerValue["reasoningLevel"];
+    serviceTier?: ExperimentalProviderModelPickerValue["serviceTier"];
     departmentId?: string;
     roleType?: "executor" | "reviewer";
   }) => Promise<boolean>;
   createDepartment: (input: { name: string; leadAgentId: string; instructions: string; acceptance: string; bindingId?: string; executorIds?: string[]; reviewerIds?: string[] }) => Promise<boolean>;
 }) {
   const [pending, setPending] = useState(false);
-  const launchableProviders = useLaunchableProviders();
   const features = usePluginFeatures(kind === "project");
-  // Starting model and reasoning per role type come from «Настройки → Правила работы».
+  // Starting CLI, model, reasoning and fast mode per role type come from «Настройки → Правила работы».
   const roleDefaults = useRoleDefaults(kind === "agent");
   // Starting texts from «Настройки → Шаблоны».
   const templates = useTemplates();
@@ -71,8 +70,6 @@ export function AgencyCreateDialogs({
     if (kind === "agent" && !instructionsTouched) setInstructions(jobDescriptionTemplate(roleType, templates));
     if (kind === "department") setInstructions((current) => (current === previous.charter ? templates.charter : current));
   }, [templates]);
-  const DEFAULT_MODEL = roleDefaults.model;
-  const DEFAULT_REASONING = roleDefaults.reasoning;
   const appliedDefaults = useRef(FALLBACK_ROLE_DEFAULTS);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [projectId, setProjectId] = useState("");
@@ -82,8 +79,7 @@ export function AgencyCreateDialogs({
   const [role, setRole] = useState("");
   const [roleType, setRoleType] = useState<RoleType>("executor");
   const [agentDepartment, setAgentDepartment] = useState("none");
-  const [selection, setSelection] = useState<ExperimentalProviderModelPickerValue>({ providerId: LAUNCH_PROVIDER_ID, model: DEFAULT_MODEL.executor, reasoningLevel: DEFAULT_REASONING.executor });
-  const [reasoning, setReasoning] = useState<ReasoningLevel>(DEFAULT_REASONING.executor);
+  const [selection, setSelection] = useState<ExperimentalProviderModelPickerValue>(roleDefaults.executor);
   const [instructionsTouched, setInstructionsTouched] = useState(false);
   const [instructions, setInstructions] = useState("Выполняйте поручение и приложите проверяемый результат.");
   const [acceptance, setAcceptance] = useState("Результат проверен, файл приложен.");
@@ -99,8 +95,7 @@ export function AgencyCreateDialogs({
     setRole("");
     setRoleType("executor");
     setAgentDepartment("none");
-    setSelection({ providerId: LAUNCH_PROVIDER_ID, model: DEFAULT_MODEL.executor, reasoningLevel: DEFAULT_REASONING.executor });
-    setReasoning(DEFAULT_REASONING.executor);
+    setSelection(roleDefaults.executor);
     setInstructionsTouched(false);
     setInstructions(kind === "agent" ? jobDescriptionTemplate("executor", templates) : "Выполняйте поручение и приложите проверяемый результат.");
     setAcceptance("Результат проверен, файл приложен.");
@@ -129,8 +124,8 @@ export function AgencyCreateDialogs({
     const previous = appliedDefaults.current;
     appliedDefaults.current = roleDefaults;
     if (kind !== "agent" || previous === roleDefaults) return;
-    setSelection((current) => (current.model === previous.model[roleType] ? { ...current, model: roleDefaults.model[roleType], reasoningLevel: roleDefaults.reasoning[roleType] } : current));
-    setReasoning((current) => (current === previous.reasoning[roleType] ? roleDefaults.reasoning[roleType] : current));
+    // The owner's defaults arrived after the form opened: replace the choice the person has not touched.
+    setSelection((current) => (sameSelection(current, previous[roleType]) ? roleDefaults[roleType] : current));
   }, [roleDefaults]);
 
   useEffect(() => {
@@ -141,8 +136,8 @@ export function AgencyCreateDialogs({
   }, [kind, projectId, catalog.environments, environmentId]);
 
   const environment = catalog.environments.find((item) => item.id === environmentId);
-  // Only an active employee on the launched CLI can lead or work in a department.
-  const launchable = agents.filter((agent) => agent.enabled !== false && (!agent.selection || launchableProviders.includes(agent.selection.providerId)));
+  // Only an active employee can lead or work in a department; any CLI connected in BB launches.
+  const launchable = agents.filter((agent) => agent.enabled !== false);
   const nameTaken = kind === "department" && existingDepartmentNames.some((item) => item.trim().toLocaleLowerCase("ru") === name.trim().toLocaleLowerCase("ru")) && Boolean(name.trim());
   const issues = kind === "department" ? charterIssues(instructions) : [];
   const advancedPolicies = advancedCatalogPolicies(catalog.policies);
@@ -168,7 +163,8 @@ export function AgencyCreateDialogs({
         policyVersionId: policyVersionIdForCreate(policyId) || undefined,
         providerId: selection.providerId,
         model: selection.model,
-        reasoningEffort: reasoning,
+        reasoningEffort: selection.reasoningLevel,
+        ...(selection.serviceTier ? { serviceTier: selection.serviceTier } : {}),
         ...(joinsDepartment ? { departmentId: agentDepartment, roleType: roleType === "reviewer" ? "reviewer" : "executor" } : {}),
       });
     }
@@ -242,8 +238,7 @@ export function AgencyCreateDialogs({
                 value={roleType}
                 onChange={(next) => {
                   setRoleType(next);
-                  setReasoning(DEFAULT_REASONING[next]);
-                  setSelection((current) => ({ ...current, reasoningLevel: DEFAULT_REASONING[next], model: current.model === DEFAULT_MODEL[roleType] ? DEFAULT_MODEL[next] : current.model }));
+                  setSelection((current) => (sameSelection(current, roleDefaults[roleType]) ? roleDefaults[next] : current));
                   if (!instructionsTouched) setInstructions(jobDescriptionTemplate(next, templates));
                 }}
                 options={ROLE_TYPE_OPTIONS}
@@ -257,26 +252,15 @@ export function AgencyCreateDialogs({
                 </Field>
               )}
               <TextField label="Должность" value={role} onChange={setRole} maxLength={80} required placeholder={TITLE_PLACEHOLDER[roleType]} info={<><p>{tr("Свободный текст на языке команды: как эту работу называют у вас. Показывается в карточках и в инструкциях руководителю.")}</p><p>{tr("На поведение системы влияет тип роли, а не должность.")}</p></>} />
-              <Field label="CLI и модель" required info={<><p>{tr("Любой провайдер, подключённый в BB. Запуск задач Агентство сейчас выполняет только для CLI с подтверждённым изолированным запуском — иначе форма предупредит.")}</p><p>{tr("Сильная модель нужна руководителю и проверяющему, для типовой работы исполнителя хватает более быстрой и дешёвой.")}</p></>}>
+              <Field label="CLI и модель" required info={<><p>{tr("Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Модель, уровень рассуждения и быстрый режим выбираются здесь же.")}</p><p>{tr("Сильная модель нужна руководителю и проверяющему, для типовой работы исполнителя хватает более быстрой и дешёвой.")}</p><p>{tr("Значения по умолчанию для каждого типа роли задаются в «Настройки → Правила работы».")}</p></>}>
                 <ProviderModelPicker
                   value={selection}
-                  onChange={(next) => {
-                    setSelection({ providerId: next.providerId, model: next.model, reasoningLevel: next.reasoningLevel });
-                    if (REASONING_OPTIONS.some((option) => option.value === next.reasoningLevel)) setReasoning(next.reasoningLevel as ReasoningLevel);
-                  }}
+                  onChange={setSelection}
                   routing={routingHostId ? { kind: "host", hostId: routingHostId } : undefined}
                   allowProviderChange
                   align="start"
                 />
-                {providerLaunchNote(selection.providerId, launchableProviders) && <p className="text-xs text-amber-700 dark:text-amber-400">{providerLaunchNote(selection.providerId, launchableProviders)}</p>}
               </Field>
-              <HintedChoice
-                label="Уровень рассуждения"
-                value={reasoning}
-                onChange={(next) => { setReasoning(next); setSelection((current) => ({ ...current, reasoningLevel: next })); }}
-                options={REASONING_OPTIONS}
-                info={<><p>{tr("Сколько модель думает перед ответом. Выше — точнее решения, но дороже и медленнее.")}</p><p>{tr("Значения по умолчанию для каждого типа роли задаются в «Настройки → Правила работы».")}</p></>}
-              />
               <TextField
                 label="Должностная инструкция"
                 value={instructions}
@@ -291,7 +275,7 @@ export function AgencyCreateDialogs({
                 <details className="text-xs">
                   <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{tr("Другие права")}</summary>
                   <div className="mt-2">
-                    <Choice label="Политика прав" value={policyId || DEFAULT_CATALOG_POLICY} onChange={setPolicyId} options={[{ value: DEFAULT_CATALOG_POLICY, label: "Стандартные: файлы проекта · Claude Code" }, ...advancedPolicies.map((item) => ({ value: item.id, label: item.label }))]} />
+                    <Choice label="Политика прав" value={policyId || DEFAULT_CATALOG_POLICY} onChange={setPolicyId} options={[{ value: DEFAULT_CATALOG_POLICY, label: "Стандартные: файлы проекта · любой CLI" }, ...advancedPolicies.map((item) => ({ value: item.id, label: item.label }))]} />
                   </div>
                 </details>
               )}
@@ -300,7 +284,7 @@ export function AgencyCreateDialogs({
           {kind === "department" && (
             <div className="max-h-[65dvh] space-y-3 overflow-y-auto pr-1">
               <TextField label="Название" value={name} onChange={setName} maxLength={80} required placeholder="Например: Разработка" hint={nameTaken ? "Отдел с таким названием уже есть: агенты не смогут их различить." : undefined} info={<><p>{tr("По названию и разделу «Принимаем» агенты в чатах выбирают, какому отделу поручить работу. Названия отделов не повторяются.")}</p></>} />
-              <Field label="Руководитель" required info={<><p>{tr("Получает все задачи отдела, оценивает их, раздаёт подзадачи исполнителям и проверяющим и собирает итог.")}</p><p>{tr("В списке только активные сотрудники на CLI, который Агентство может запустить ({providers}). Нет подходящего — сначала создайте сотрудника.", { providers: launchableProviders.join(", ") })}</p></>}>
+              <Field label="Руководитель" required info={<><p>{tr("Получает все задачи отдела, оценивает их, раздаёт подзадачи исполнителям и проверяющим и собирает итог.")}</p><p>{tr("В списке активные сотрудники на любом CLI. Нет подходящего — сначала создайте сотрудника.")}</p></>}>
                 <Choice label="Руководитель" value={leadId || "unset"} onChange={(value) => setLeadId(value === "unset" ? "" : value)} options={[{ value: "unset", label: "Выберите руководителя" }, ...launchable.map((item) => ({ value: item.id, label: item.role ? `${item.name} · ${item.role}` : item.name }))]} />
               </Field>
               {launchable.length > 1 && (
@@ -337,4 +321,8 @@ export function AgencyCreateDialogs({
       </DialogContent>
     </Dialog>
   );
+}
+
+function sameSelection(left: ExperimentalProviderModelPickerValue, right: ExperimentalProviderModelPickerValue): boolean {
+  return left.providerId === right.providerId && left.model === right.model && left.reasoningLevel === right.reasoningLevel && (left.serviceTier ?? null) === (right.serviceTier ?? null);
 }

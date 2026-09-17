@@ -173,7 +173,7 @@ export const CLI_OPERATIONS = {
   },
   getIsolationReadiness: {
     input: getIsolationReadinessRpcSchema,
-    summary: "GET spawn-contract + typed spawn; engines не готовность; только claude-code",
+    summary: "GET spawn-contract + typed spawn; engines не готовность; любой CLI, подключённый в BB, если его разрешают политики проекта и сотрудника",
   },
   returnJobForRework: {
     input: returnJobForReworkCommandSchema,

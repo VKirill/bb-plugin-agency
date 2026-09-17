@@ -9,7 +9,7 @@ import { mapAgents, mapDepartments, mapProjects } from "../src/app/data/view-mod
 import { agentDraftStale, isOwnProfileEcho, unsupportedAgentFieldChanges } from "../src/app/data/agent-profile-fields";
 import { applyDraftsAfterSave, canLeaveAfterSave, commitDocumentSave } from "../src/app/data/document-save";
 import { assigneeChoiceOptions, assigneeFields, assigneesForDepartment, canConfirmPlacement, departmentsForBinding, JOB_CREATE_HINT, placementFields, sanitizeDepartmentId, selectedAgentId, selectedBindingId, selectedDepartmentId, UNASSIGNED_AGENT } from "../src/app/data/job-placement";
-import { productServerReason, PRODUCT_ASSIGNEE_REQUIRED, PRODUCT_CLAUDE_ONLY, PRODUCT_HANDSHAKE_UNREADY } from "../src/app/data/product-reasons";
+import { productServerReason, PRODUCT_ASSIGNEE_REQUIRED, PRODUCT_HANDSHAKE_UNREADY } from "../src/app/data/product-reasons";
 import {
   applyRestoredSaveResult,
   commitRestoredDocumentSave,
@@ -503,7 +503,6 @@ describe("workspace view models", () => {
       isolationReady: false,
       isolatedSpawnFields: false,
       sdkTypedSpawnReady: false,
-      provenIsolationProviders: [],
       assignedProvider: null,
       launchAllowedForAssigned: false,
       reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",
@@ -514,7 +513,6 @@ describe("workspace view models", () => {
       isolationReady: true,
       isolatedSpawnFields: true,
       sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
       assignedProvider: { jobId: "job_a", agentId: "agt_a", agentVersionId: "agv_a", providerId: "claude-code", source: "live_assigned_agent_version" },
       launchAllowedForAssigned: false,
       reasonCode: "launch_not_authorized",
@@ -1035,7 +1033,6 @@ describe("AGY-8 live launch UI", () => {
       isolationReady: false,
       isolatedSpawnFields: false,
       sdkTypedSpawnReady: false,
-      provenIsolationProviders: [],
       assignedProvider: null,
       launchAllowedForAssigned: false,
       reason: "job.assignedAgentId is required",
@@ -1240,7 +1237,6 @@ describe("AGY-8 live launch UI", () => {
       isolationReady: true,
       isolatedSpawnFields: true,
       sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
       assignedProvider: null,
       launchAllowedForAssigned: false,
       reason: "GET proven",
@@ -1251,7 +1247,6 @@ describe("AGY-8 live launch UI", () => {
       isolationReady: true,
       isolatedSpawnFields: true,
       sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
       assignedProvider: {
         jobId: "job_offer0001",
         agentId: "agt_writer01",
@@ -1270,15 +1265,14 @@ describe("AGY-8 live launch UI", () => {
     })).toBe("blocked");
   });
 
-  it("gates launch on assignee providerId and does not default provenIsolationProviders", () => {
-    const claudeNote = "isolation proven only for claude-code; readiness does not grant launch for other providers";
+  it("launches any assigned provider the server allows, and only that provider", () => {
     const missingField = parseIsolationReadiness({
       handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
       isolatedSpawnFields: true,
       sdkTypedSpawnReady: true,
-      reason: claudeNote,
+      reason: "ready",
     });
     expect(missingField).toBeNull();
     expect(readinessAllowsProvider(missingField, "claude-code")).toBe(false);
@@ -1290,38 +1284,39 @@ describe("AGY-8 live launch UI", () => {
       providerId: "codex",
       source: "live_assigned_agent_version" as const,
     };
-    const readyBitsWrongAssignee = parseIsolationReadiness({
+    const readyCodex = parseIsolationReadiness({
       handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
       isolatedSpawnFields: true,
       sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
+      assignedProvider: assignedCodex,
+      launchAllowedForAssigned: true,
+      reasonCode: "ok",
+      reason: "ready",
+    });
+    expect(readinessAllowsProvider(readyCodex, "codex")).toBe(true);
+    expect(launchReadinessNotice(readyCodex, "codex")).toBeNull();
+    // A draft that names another CLI than the live profile does not launch.
+    expect(readinessAllowsProvider(readyCodex, "claude-code")).toBe(false);
+    expect(launchAssigneeProviderId(readyCodex)).toBe("codex");
+    const unavailable = parseIsolationReadiness({
+      handshakeReady: true,
+      executionAvailable: true,
+      isolationReady: true,
+      isolatedSpawnFields: true,
+      sdkTypedSpawnReady: true,
       assignedProvider: assignedCodex,
       launchAllowedForAssigned: false,
-      reason: claudeNote,
+      reasonCode: "launch_not_authorized",
+      reason: "CLI codex не подключён в BB на машине «Mac mini». Подключите его в настройках BB или выберите сотруднику другой CLI.",
     });
-    expect(readinessAllowsProvider(readyBitsWrongAssignee, "codex")).toBe(false);
-    expect(launchReadinessNotice(readyBitsWrongAssignee, "codex")).toBe(PRODUCT_CLAUDE_ONLY);
-    expect(launchAssigneeProviderId(readyBitsWrongAssignee)).toBe("codex");
-    const assignedClaude = { ...assignedCodex, providerId: "claude-code" };
-    const readyClaude = parseIsolationReadiness({
-      handshakeReady: true,
-      executionAvailable: true,
-      isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
-      provenIsolationProviders: ["claude-code"],
-      assignedProvider: assignedClaude,
-      launchAllowedForAssigned: true,
-      reason: claudeNote,
-    });
-    expect(readinessAllowsProvider(readyClaude, "claude-code")).toBe(true);
-    expect(launchReadinessNotice(readyClaude, "claude-code")).toBeNull();
+    expect(readinessAllowsProvider(unavailable, "codex")).toBe(false);
+    expect(launchReadinessNotice(unavailable, "codex")).toContain("не подключён в BB");
     expect(launchAssigneeProviderId(null)).toBeNull();
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: jobLaunchAllowedFromReadiness(readyBitsWrongAssignee),
+      handshakeReady: jobLaunchAllowedFromReadiness(unavailable),
       lastPrepare: null,
       hasLaunchId: false,
     })).toBe("blocked");

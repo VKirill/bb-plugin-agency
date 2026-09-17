@@ -160,16 +160,34 @@ describe("AgentVersion reasoningEffort", () => {
         version: 2,
         role: "editor",
         instructions: "Править тексты по брифу.",
-        providerId: "claude-code",
-        model: "opus",
+        providerId: "codex",
+        model: "gpt-5.6-luna",
         skillIds: [skillId],
         mcpIds: [],
         policyVersionId: policy.value.id,
         reasoningEffort: "medium",
+        serviceTier: "fast",
       });
       if (!withEffort.ok) throw new Error(withEffort.error.message);
       expect(withEffort.value.reasoningEffort).toBe("medium");
       expect(store.getAgentVersion(withEffort.value.id)?.reasoningEffort).toBe("medium");
+      expect(store.getAgentVersion(withEffort.value.id)?.serviceTier).toBe("fast");
+      expect(storedOmit?.serviceTier).toBeUndefined();
+
+      // The policy names Codex only: a profile on another CLI could never launch, so it is refused on save.
+      const otherCli = store.createAgentVersion(bootstrap, {
+        requestId: requestId(),
+        agentId: agent.value.agent.id,
+        version: 3,
+        role: "editor",
+        instructions: "Править тексты по брифу.",
+        providerId: "claude-code",
+        model: "claude-sonnet-5",
+        skillIds: [skillId],
+        mcpIds: [],
+        policyVersionId: policy.value.id,
+      });
+      expect(otherCli).toMatchObject({ ok: false, error: { code: "provider_not_allowed_by_policy" } });
     } finally {
       close();
     }

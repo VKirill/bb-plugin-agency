@@ -11,7 +11,6 @@ import {
 import { nextLaunchAction, parseIsolationReadiness, parsePrepareLaunch } from "../src/app/data/launch-rpc";
 import {
   PRODUCT_ASSIGNEE_REQUIRED,
-  PRODUCT_CLAUDE_ONLY,
   PRODUCT_HANDSHAKE_UNREADY,
   PRODUCT_LAUNCH_READY,
   PRODUCT_LAUNCH_STARTED,
@@ -106,10 +105,6 @@ describe("reasonCode-first launch copy", () => {
       reasonCode: "assignee_required",
       reason: "job.assignedAgentId is required",
     })).toBe(PRODUCT_ASSIGNEE_REQUIRED);
-    expect(productLaunchCopy({
-      reasonCode: "isolation_unproven",
-      reason: "Isolation proven only for claude-code",
-    })).toBe(PRODUCT_CLAUDE_ONLY);
     expect(productLaunchCopy({
       reasonCode: "ok",
       reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",

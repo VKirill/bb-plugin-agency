@@ -1,5 +1,5 @@
 import { knowledgeBlock } from "../knowledge/store";
-import { ISOLATION_PROVEN_PROVIDERS } from "../runtime/isolated-sdk/sdk-isolation-contract";
+import { agencyLanguage } from "../i18n/language.js";
 import { currentAgencyRules } from "../templates/store";
 import { handInCommentMissing } from "../runtime/hand-in/service";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
@@ -73,6 +73,7 @@ import {
   saveDepartmentProfileCommandSchema,
   optionalPluginIds,
   optionalReasoningEffort,
+  optionalServiceTier,
   jobTransitionCommandSchema,
   publishArtifactVersionCommandSchema,
   updateAgentCommandSchema,
@@ -432,6 +433,18 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     );
   }
 
+  /** A profile names its CLI; its permission policy must not forbid that CLI, or no launch could ever pass. */
+  function assertPolicyAllowsProvider(policyVersionId: string, providerId: string): DomainResult<true> {
+    const allowed = repos.policy.get(policyVersionId)?.cliHostConstraints.providerIds ?? [];
+    if (!allowed.length || allowed.includes(providerId)) return ok(true);
+    return fail(
+      "provider_not_allowed_by_policy",
+      agencyLanguage() === "en"
+        ? `The employee's permission policy allows only ${allowed.join(", ")}, not ${providerId}. Pick a policy that allows this CLI or any CLI.`
+        : `Политика прав сотрудника разрешает только ${allowed.join(", ")}, а не ${providerId}. Выберите политику, которая разрешает этот CLI или любой CLI.`,
+    );
+  }
+
   /** Paused or archived employees take no new work. */
   function assertAgentActive(agentId: string | null | undefined): DomainResult<true> {
     if (!agentId) return ok(true);
@@ -623,6 +636,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (!repos.policy.get(input.version.policyVersionId)) {
           return fail("not_found", `policy ${input.version.policyVersionId} not found`);
         }
+        const allowed = assertPolicyAllowsProvider(input.version.policyVersionId, input.version.providerId);
+        if (!allowed.ok) return allowed;
         const agentId = newOpaqueId("agent");
         const versionId = newOpaqueId("agentVersion");
         const updatedAt = nowUtc(ctx);
@@ -638,6 +653,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           mcpIds: input.version.mcpIds,
           policyVersionId: input.version.policyVersionId,
           ...optionalReasoningEffort(input.version.reasoningEffort),
+          ...optionalServiceTier(input.version.serviceTier),
           ...optionalPluginIds(input.version.pluginIds),
         };
         const agent: Agent = {
@@ -665,6 +681,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (!repos.policy.get(parsed.data.policyVersionId)) {
           return fail("not_found", `policy ${parsed.data.policyVersionId} not found`);
         }
+        const allowed = assertPolicyAllowsProvider(parsed.data.policyVersionId, parsed.data.providerId);
+        if (!allowed.ok) return allowed;
         const version: AgentVersion = {
           id: newOpaqueId("agentVersion"),
           agentId: parsed.data.agentId,
@@ -677,6 +695,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           mcpIds: parsed.data.mcpIds,
           policyVersionId: parsed.data.policyVersionId,
           ...optionalReasoningEffort(parsed.data.reasoningEffort),
+          ...optionalServiceTier(parsed.data.serviceTier),
           ...optionalPluginIds(parsed.data.pluginIds),
         };
         try {
@@ -851,6 +870,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (!repos.policy.get(parsed.data.version.policyVersionId)) {
           return fail("not_found", `policy ${parsed.data.version.policyVersionId} not found`);
         }
+        const allowed = assertPolicyAllowsProvider(parsed.data.version.policyVersionId, parsed.data.version.providerId);
+        if (!allowed.ok) return allowed;
         const currentVersion = repos.agentVersion.get(current.value.currentVersionId);
         if (!currentVersion) return fail("not_found", `agent version ${current.value.currentVersionId} not found`);
         const draft = parsed.data.version;
@@ -861,6 +882,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           currentVersion.model === draft.model &&
           currentVersion.policyVersionId === draft.policyVersionId &&
           currentVersion.reasoningEffort === draft.reasoningEffort &&
+          currentVersion.serviceTier === draft.serviceTier &&
           sameTextList(currentVersion.skillIds, draft.skillIds) &&
           sameTextList(currentVersion.mcpIds, draft.mcpIds) &&
           sameTextList(currentVersion.pluginIds ?? [], draft.pluginIds ?? []);
@@ -878,6 +900,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
             mcpIds: draft.mcpIds,
             policyVersionId: draft.policyVersionId,
             ...optionalReasoningEffort(draft.reasoningEffort),
+            ...optionalServiceTier(draft.serviceTier),
             ...optionalPluginIds(draft.pluginIds),
           };
           try {
@@ -1658,8 +1681,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
   };
 
   /**
-   * Automatic assignment: the lead, or the active member of a role type on a
-   * launchable CLI with the fewest open jobs (ties by name). Team reviewers of
+   * Automatic assignment: the lead, or the active member of a role type with a
+   * CLI in the profile and the fewest open jobs (ties by name). Team reviewers of
    * the job are skipped for an executor pick.
    */
   function pickAssignee(departmentId: string, role: "lead" | "executor" | "reviewer", reviewerIds: readonly string[], bindingId?: string): DomainResult<string> {
@@ -1680,7 +1703,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       .all(departmentId, role) as { agent_id: string; provider_id: string | null; open_jobs: number }[];
     const pick = rows.find(
       (row) =>
-        (ISOLATION_PROVEN_PROVIDERS as readonly string[]).includes(row.provider_id ?? "") &&
+        Boolean(row.provider_id) &&
         !(role === "executor" && reviewerIds.includes(row.agent_id)) &&
         // An employee with a workplace elsewhere is not picked for this folder.
         (!bindingId || (activeWorkplace(row.agent_id) ?? bindingId) === bindingId),

@@ -12,8 +12,8 @@ import { JobsPage } from "./jobs";
 import { Button, Empty, HintHeading, Icon, InfoHint, PageHead, Rows, SearchInput, TabBar, Textarea } from "./shared";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../../shared/rpc-contract";
-import { useLaunchableProviders } from "./use-launchable-providers";
 import { tr } from "../i18n";
+import { providerName } from "../data/role-types";
 
 /**
  * Live project pages. A project in the Agency is one folder of a BB project on
@@ -29,6 +29,8 @@ export type ProjectActions = {
   unlinkDepartment: (bindingId: string, departmentId: string) => Promise<boolean>;
   setDepartmentAvailability: (departmentId: string, availability: "all" | "selected") => Promise<boolean>;
   readRules: (bindingId: string) => Promise<MutationOutcome<ProjectRulesFile>>;
+  /** Drops the CLI list from the project's policy: any CLI connected in BB may work here. */
+  allowAnyCli: (bindingId: string) => Promise<boolean>;
   saveRules: (bindingId: string, text: string, expectedHash: string | null) => Promise<MutationOutcome<{ hash: string; size: number }>>;
 };
 
@@ -72,7 +74,6 @@ function ProjectReadiness({ project, departments, agents, actions, openRules, op
  project: Group; departments: Group[]; agents: Agent[]; actions: ProjectActions; openRules: () => void; openDepartment: (id: string) => void;
 }) {
  const rpc = useRpc<typeof rpcContract>();
- const launchableProviders = useLaunchableProviders();
  const [rules, setRules] = useState<{ exists: boolean; untouched: boolean } | null>(null);
  const [online, setOnline] = useState<boolean | null>(null);
  const actionsRef = useRef(actions);
@@ -93,7 +94,7 @@ function ProjectReadiness({ project, departments, agents, actions, openRules, op
  const available = departments.filter((item) => item.availability !== "selected" || project.members.includes(item.id));
  const launchableLead = available.find((item) => {
   const lead = agents.find((agent) => agent.id === item.lead);
-  return lead && lead.enabled && launchableProviders.includes(lead.selection.providerId);
+  return lead && lead.enabled;
  });
  const checks: ReadinessCheck[] = [
   {
@@ -110,15 +111,24 @@ function ProjectReadiness({ project, departments, agents, actions, openRules, op
    detail: online === null ? tr("Состояние машины неизвестно.") : online ? tr("{name} подключена к BB.", { name: project.hostName || tr("Машина") }) : tr("{name} не в сети: сотрудник не запустится, пока она не подключится.", { name: project.hostName || tr("Машина") }),
   },
   {
+   key: "cli",
+   ok: !project.allowedProviders?.length,
+   title: tr("CLI сотрудников"),
+   detail: project.allowedProviders?.length
+    ? tr("Политика проекта разрешает только {providers}: сотрудники на других CLI здесь не запустятся.", { providers: project.allowedProviders.map(providerName).join(", ") })
+    : tr("Разрешён любой CLI, подключённый в BB: Claude Code, Codex, Cursor и другие."),
+   ...(project.allowedProviders?.length ? { action: { label: tr("Разрешить любой CLI"), run: () => void actionsRef.current.allowAnyCli(project.id) } } : {}),
+  },
+  {
    key: "department",
    ok: Boolean(launchableLead),
    title: tr("Отдел с запускаемым руководителем"),
-   detail: launchableLead ? tr("Задачи можно поручать, например, отделу «{name}».", { name: launchableLead.name }) : available.length ? tr("У доступных отделов нет активного руководителя на запускаемом CLI ({providers}): задачу некому запустить.", { providers: launchableProviders.join(", ") }) : tr("Проекту не доступен ни один отдел."),
+   detail: launchableLead ? tr("Задачи можно поручать, например, отделу «{name}».", { name: launchableLead.name }) : available.length ? tr("У доступных отделов нет активного руководителя: задачу некому запустить.") : tr("Проекту не доступен ни один отдел."),
    ...(!launchableLead && available[0] ? { action: { label: tr("Открыть отдел"), run: () => openDepartment(available[0]!.id) } } : {}),
   },
  ];
  return <section aria-label={tr("Готовность к запуску")} className="space-y-2 lg:col-span-2">
-  <HintHeading title="Готовность к запуску" hint={<><p>{tr("Что нужно, чтобы сотрудник запустился в этой папке. Проверяется по живым данным при открытии страницы.")}</p><p>{tr("Запуск также требует установленный и авторизованный Claude Code на машине — это проверяется в момент запуска.")}</p></>}/>
+  <HintHeading title="Готовность к запуску" hint={<><p>{tr("Что нужно, чтобы сотрудник запустился в этой папке. Проверяется по живым данным при открытии страницы.")}</p><p>{tr("Запуск также требует, чтобы CLI сотрудника был установлен и авторизован на машине: это проверяется перед запуском.")}</p></>}/>
   <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
    {checks.map((check) => <li key={check.key} className="flex items-start gap-3 px-4 py-2.5">
     <Icon name={check.ok === null ? "Circle" : check.ok ? "CircleCheck" : "AlertCircle"} className={`mt-0.5 size-4 shrink-0 ${check.ok === null ? "text-muted-foreground" : check.ok ? "text-emerald-500" : "text-orange-500"}`}/>

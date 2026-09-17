@@ -1,6 +1,5 @@
 export {
   LIVE_ASSIGNED_PROVIDER_SOURCE,
-  assertProvenIsolationProvider,
   resolveLiveAssignedProvider,
 } from "./assigned-provider.js";
 export type { LiveAssignedProvider } from "./assigned-provider.js";
@@ -42,8 +41,6 @@ export { spawnArgsFromContract } from "./spawn-args.js";
 export type { IsolatedThreadSpawnArgs } from "./spawn-args.js";
 export type { IsolatedThreadView } from "./sdk-ports.js";
 export {
-  CLAUDE_ONLY_ISOLATION_NOTE,
-  ISOLATION_PROVEN_PROVIDERS,
   OFFICIAL_LIST_HAS_CALLER_LAUNCH,
   OFFICIAL_SPAWN_HAS_CALLER_LAUNCH,
   OFFICIAL_SPAWN_HAS_REASONING_LEVEL,

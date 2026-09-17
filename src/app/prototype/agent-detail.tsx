@@ -16,10 +16,8 @@ import { demoCapabilityRows, mergeCapabilityChoices } from "../data/capability-c
 import { ROLE_TYPE_LABELS, mcpOptions, skillOptions } from "./data";
 import { CapabilityChecks } from "./capability-checks";
 import { CustomMcpEditor } from "./custom-mcp";
-import { AgentMark, Button, Choice, Empty, Field, HintedChoice, PageHead, Panel, Rows, SearchInput, TabBar, TextField } from "./shared";
+import { AgentMark, Button, Choice, Empty, Field, PageHead, Panel, Rows, SearchInput, TabBar, TextField } from "./shared";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
-import { LAUNCH_PROVIDER_ID, REASONING_OPTIONS, type ReasoningLevel } from "../data/role-types";
-import { providerLaunchNote, useLaunchableProviders } from "./use-launchable-providers";
 import { JOB_DESCRIPTION_LABEL, jobDescriptionKind, jobDescriptionTemplate } from "../data/instruction-templates";
 import { AGENT_SANDBOX_RULE_GROUP, LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
 import { tr } from "../i18n";
@@ -58,7 +56,6 @@ export function AgentDetail({
   const [draft, setDraft] = useState(agent);
   const [pending, setPending] = useState(false);
   const [confirmPause, setConfirmPause] = useState(false);
-  const launchableProviders = useLaunchableProviders();
   const features = usePluginFeatures(live);
   const templates = useTemplates();
   const dirty = persistedAgentDirty(baseline, draft);
@@ -203,31 +200,15 @@ export function AgentDetail({
           <>
             <Panel title="Модель">
               <div className="space-y-5">
-                {providerLaunchNote(draft.selection.providerId, launchableProviders) && (
-                  <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
-                    <p>{providerLaunchNote(draft.selection.providerId, launchableProviders)}</p>
-                    <Button size="sm" variant="outline" className="mt-2" onClick={() => set({ selection: { providerId: LAUNCH_PROVIDER_ID, model: "", reasoningLevel: draft.selection.reasoningLevel } })}>{tr("Переключить на Claude Code")}</Button>
-                  </div>
-                )}
-                <Field label="CLI и модель" info={<><p>{tr("Любой провайдер, подключённый в BB. Задачи Агентство запускает только на CLI с подтверждённым изолированным запуском.")}</p><p>{tr("Смена модели создаёт новую версию профиля. Идущий запуск доработает на прежней.")}</p></>}>
+                <Field label="CLI и модель" info={<><p>{tr("Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Уровень рассуждения и быстрый режим выбираются здесь же; набор уровней у каждого CLI свой.")}</p><p>{tr("Смена модели создаёт новую версию профиля. Идущий запуск доработает на прежней.")}</p></>}>
                   <ProviderModelPicker
                     value={draft.selection}
-                    onChange={(selection) => set({
-                      selection: { providerId: selection.providerId, model: selection.model, reasoningLevel: selection.reasoningLevel },
-                      ...(REASONING_OPTIONS.some((option) => option.value === selection.reasoningLevel) ? { reasoningEffort: selection.reasoningLevel as ReasoningLevel } : {}),
-                    })}
+                    onChange={(selection) => set({ selection, reasoningEffort: selection.reasoningLevel })}
                     routing={routing}
                     allowProviderChange
                     align="start"
                   />
                 </Field>
-                <HintedChoice
-                  label="Уровень рассуждения"
-                  value={draft.reasoningEffort ?? "medium"}
-                  onChange={(reasoningEffort) => set({ reasoningEffort, selection: { ...draft.selection, reasoningLevel: reasoningEffort } })}
-                  options={REASONING_OPTIONS}
-                  info={<><p>{tr("Сколько модель думает перед ответом. Выше — точнее решения, но дороже и медленнее.")}</p>{!agent.reasoningEffort && <p>{tr("Сейчас не задан: используется значение CLI по умолчанию.")}</p>}</>}
-                />
               </div>
             </Panel>
             <Panel title="Права">
@@ -281,7 +262,7 @@ export function AgentDetail({
                 </Field>
                 <Field
                   label="CLI и модель"
-                  hint={`${AGENT_PROFILE_UNSUPPORTED.reasoning} ${AGENT_PROFILE_UNSUPPORTED.serviceTier} Сохраняются только CLI и модель.`}
+                  hint={`${AGENT_PROFILE_UNSUPPORTED.reasoning} Сохраняются только CLI и модель.`}
                 >
                   <ProviderModelPicker
                     value={draft.selection}

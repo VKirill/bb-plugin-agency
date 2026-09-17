@@ -5,7 +5,8 @@ import type { BbCatalog } from "./store-commands";
 import type { MutationFailure, MutationOutcome } from "./envelope";
 import type { Agent, Department, ProjectBinding } from "../../shared/contracts";
 import { environmentPlacementLabel } from "./placement-label";
-import { LAUNCH_PROVIDER_ID, samePolicyContent, standardAgentPolicy, standardBindingPolicy, type PolicyContent } from "./role-types";
+import { DEFAULT_PROVIDER_ID, samePolicyContent, standardAgentPolicy, standardBindingPolicy, type PolicyContent } from "./role-types";
+import type { ReasoningEffort, ServiceTier } from "../../shared/contracts";
 
 export { bindingPlacementLabel, environmentPlacementLabel } from "./placement-label";
 
@@ -24,7 +25,9 @@ export type CreateAgentInput = {
   instructions: string;
   providerId?: string;
   model?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  reasoningEffort?: ReasoningEffort;
+  /** The provider's fast mode, present only for providers with service tiers. */
+  serviceTier?: ServiceTier;
   policyVersionId?: string;
   /** Adds the new employee to a department with this role type. */
   departmentId?: string;
@@ -85,8 +88,8 @@ export async function persistCreateAgent(
   if (!model) {
     return { ok: false, failure: { kind: "domain", error: { code: "model_required", message: tr("Выберите модель сотрудника.") } } };
   }
-  const providerId = input.providerId?.trim() || LAUNCH_PROVIDER_ID;
-  const policy = await resolvePolicy(api, input.policyVersionId, standardAgentPolicy(providerId), policies);
+  const providerId = input.providerId?.trim() || DEFAULT_PROVIDER_ID;
+  const policy = await resolvePolicy(api, input.policyVersionId, standardAgentPolicy(), policies);
   if (!policy.ok) return policy;
   const created = await api.provisionAgent({
     requestId: newRequestId(),
@@ -96,10 +99,11 @@ export async function persistCreateAgent(
       version: 1,
       role: input.role.trim(),
       instructions: input.instructions.trim(),
-      // The Agency launches only this CLI; never a silent fallback to another provider.
+      // The CLI chosen in the form; never a silent fallback to another provider.
       providerId,
       model,
       ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
       skillIds: [],
       mcpIds: [],
       policyVersionId: policy.value,
@@ -160,7 +164,7 @@ export const DEFAULT_BINDING_POLICY_HINT =
   "Стандартные права проекта: чтение и запись файлов в этой папке, запуск только на машине этой папки.";
 
 export const DEFAULT_AGENT_POLICY_HINT =
-  "Стандартные права сотрудника: чтение и запись файлов проекта, запуск через его CLI на машине проекта.";
+  "Стандартные права сотрудника: чтение и запись файлов проекта, запуск через CLI из его профиля на машине проекта.";
 
 export function isOrdinaryCatalogPolicy(policy: { label: string }): boolean {
   return policy.label.replace(/^Политика · /u, "").trim() === "read.files";

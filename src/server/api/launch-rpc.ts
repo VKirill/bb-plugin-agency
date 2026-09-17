@@ -27,10 +27,7 @@ import {
   officialSdkAllowsIsolatedSpawn,
   bindOfficialThreads,
   isolatedViewFromRecord,
-  CLAUDE_ONLY_ISOLATION_NOTE,
-  ISOLATION_PROVEN_PROVIDERS,
   SDK_ISOLATION_BLOCKER,
-  assertProvenIsolationProvider,
   resolveLiveAssignedProvider,
   type LiveAssignedProvider,
   readCompletionFromCore,
@@ -54,6 +51,7 @@ import { createInternalRunStoreReads, createRunStore } from "../runtime/run-stor
 import { createCancelLaunchService } from "../runtime/cancel-launch";
 import { returnJobForRework } from "../runtime/rework/service";
 import { readProjectRulesFile } from "./project-rules";
+import { agencyLanguage } from "../i18n/language.js";
 import type { IsolatedSendPort } from "../runtime/isolated-sdk/send-port.js";
 import { flushParentWakes } from "../runtime/parent-wake";
 import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../runtime/stop-handoff/ports.js";
@@ -233,8 +231,6 @@ export function createIsolatedLaunchRpc(deps: {
         if (!job) return fail("not_found", `job ${input.jobId} not found`);
         const assigned = resolveLiveAssignedProvider(deps.store, job);
         if (!assigned.ok) return assigned;
-        const proven = assertProvenIsolationProvider(assigned.value.providerId);
-        if (!proven.ok) return proven;
         const binding = deps.store.getBinding(job.bindingId);
         if (!binding) return fail("not_found", `binding ${job.bindingId} not found`);
         if (deps.checkHost) {
@@ -515,17 +511,19 @@ export function createIsolatedLaunchRpc(deps: {
             assignedReason = assigned.error.message;
           } else {
             assignedProvider = assigned.value;
-            const proven = assertProvenIsolationProvider(assigned.value.providerId);
-            if (!proven.ok) {
-              assignedErrorCode = proven.error.code;
-              assignedReason = proven.error.message;
-            }
           }
           if (assignedErrorCode === "agent_inactive") {
             assignedReason = "Исполнитель приостановлен: включите его профиль или назначьте другого сотрудника.";
           }
           // What the launch itself would check, said before the button is pressed.
           const binding = deps.store.getBinding(job.bindingId);
+          if (!assignedErrorCode && binding && assignedProvider) {
+            const blocked = providerPolicyBlock(deps.store, binding.policyVersionId, assignedProvider);
+            if (blocked) {
+              assignedErrorCode = "provider_constraint_mismatch";
+              assignedReason = blocked;
+            }
+          }
           if (!assignedErrorCode && binding && assignedProvider) {
             if (deps.checkHost) {
               const host = await deps.checkHost({ hostId: binding.hostId, providerId: assignedProvider.providerId });
@@ -563,14 +561,13 @@ export function createIsolatedLaunchRpc(deps: {
             ? ready.reason
             : !sdkTypedSpawnReady
               ? SDK_ISOLATION_BLOCKER
-              : `${ready.reason}; ${CLAUDE_ONLY_ISOLATION_NOTE}`;
+              : ready.reason;
         return ok({
           handshakeReady,
           executionAvailable: ready.executionAvailable && sdkTypedSpawnReady,
           isolationReady: ready.isolationReady && sdkTypedSpawnReady,
           isolatedSpawnFields: ready.isolatedSpawnFields && sdkTypedSpawnReady,
           sdkTypedSpawnReady,
-          provenIsolationProviders: [...ISOLATION_PROVEN_PROVIDERS],
           assignedProvider,
           launchAllowedForAssigned,
           reasonCode: publicLaunchReasonCode({
@@ -650,4 +647,27 @@ export function listBoundLaunchWatches(db: SqlDatabase): Array<{ threadId: strin
   )
     .filter((row): row is { launchId: string; jobId: string; threadId: string } => Boolean(row.threadId))
     .map((row) => ({ launchId: row.launchId, jobId: row.jobId, threadId: row.threadId }));
+}
+
+/**
+ * A project or employee policy that lists CLIs and leaves out the employee's CLI would fail the
+ * launch with a technical code: say before the launch which policy blocks it and how to open it.
+ */
+function providerPolicyBlock(store: DomainStore, bindingPolicyId: string, assigned: LiveAssignedProvider): string | null {
+  const en = agencyLanguage() === "en";
+  const providerId = assigned.providerId;
+  const project = store.getPolicyVersion(bindingPolicyId)?.cliHostConstraints.providerIds ?? [];
+  if (project.length && !project.includes(providerId)) {
+    return en
+      ? `The project's policy allows only ${project.join(", ")}, and the employee works on ${providerId}. Open the project card and press «Allow any CLI» in «Launch readiness».`
+      : `Политика проекта разрешает только ${project.join(", ")}, а сотрудник работает на ${providerId}. Откройте карточку проекта и нажмите «Разрешить любой CLI» в «Готовности к запуску».`;
+  }
+  const version = store.getAgentVersion(assigned.agentVersionId);
+  const agent = version ? store.getPolicyVersion(version.policyVersionId)?.cliHostConstraints.providerIds ?? [] : [];
+  if (agent.length && !agent.includes(providerId)) {
+    return en
+      ? `The employee's policy allows only ${agent.join(", ")}, not ${providerId}. Save the profile again with this CLI: the CLI is added to the policy.`
+      : `Политика прав сотрудника разрешает только ${agent.join(", ")}, а не ${providerId}. Сохраните профиль с этим CLI ещё раз: CLI добавится в политику.`;
+  }
+  return null;
 }

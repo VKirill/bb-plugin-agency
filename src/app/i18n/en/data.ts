@@ -96,14 +96,13 @@ export const EN_DATA: Record<string, string> = {
   "остались строки шаблона: {lines}": "template lines still in place: {lines}",
 
   // agent-profile-fields.ts
-  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, модель, уровень рассуждения и навыки. Идущие запуски работают по прежней версии.":
-    "Saving creates a new profile version: name, job title, instructions, model, reasoning level and skills. Runs already underway keep the previous version.",
+  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, CLI, модель, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.":
+    "Saving creates a new profile version: name, job title, instructions, CLI, model, reasoning level, fast mode and skills. Runs already underway keep the previous version.",
   "Отдел задаётся в составе отдела, в версии профиля не хранится.":
     "The department is set from the department's roster; it isn't stored in the profile version.",
   "Машина в версии профиля не хранится. Запуск идёт в окружении проекта задачи.":
     "The machine isn't stored in the profile version. The run uses the job's project environment.",
   "Уровень рассуждения в версии профиля не хранится.": "Reasoning level isn't stored in the profile version.",
-  "Тариф модели в версии профиля не хранится.": "Model tier isn't stored in the profile version.",
   "Режим разрешений в версии профиля не хранится.": "Permission mode isn't stored in the profile version.",
   "Число одновременных задач в версии профиля не хранится.": "Concurrent job count isn't stored in the profile version.",
   "Доступ к терминалу в версии профиля не хранится.": "Terminal access isn't stored in the profile version.",
@@ -117,7 +116,6 @@ export const EN_DATA: Record<string, string> = {
     "Can't save: {fields}. These fields aren't part of the profile version yet.",
   "отдел": "department",
   "машина": "machine",
-  "тариф модели": "model tier",
   "режим разрешений": "permission mode",
   "одновременные задачи": "concurrent jobs",
   "терминал": "terminal",
@@ -369,8 +367,10 @@ export const EN_DATA: Record<string, string> = {
 
   // product-reasons.ts
   "Среда ещё не подтвердила изолированный запуск.": "The environment hasn't confirmed an isolated launch yet.",
-  "Запуск проверен только для сотрудника на Claude. Другого исполнителя запустить нельзя.":
-    "Launch is verified only for a Claude employee. No other executor can be launched.",
+  "Политика прав сотрудника не разрешает выбранный CLI. Выберите политику, которая разрешает этот CLI или любой CLI.":
+    "The employee's permission policy doesn't allow the chosen CLI. Pick a policy that allows this CLI or any CLI.",
+  "Выбранный CLI не подключён в BB на машине проекта. Подключите его в настройках BB или выберите сотруднику другой CLI.":
+    "The chosen CLI isn't connected in BB on the project's machine. Connect it in BB settings or give the employee another CLI.",
   "Сейчас запуск недоступен.": "Launch isn't available right now.",
   "Готово к запуску": "Ready to launch",
   "Запуск начат": "Launch started",
@@ -397,8 +397,8 @@ export const EN_DATA: Record<string, string> = {
   "Задача зависит от незавершённых задач. Сначала закройте их.": "The job depends on unfinished jobs. Close them first.",
   "Права проекта и сотрудника не пересекаются: у них нет общего разрешения. Проверьте политику сотрудника и проекта.":
     "The project's and the employee's rights don't overlap: they share no permission. Check the employee's and the project's policy.",
-  "Политика проекта или сотрудника не разрешает этот CLI. Проверьте политику.":
-    "The project's or the employee's policy doesn't allow this CLI. Check the policy.",
+  "Политика проекта или сотрудника не разрешает CLI сотрудника. В карточке проекта нажмите «Разрешить любой CLI» или сохраните профиль сотрудника с этим CLI ещё раз.":
+    "The project's or the employee's policy doesn't allow the employee's CLI. Press «Allow any CLI» in the project card or save the employee's profile with this CLI again.",
   "Политика сотрудника не разрешает машину этого проекта. Проверьте политику.":
     "The employee's policy doesn't allow this project's machine. Check the policy.",
   "Навык сотрудника не найден на машине проекта. Уберите его из профиля или установите навык на этой машине.":
@@ -544,8 +544,8 @@ export const EN_DATA: Record<string, string> = {
   "возврат": "returned",
   "Стандартные права проекта: чтение и запись файлов в этой папке, запуск только на машине этой папки.":
     "Standard project rights: read and write files in this folder, launch only on this folder's machine.",
-  "Стандартные права сотрудника: чтение и запись файлов проекта, запуск через его CLI на машине проекта.":
-    "Standard employee rights: read and write the project's files, launch through their CLI on the project's machine.",
+  "Стандартные права сотрудника: чтение и запись файлов проекта, запуск через CLI из его профиля на машине проекта.":
+    "Standard employee rights: read and write the project's files, launch through the CLI in their profile on the project's machine.",
 
   // envelope.ts
   "Сервер отклонил вызов: неизвестный вызывающий. Это ошибка доступа, не пустой каталог.":

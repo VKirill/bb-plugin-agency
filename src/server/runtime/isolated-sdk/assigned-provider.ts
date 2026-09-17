@@ -1,6 +1,5 @@
 import { fail, ok, type DomainResult } from "../../../domain";
 import type { DomainStore } from "../../services";
-import { ISOLATION_PROVEN_PROVIDERS } from "./sdk-isolation-contract.js";
 
 export const LIVE_ASSIGNED_PROVIDER_SOURCE = "live_assigned_agent_version" as const;
 
@@ -31,14 +30,4 @@ export function resolveLiveAssignedProvider(
     providerId: version.providerId,
     source: LIVE_ASSIGNED_PROVIDER_SOURCE,
   });
-}
-
-export function assertProvenIsolationProvider(providerId: string): DomainResult<true> {
-  if (!(ISOLATION_PROVEN_PROVIDERS as readonly string[]).includes(providerId)) {
-    return fail(
-      "provider_isolation_unproven",
-      `live assigned agentVersion provider ${providerId} is not in proven isolation set (${ISOLATION_PROVEN_PROVIDERS.join(",")})`,
-    );
-  }
-  return ok(true);
 }

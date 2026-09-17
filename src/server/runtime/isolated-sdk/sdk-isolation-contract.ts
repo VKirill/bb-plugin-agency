@@ -1,5 +1,5 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import type { ReasoningEffort } from "../../../shared/contracts/versions.js";
+import type { ReasoningEffort, ServiceTier } from "../../../shared/contracts/versions.js";
 
 /**
  * Agency isolation contract. Independent of npm SDK spawn/list field names.
@@ -23,8 +23,11 @@ export type IsolatedThreadSpawnArgs = {
   experimental_callerJobId?: string;
   /** Official `threads.spawn` field. Not `reasoningEffort`. */
   reasoningLevel?: ReasoningEffort;
+  /** Official `threads.spawn` field: the provider's fast mode, only for providers with service tiers. */
+  serviceTier?: ServiceTier;
   executionInputSources?: {
     reasoningLevel?: "explicit";
+    serviceTier?: "explicit";
     permissionMode?: "explicit";
   };
   /** Set only by the owner's rule «Запуск без песочницы». */
@@ -72,12 +75,6 @@ export const OFFICIAL_LIST_HAS_CALLER_LAUNCH: OfficialListHasCallerLaunch =
 
 export const SDK_ISOLATION_BLOCKER =
   "typed spawn fields are present on compile pin 0.4.87-agy16.431; runtime spawn still requires actual GET /api/v1/system/experimental_thread-spawn-contract; engines and ordinary host 0.4.87 are not readiness";
-
-/** Isolation e2e is proven only for this provider. Handshake bits are not a blanket launch grant. */
-export const ISOLATION_PROVEN_PROVIDERS = ["claude-code"] as const;
-
-export const CLAUDE_ONLY_ISOLATION_NOTE =
-  "isolation proven only for claude-code; readiness does not grant launch for other providers";
 
 export function officialSdkAllowsIsolatedSpawn(): boolean {
   return Boolean(OFFICIAL_SPAWN_HAS_CALLER_LAUNCH && OFFICIAL_LIST_HAS_CALLER_LAUNCH);

@@ -8,7 +8,7 @@ import type { MutationOutcome } from "./envelope";
 import { createRpcAgencyApi, type RpcCaller } from "./rpc-agency-api";
 import { EMPTY_SNAPSHOT, type WorkspaceSnapshot } from "./snapshot";
 import { dueAtFromDate, mapAgents, mapDepartments, mapJobs, mapProjects, parseDescription, PRIORITY_CODE, queueCounts, splitDescription } from "./view-models";
-import { BRIEF_REQUIRED_NOTICE, canCreateJob, failureNotice, newRequestId, persistAgentPatch, persistDepartmentPatch, persistJobPatch, persistProjectPatch } from "./persist";
+import { BRIEF_REQUIRED_NOTICE, canCreateJob, failureNotice, newRequestId, persistAgentPatch, persistDepartmentPatch, persistJobPatch, persistProjectAnyCli, persistProjectPatch } from "./persist";
 import { persistCreateAgent, persistCreateBinding, persistCreateDepartment, type CreateAgentInput, type CreateBindingInput, type CreateDepartmentInput } from "./persist-create";
 import { EMPTY_BB_CATALOG } from "./capability-catalog";
 import type { BbCatalog } from "./store-commands";
@@ -360,6 +360,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
       unlinkDepartment: (bindingId: string, departmentId: string) =>
         runChange(() => resolvedApi.unlinkDepartment({ requestId: newRequestId(), bindingId, departmentId })),
       readRules: (bindingId: string) => resolvedApi.readProjectRules({ bindingId }),
+      allowAnyCli: (bindingId: string) => runChange(() => persistProjectAnyCli(resolvedApi, snapshot, bindingId)),
       saveRules: (bindingId: string, text: string, expectedHash: string | null) =>
         resolvedApi.saveProjectRules({ requestId: newRequestId(), bindingId, text, expectedHash }),
       setDepartmentAvailability: (departmentId: string, availability: "all" | "selected") =>
@@ -372,7 +373,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
           }),
         ),
     };
-  }, [resolvedApi, runChange, snapshot.bindings, snapshot.departments]);
+  }, [resolvedApi, runChange, snapshot]);
 
   const counts = useMemo(() => queueCounts(jobs, snapshot.counts), [jobs, snapshot.counts]);
 

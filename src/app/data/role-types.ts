@@ -1,8 +1,8 @@
 import { tr } from "../i18n";
 
 /**
- * Fixed choices for building a team: role types, reasoning levels and the
- * standard permissions. Labels and explanations live here so the create
+ * Fixed choices for building a team: role types and the standard
+ * permissions. The CLI, model and reasoning come from BB's own picker. Labels and explanations live here so the create
  * dialogs, profiles and department pages say the same thing.
  */
 
@@ -47,30 +47,14 @@ export const ROLE_TYPE_OPTIONS: HintedOption<RoleType>[] = [
   },
 ];
 
-export type ReasoningLevel = "low" | "medium" | "high" | "xhigh" | "max";
-
-export const REASONING_OPTIONS: HintedOption<ReasoningLevel>[] = [
-  { value: "low", label: "Низкий", description: "Быстро и дёшево: рутина по чёткому брифу.", hint: ["Подходит для простых правок, форматирования, сбора данных по готовой схеме."] },
-  { value: "medium", label: "Средний", description: "Баланс скорости и качества для большинства исполнителей.", hint: ["Типовые изменения в коде, черновики текстов, обычный анализ."] },
-  { value: "high", label: "Высокий", description: "Для руководителей и проверяющих: оценка, план, поиск дефектов.", hint: ["Модель дольше рассуждает перед ответом: дороже, но меньше ошибок в решениях."] },
-  { value: "xhigh", label: "Очень высокий", description: "Сложные изменения в нескольких модулях, архитектура.", hint: ["Заметно дороже и медленнее. Включайте для задач с высоким риском."] },
-  { value: "max", label: "Максимальный", description: "Самые трудные задачи, где цена ошибки высока.", hint: ["Самый дорогой режим. Обычно не нужен постоянно."] },
-];
-
-export const DEFAULT_REASONING: Record<RoleType, ReasoningLevel> = {
-  lead: "high",
-  executor: "medium",
-  reviewer: "high",
-};
-
 export const TITLE_PLACEHOLDER: Record<RoleType, string> = {
   lead: "Например: Руководитель разработки",
   executor: "Например: Разработчик TypeScript",
   reviewer: "Например: Проверяющий кода",
 };
 
-/** The only CLI the Agency launches today; others stay in the catalog but cannot run a job. */
-export const LAUNCH_PROVIDER_ID = "claude-code";
+/** A profile without a saved CLI starts on this one; any provider connected in BB can be chosen. */
+export const DEFAULT_PROVIDER_ID = "claude-code";
 
 export type PolicyContent = {
   allowedCapabilities: string[];
@@ -78,13 +62,44 @@ export type PolicyContent = {
   secretRefs: string[];
 };
 
-/** Standard employee permissions: project files, the employee's own CLI, any machine of the project. */
-export function standardAgentPolicy(providerId: string = LAUNCH_PROVIDER_ID): PolicyContent {
+/** Standard employee permissions: project files, any CLI (the profile names it), any machine of the project. */
+export function standardAgentPolicy(): PolicyContent {
   return {
     allowedCapabilities: ["read.files", "write.files"],
-    cliHostConstraints: { providerIds: [providerId], hostIds: [] },
+    cliHostConstraints: { providerIds: [], hostIds: [] },
     secretRefs: [],
   };
+}
+
+/**
+ * The owner picked a CLI in the profile, but the profile's policy lists other CLIs (older
+ * policies name only Claude Code). The same policy with that CLI added; null when it is allowed.
+ * Files, machines and secrets stay as they were.
+ */
+export function policyWithProvider(policy: PolicyContent, providerId: string): PolicyContent | null {
+  const providers = policy.cliHostConstraints.providerIds;
+  if (!providers.length || providers.includes(providerId)) return null;
+  return policyContent(policy, [...providers, providerId]);
+}
+
+/** The same policy without a CLI list: any CLI connected in BB. Null when it already allows any. */
+export function policyForAnyCli(policy: PolicyContent): PolicyContent | null {
+  if (!policy.cliHostConstraints.providerIds.length) return null;
+  return policyContent(policy, []);
+}
+
+/** Only the content fields: a stored policy record also carries its id, which a new version must not. */
+function policyContent(policy: PolicyContent, providerIds: string[]): PolicyContent {
+  return {
+    allowedCapabilities: [...policy.allowedCapabilities],
+    cliHostConstraints: { providerIds, hostIds: [...policy.cliHostConstraints.hostIds] },
+    secretRefs: [...policy.secretRefs],
+  };
+}
+
+/** Provider name for people; unknown ids stay as they are. */
+export function providerName(id: string): string {
+  return PROVIDER_NAMES[id] ?? id;
 }
 
 export const STANDARD_AGENT_POLICY: PolicyContent = standardAgentPolicy();
@@ -111,6 +126,14 @@ export function samePolicyContent(left: PolicyContent, right: PolicyContent): bo
   );
 }
 
+const PROVIDER_NAMES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  "acp-cursor": "Cursor",
+  "acp-opencode": "OpenCode",
+  "acp-antigravity": "Antigravity",
+};
+
 const CAPABILITY_LABELS: Record<string, string> = {
   "read.files": "чтение файлов",
   "write.files": "запись файлов",
@@ -120,7 +143,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
 export function policySummary(policy: PolicyContent, hostName: (id: string) => string = (id) => id): string {
   const caps = policy.allowedCapabilities.map((cap) => tr(CAPABILITY_LABELS[cap] ?? cap)).join(", ") || tr("ничего");
   const providers = policy.cliHostConstraints.providerIds.length
-    ? policy.cliHostConstraints.providerIds.map((id) => (id === LAUNCH_PROVIDER_ID ? "Claude Code" : id)).join(", ")
+    ? policy.cliHostConstraints.providerIds.map((id) => PROVIDER_NAMES[id] ?? id).join(", ")
     : tr("любой CLI");
   const hosts = policy.cliHostConstraints.hostIds.length ? policy.cliHostConstraints.hostIds.map(hostName).join(", ") : tr("любая машина");
   return `${caps[0]?.toUpperCase() ?? ""}${caps.slice(1)} · ${providers} · ${hosts}`;

@@ -881,7 +881,6 @@ export const LAUNCH_REASON_CODES = [
   "assignee_required",
   "assignee_not_member",
   "handshake_unready",
-  "isolation_unproven",
   "launch_not_authorized",
 ] as const;
 
@@ -898,12 +897,11 @@ export function publicLaunchReasonCode(input: {
 }): LaunchReasonCode {
   if (input.assignedErrorCode === "assignee_required") return "assignee_required";
   if (input.assignedErrorCode === "assignee_not_member") return "assignee_not_member";
-  if (input.assignedErrorCode === "provider_isolation_unproven") return "isolation_unproven";
   if (input.assignedErrorCode) return "launch_not_authorized";
   if (!input.hasJobId) return "launch_not_authorized";
   if (!input.handshakeReady || !input.sdkTypedSpawnReady) return "handshake_unready";
   if (input.launchAllowed) return "ok";
-  return "isolation_unproven";
+  return "launch_not_authorized";
 }
 
 export const isolationReadinessSchema = z
@@ -913,7 +911,6 @@ export const isolationReadinessSchema = z
     isolationReady: z.boolean(),
     isolatedSpawnFields: z.boolean(),
     sdkTypedSpawnReady: z.boolean(),
-    provenIsolationProviders: z.array(z.literal("claude-code")).min(1),
     assignedProvider: liveAssignedProviderSchema.nullable(),
     launchAllowedForAssigned: z.boolean(),
     reason: z.string(),

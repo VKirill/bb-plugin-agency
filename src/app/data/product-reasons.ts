@@ -5,8 +5,6 @@ import { tr } from "../i18n";
 export const PRODUCT_ASSIGNEE_REQUIRED = "Сначала назначьте исполнителя из состава этого отдела.";
 export const PRODUCT_HANDSHAKE_UNREADY =
   "Среда ещё не подтвердила изолированный запуск.";
-export const PRODUCT_CLAUDE_ONLY =
-  "Запуск проверен только для сотрудника на Claude. Другого исполнителя запустить нельзя.";
 export const PRODUCT_LAUNCH_UNAVAILABLE = "Сейчас запуск недоступен.";
 export const PRODUCT_LAUNCH_READY = "Готово к запуску";
 export const PRODUCT_LAUNCH_STARTED = "Запуск начат";
@@ -18,9 +16,9 @@ const CODE_PRODUCT: Record<string, string> = {
   assignee_not_member:
     "Исполнитель должен состоять в выбранном отделе. Выберите сотрудника из состава отдела.",
   handshake_unready: PRODUCT_HANDSHAKE_UNREADY,
-  isolation_unproven: PRODUCT_CLAUDE_ONLY,
   launch_not_authorized: PRODUCT_LAUNCH_UNAVAILABLE,
-  provider_isolation_unproven: PRODUCT_CLAUDE_ONLY,
+  provider_not_allowed_by_policy: "Политика прав сотрудника не разрешает выбранный CLI. Выберите политику, которая разрешает этот CLI или любой CLI.",
+  provider_unavailable: "Выбранный CLI не подключён в BB на машине проекта. Подключите его в настройках BB или выберите сотруднику другой CLI.",
   agent_inactive: "Сотрудник приостановлен. Включите его профиль или назначьте другого исполнителя.",
   assignee_is_reviewer: "Исполнитель не может быть проверяющим своей же задачи. Назначьте проверяющим другого сотрудника.",
   job_has_live_run: "Тред сотрудника ещё работает. Сначала остановите запуск в карточке задачи.",
@@ -33,7 +31,7 @@ const CODE_PRODUCT: Record<string, string> = {
   missing_transition_guard: "Для этого шага не хватает условий: исполнитель, проект, бриф и критерии приёмки, а для проверки — опубликованная версия.",
   open_blockers: "Задача зависит от незавершённых задач. Сначала закройте их.",
   policy_effective_empty: "Права проекта и сотрудника не пересекаются: у них нет общего разрешения. Проверьте политику сотрудника и проекта.",
-  provider_constraint_mismatch: "Политика проекта или сотрудника не разрешает этот CLI. Проверьте политику.",
+  provider_constraint_mismatch: "Политика проекта или сотрудника не разрешает CLI сотрудника. В карточке проекта нажмите «Разрешить любой CLI» или сохраните профиль сотрудника с этим CLI ещё раз.",
   host_constraint_mismatch: "Политика сотрудника не разрешает машину этого проекта. Проверьте политику.",
   unknown_skill: "Навык сотрудника не найден на машине проекта. Уберите его из профиля или установите навык на этой машине.",
   unknown_mcp: "MCP из профиля сотрудника пока не передаются в запуск. Уберите MCP из профиля.",
@@ -90,10 +88,6 @@ const REASON_PRODUCT: { match: RegExp; text: string }[] = [
   {
     match: /Isolation and isolated spawn fields are not proven/i,
     text: PRODUCT_HANDSHAKE_UNREADY,
-  },
-  {
-    match: /isolation proven only for claude|CLAUDE_ONLY_ISOLATION/i,
-    text: PRODUCT_CLAUDE_ONLY,
   },
   { match: /verified bind applied/i, text: PRODUCT_LAUNCH_STARTED },
 ];

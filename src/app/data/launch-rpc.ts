@@ -135,7 +135,6 @@ export type IsolationReadiness = {
   isolationReady: boolean;
   isolatedSpawnFields: boolean;
   sdkTypedSpawnReady: boolean;
-  provenIsolationProviders: readonly string[];
   assignedProvider: LiveAssignedProviderView | null;
   launchAllowedForAssigned: boolean;
   reason: string;
@@ -297,9 +296,6 @@ function parseAssignedProvider(value: unknown): LiveAssignedProviderView | null 
 export function parseIsolationReadiness(value: unknown): IsolationReadiness | null {
   const row = record(value);
   if (!row || typeof row.reason !== "string") return null;
-  if (!Array.isArray(row.provenIsolationProviders) || row.provenIsolationProviders.length === 0) return null;
-  const proven = row.provenIsolationProviders.filter((item): item is string => typeof item === "string" && item.length > 0);
-  if (proven.length !== row.provenIsolationProviders.length) return null;
   if (!("assignedProvider" in row) || typeof row.launchAllowedForAssigned !== "boolean") return null;
   let assignedProvider: LiveAssignedProviderView | null = null;
   if (row.assignedProvider !== null) {
@@ -312,7 +308,6 @@ export function parseIsolationReadiness(value: unknown): IsolationReadiness | nu
     isolationReady: row.isolationReady === true,
     isolatedSpawnFields: row.isolatedSpawnFields === true,
     sdkTypedSpawnReady: row.sdkTypedSpawnReady === true,
-    provenIsolationProviders: proven,
     assignedProvider,
     launchAllowedForAssigned: row.launchAllowedForAssigned,
     reason: row.reason,
@@ -328,8 +323,7 @@ export function canLaunchFromReadiness(readiness: IsolationReadiness | null): bo
       readiness.executionAvailable &&
       readiness.isolationReady &&
       readiness.isolatedSpawnFields &&
-      readiness.sdkTypedSpawnReady &&
-      readiness.provenIsolationProviders.length > 0,
+      readiness.sdkTypedSpawnReady,
   );
 }
 
@@ -340,12 +334,7 @@ export function readinessAllowsProvider(
   const assigned = readiness?.assignedProvider?.providerId;
   if (!readiness || !assigned || !providerId?.trim()) return false;
   if (assigned !== providerId) return false;
-  if (!readiness.provenIsolationProviders.length) return false;
-  return (
-    readiness.launchAllowedForAssigned &&
-    canLaunchFromReadiness(readiness) &&
-    readiness.provenIsolationProviders.includes(providerId)
-  );
+  return readiness.launchAllowedForAssigned && canLaunchFromReadiness(readiness);
 }
 
 /** Live provider comes only from getIsolationReadiness.assignedProvider, not UI job/agent drafts. */

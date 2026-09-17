@@ -25,12 +25,17 @@ function setup() {
       const created = s.store.createPolicyVersion(ctx, {
         requestId: randomUUID(),
         allowedCapabilities: ["read.files", "write.files"],
-        cliHostConstraints: { providerIds: ["claude-code"], hostIds: [] },
+        cliHostConstraints: { providerIds: [], hostIds: [] },
         secretRefs: [],
       });
       return created.ok ? { ok: true, value: created.value.id } : created;
     },
-    defaults: (roleType) => ({ model: roleType === "lead" ? "claude-opus-5[1m]" : "claude-sonnet-5", reasoningEffort: roleType === "lead" ? "high" : "medium" }),
+    defaults: (roleType) => ({
+      providerId: roleType === "lead" ? "claude-code" : "codex",
+      model: roleType === "lead" ? "claude-opus-5[1m]" : "gpt-5.6-luna",
+      reasoningEffort: roleType === "lead" ? "high" : "medium",
+      serviceTier: roleType === "lead" ? null : "fast",
+    }),
     provisionAgent: (input) => s.store.provisionAgent(ctx, input as never),
     provisionDepartment: (input) => s.store.provisionDepartment(ctx, input),
     addMembership: (input) => s.store.addMembership(ctx, input),

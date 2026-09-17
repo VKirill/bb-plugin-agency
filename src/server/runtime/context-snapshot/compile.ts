@@ -464,10 +464,11 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       ...(input.providerLimits.maxOutputTokens !== undefined ? { maxOutputTokens: input.providerLimits.maxOutputTokens } : {}),
     },
     ...(pluginIds.length ? { plugins: { ids: pluginIds, toolNames: pluginToolNames } } : {}),
-    ...(agentVersion.reasoningEffort || input.permissionMode === "full"
+    ...(agentVersion.reasoningEffort || agentVersion.serviceTier || input.permissionMode === "full"
       ? {
           execution: {
             ...(agentVersion.reasoningEffort ? { reasoningLevel: agentVersion.reasoningEffort } : {}),
+            ...(agentVersion.serviceTier ? { serviceTier: agentVersion.serviceTier } : {}),
             ...(input.permissionMode === "full" ? { permissionMode: "full" as const } : {}),
           },
         }

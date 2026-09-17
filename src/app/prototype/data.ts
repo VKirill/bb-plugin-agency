@@ -91,7 +91,8 @@ export interface Agent {
   /** Jobs of this employee a thread may still be working on. */
   liveJobs?: number;
   /** Reasoning effort stored in the profile version; absent means the CLI default. */
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  /** Saved reasoning level; each provider offers its own set in BB's picker. */
+  reasoningEffort?: ExperimentalProviderModelPickerValue["reasoningLevel"];
   shell?: boolean;
   delegate?: boolean;
   id: string;
@@ -149,6 +150,8 @@ export interface Group {
   environmentId?: string;
   root?: string;
   environmentName?: string | null;
+  /** Project: CLIs its permission policy allows; empty means any CLI connected in BB. */
+  allowedProviders?: string[];
   /** Set when the project is disconnected from the Agency. */
   archivedAt?: string;
   /** Departments only: omitted means open to all projects. */

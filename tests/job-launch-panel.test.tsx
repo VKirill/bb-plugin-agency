@@ -95,7 +95,6 @@ const readyReadiness: IsolationReadiness = {
   isolationReady: true,
   isolatedSpawnFields: true,
   sdkTypedSpawnReady: true,
-  provenIsolationProviders: ["claude"],
   assignedProvider: {
     jobId: "job_2de115e5c5e8bd8b555a71a3",
     agentId: "agt_b1fe6a357a7e8736a896c649",

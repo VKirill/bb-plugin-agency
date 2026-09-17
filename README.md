@@ -12,7 +12,8 @@ publishes a file version and goes through review.
 
 > **Status:** `0.1.0-alpha.15`, a working alpha. Durable data, managed launches,
 > work rules, limits and budgets, the launch queue, schedules and webhooks,
-> knowledge, goals and backups work. Isolation is verified for Claude Code only;
+> knowledge, goals and backups work. An employee runs on any CLI connected in BB:
+> Claude Code, Codex, Cursor, OpenCode and Antigravity are verified end to end;
 > the limits are listed below and in
 > [docs/implementation-readiness.md](docs/implementation-readiness.md) (Russian).
 
@@ -88,9 +89,9 @@ backlog → queued → running → review → done
 1. **Durable CRUD.** A job gets a brief, acceptance criteria, an assignee and
    pinned input file versions (`attachJobInput`). It can wait for other jobs and
    name a next step for another department.
-2. **Readiness.** `getIsolationReadiness` and the core `GET spawn-contract`. No
-   contract, or a provider outside the proven set (`claude-code`), means no launch;
-   the catalog keeps working.
+2. **Readiness.** `getIsolationReadiness` and the core `GET spawn-contract`, the
+   employee's CLI on the project's machine, and project and employee policies that
+   allow that CLI. No contract means no launch; the catalog keeps working.
 3. **Context snapshot.** An immutable `ContextSnapshot`: versions of the rules, the
    department process, the role, the brief, the effective policy, CLI and host,
    inputs and handoffs. The job layer does not cancel the department layer; a
@@ -218,9 +219,9 @@ lane-stack is the author's own set of Claude Code agents for orchestrating devel
 
 An honest list of limits, so the alpha is not read as a finished product:
 
-- Isolation of every CLI. Only automatic skill loading for Claude Code is
-  verified, and that is not a file sandbox. Codex and OpenCode did not pass
-  acceptance; their token accounting depends on the BB core.
+- A file sandbox for employees. Launches go through BB with only the profile's
+  skills and plugins, but that is not file isolation. Token accounting of Codex and
+  ACP providers (Cursor, OpenCode, Antigravity) depends on the BB core.
 - Acceptance by the word "done" and inferring `waiting_input` from thread prose.
   Both are typed commands only.
 - A fallback CLI when the main one is unavailable.

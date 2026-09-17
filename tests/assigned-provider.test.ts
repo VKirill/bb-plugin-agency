@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assertProvenIsolationProvider,
-  resolveLiveAssignedProvider,
-} from "../src/server/runtime/isolated-sdk/assigned-provider";
+import { resolveLiveAssignedProvider } from "../src/server/runtime/isolated-sdk/assigned-provider";
 
 function store(rows: {
   agents: Array<{ id: string; currentVersionId: string }>;
@@ -35,15 +32,10 @@ describe("live assigned provider", () => {
     });
   });
 
-  it("fails closed without assignee or when provider is not proven", () => {
+  it("fails closed without assignee", () => {
     expect(resolveLiveAssignedProvider(store({ agents: [], versions: [] }), {
       id: "job_aaaaaaaaaaaa",
       assignedAgentId: null,
     }).ok).toBe(false);
-    expect(assertProvenIsolationProvider("codex")).toMatchObject({
-      ok: false,
-      error: { code: "provider_isolation_unproven" },
-    });
-    expect(assertProvenIsolationProvider("claude-code")).toEqual({ ok: true, value: true });
   });
 });

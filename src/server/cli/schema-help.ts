@@ -33,7 +33,7 @@ bb CLI run исполняется на машине плагина (server), н�
 canonicalRoot из payload не является правом на чтение чужого host.
 Новый BB project CLI не создаёт: только bind существующего каталога.
 Spawn не обещать из help: смотри bb agency launch readiness / getIsolationReadiness
-этого instance (GET spawn-contract + proven provider). Произвольный RPC закрыт allowlist.
+этого instance (GET spawn-contract, CLI в BB, политики). Произвольный RPC закрыт allowlist.
 bytesBase64 и значения секретов в stdout не печатаются.
 `;
 

@@ -11,6 +11,8 @@ import { jobPersistStatusRefusal } from "./job-lifecycle";
 import { dueAtFromDate, dueDate, parseDescription, PRIORITY_CODE, splitDescription } from "./view-models";
 import type { WorkspaceSnapshot } from "./snapshot";
 import { unsupportedAgentFieldChanges, unsupportedAgentSaveMessage } from "./agent-profile-fields";
+import { DEFAULT_PROVIDER_ID, policyForAnyCli, policyWithProvider, samePolicyContent, type PolicyContent } from "./role-types";
+import type { ProjectBinding } from "../../shared/contracts";
 import { productDomainNotice, productServerReason } from "./product-reasons";
 
 export function newRequestId(): string {
@@ -230,15 +232,24 @@ export async function persistAgentPatch(
   const stale = draftRevisionConflict(next.revision, record.revision);
   if (stale) return { ok: false, failure: stale };
   const currentVersion = snapshot.agentVersions.find((item) => item.id === record.currentVersionId);
-  const policyVersionId =
+  const chosenPolicyId =
     (next.policyVersionId && snapshot.policies.some((policy) => policy.id === next.policyVersionId) ? next.policyVersionId : undefined) ||
     currentVersion?.policyVersionId;
-  if (!policyVersionId) {
+  if (!chosenPolicyId) {
     return { ok: false, failure: { kind: "domain", error: { code: "not_found", message: tr("Нет политики для версии профиля.") } } };
   }
   const named = next.role.trim() || currentVersion?.role || "Роль";
   const instructions = next.instructions.trim() || currentVersion?.instructions || "Задайте инструкции сотрудника.";
-  const providerId = next.selection.providerId.trim() || currentVersion?.providerId || "claude-code";
+  const providerId = next.selection.providerId.trim() || currentVersion?.providerId || DEFAULT_PROVIDER_ID;
+  // The owner picked this CLI: a policy that lists other CLIs (older ones name only Claude Code) gets it added.
+  const chosenPolicy = snapshot.policies.find((policy) => policy.id === chosenPolicyId);
+  const widened = chosenPolicy ? policyWithProvider(chosenPolicy, providerId) : null;
+  let policyVersionId = chosenPolicyId;
+  if (widened) {
+    const resolved = await resolvePolicyContent(api, snapshot, widened);
+    if (!resolved.ok) return resolved;
+    policyVersionId = resolved.value;
+  }
   const model = next.selection.model.trim() || currentVersion?.model;
   if (!model) {
     return { ok: false, failure: { kind: "domain", error: { code: "model_required", message: tr("Выберите модель сотрудника.") } } };
@@ -257,6 +268,7 @@ export async function persistAgentPatch(
       providerId,
       model,
       ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+      ...(next.selection.serviceTier ? { serviceTier: next.selection.serviceTier } : {}),
       skillIds: next.skills.map((item) => item.trim()).filter(Boolean),
       mcpIds: next.mcps.map((item) => item.trim()).filter(Boolean),
       pluginIds: (next.plugins ?? []).map((item) => item.trim()).filter(Boolean),
@@ -486,4 +498,24 @@ export async function persistAnswerNeedsInput(
 function sameContract(a: Job["contract"], b: Job["contract"]): boolean {
   const norm = (value: Job["contract"]) => JSON.stringify(value ?? { mayChange: [], mustNotTouch: [], checks: [] });
   return norm(a) === norm(b);
+}
+
+/** An existing policy with this content, or a new policy version. */
+async function resolvePolicyContent(api: AgencyApi, snapshot: WorkspaceSnapshot, content: PolicyContent): Promise<MutationOutcome<string>> {
+  const same = snapshot.policies.find((policy) => samePolicyContent(policy, content));
+  if (same) return { ok: true, value: same.id };
+  const created = await api.createPolicyVersion({ requestId: newRequestId(), ...content });
+  return created.ok ? { ok: true, value: created.value.id } : created;
+}
+
+/** The project allows any CLI connected in BB; files, machines and secrets of its policy stay. */
+export async function persistProjectAnyCli(api: AgencyApi, snapshot: WorkspaceSnapshot, bindingId: string): Promise<MutationOutcome<ProjectBinding | null>> {
+  const binding = snapshot.bindings.find((item) => item.id === bindingId);
+  if (!binding) return { ok: false, failure: { kind: "domain", error: { code: "not_found", message: tr("Проект не найден на сервере.") } } };
+  const policy = snapshot.policies.find((item) => item.id === binding.policyVersionId);
+  const open = policy ? policyForAnyCli(policy) : null;
+  if (!open) return { ok: true, value: null };
+  const resolved = await resolvePolicyContent(api, snapshot, open);
+  if (!resolved.ok) return resolved;
+  return api.updateProjectBinding({ requestId: newRequestId(), expectedRevision: binding.revision, bindingId, policyVersionId: resolved.value });
 }

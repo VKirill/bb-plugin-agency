@@ -2,7 +2,7 @@ import type { ArtifactVersion } from "../../../shared/contracts/artifact.js";
 import type { CatalogMcpId, CatalogSkillId } from "../../../shared/contracts/ids.js";
 import type { ProjectBinding } from "../../../shared/contracts/project-binding.js";
 import type { Job } from "../../../shared/contracts/job.js";
-import type { AgentVersion, PolicyVersion, ProcessVersion, ReasoningEffort } from "../../../shared/contracts/versions.js";
+import type { AgentVersion, PolicyVersion, ProcessVersion, ReasoningEffort, ServiceTier } from "../../../shared/contracts/versions.js";
 
 export type { CatalogMcpId, CatalogSkillId };
 
@@ -227,6 +227,8 @@ export type ContextSnapshot = {
   /** Frozen spawn execution. Omitted on legacy snapshots and when nothing is set explicitly. */
   execution?: {
     reasoningLevel?: ReasoningEffort;
+    /** The provider's fast mode or its default tier, as the profile chose it. */
+    serviceTier?: ServiceTier;
     /** "full" when the owner's rule runs this launch without the CLI sandbox. */
     permissionMode?: "full";
   };

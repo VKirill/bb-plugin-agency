@@ -11,7 +11,9 @@ import { requestIdSchema } from "./ids";
  * the agency limit, a department limit and an employee limit apply together.
  */
 
-const reasoningSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+/** Same ladder as the profile: each provider offers its own subset in the picker. */
+const reasoningSchema = z.enum(["none", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"]);
+const serviceTierSchema = z.enum(["default", "fast"]);
 
 export const workRulesSchema = z
   .object({
@@ -39,12 +41,20 @@ export const workRulesSchema = z
     budgetMonthlyUsd: z.number().min(0).max(1_000_000).nullable(),
     /** Running attempts at once in this scope; null means no limit. */
     concurrencyLimit: z.number().int().min(1).max(100).nullable(),
+    /** Any provider connected in BB: a new employee of this role type starts on it. */
+    defaultProviderLead: z.string().trim().min(1).max(80),
+    defaultProviderExecutor: z.string().trim().min(1).max(80),
+    defaultProviderReviewer: z.string().trim().min(1).max(80),
     defaultModelLead: z.string().trim().min(1).max(120),
     defaultModelExecutor: z.string().trim().min(1).max(120),
     defaultModelReviewer: z.string().trim().min(1).max(120),
     defaultReasoningLead: reasoningSchema,
     defaultReasoningExecutor: reasoningSchema,
     defaultReasoningReviewer: reasoningSchema,
+    /** Null: the provider has no service tiers or the default tier is used. */
+    defaultServiceTierLead: serviceTierSchema.nullable(),
+    defaultServiceTierExecutor: serviceTierSchema.nullable(),
+    defaultServiceTierReviewer: serviceTierSchema.nullable(),
   })
   .strict();
 
@@ -69,12 +79,18 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   budgetWarnPercent: 80,
   budgetMonthlyUsd: null,
   concurrencyLimit: null,
+  defaultProviderLead: "claude-code",
+  defaultProviderExecutor: "claude-code",
+  defaultProviderReviewer: "claude-code",
   defaultModelLead: "claude-opus-5[1m]",
   defaultModelExecutor: "claude-sonnet-5",
   defaultModelReviewer: "claude-opus-5[1m]",
   defaultReasoningLead: "high",
   defaultReasoningExecutor: "medium",
   defaultReasoningReviewer: "high",
+  defaultServiceTierLead: null,
+  defaultServiceTierExecutor: null,
+  defaultServiceTierReviewer: null,
 };
 
 /** Keys a department inherits from the agency and may override. */
@@ -109,12 +125,18 @@ export const HOST_OVERRIDE_RULE_KEYS = ["runWithoutSandbox"] as const satisfies 
 export const LIMIT_RULE_KEYS = ["budgetMonthlyUsd", "concurrencyLimit"] as const satisfies readonly WorkRuleKey[];
 
 export const AGENCY_ONLY_RULE_KEYS = [
+  "defaultProviderLead",
+  "defaultProviderExecutor",
+  "defaultProviderReviewer",
   "defaultModelLead",
   "defaultModelExecutor",
   "defaultModelReviewer",
   "defaultReasoningLead",
   "defaultReasoningExecutor",
   "defaultReasoningReviewer",
+  "defaultServiceTierLead",
+  "defaultServiceTierExecutor",
+  "defaultServiceTierReviewer",
 ] as const satisfies readonly WorkRuleKey[];
 
 export const workRulesScopeSchema = z.union([
