@@ -1,5 +1,5 @@
 import type { DashboardUsageDay } from "../../shared/contracts/dashboard-usage";
-import { tr } from "../i18n";
+import { tr, uiLocale } from "../i18n";
 import type { UsageCatalogNames } from "./usage-dashboard";
 
 /**
@@ -101,4 +101,61 @@ export function niceTicks(max: number, count = 4): number[] {
 export function sharePercent(value: number, total: number): number {
   if (!total) return 0;
   return Math.round((value / total) * 1000) / 10;
+}
+
+/** Windows the chart offers above the plot, in days. */
+export const CHART_PERIODS = [7, 30, 90] as const;
+
+function isoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+/** The dates a window covers, today included. */
+export function periodRange(days: number, today = new Date()): { fromDate: string; toDate: string } {
+  const from = new Date(today.getTime());
+  from.setUTCDate(from.getUTCDate() - (days - 1));
+  return { fromDate: isoDate(from), toDate: isoDate(today) };
+}
+
+/** Which window the filter is on: a preset, or null for everything there is. */
+export function activePeriod(filter: { fromDate: string; toDate: string }, today = new Date()): number | null {
+  if (!filter.fromDate && !filter.toDate) return null;
+  for (const days of CHART_PERIODS) {
+    const range = periodRange(days, today);
+    if (range.fromDate === filter.fromDate && range.toDate === filter.toDate) return days;
+  }
+  return null;
+}
+
+/** Axis labels stay short: «2,5 млн» instead of eight digits that collide with the plot. */
+export function compactTokens(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  return value.toLocaleString(uiLocale(), { notation: "compact", maximumFractionDigits: 1 });
+}
+
+/** Names on the bands: the long ones are cut, the tooltip still spells them out. */
+export function clipLabel(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * Label positions pushed apart to `gap` without leaving the plot: bands can be thin and
+ * their middles nearly equal, and two names on one line read as one.
+ */
+export function spreadLabels(anchors: readonly number[], gap: number, top: number, bottom: number): number[] {
+  const order = anchors.map((value, index) => ({ value, index })).sort((left, right) => left.value - right.value);
+  let previous = Number.NEGATIVE_INFINITY;
+  for (const item of order) {
+    item.value = Math.max(item.value, previous + gap);
+    previous = item.value;
+  }
+  // Pushed past the bottom edge: walk back up so the last label stays inside the plot.
+  let limit = bottom;
+  for (const item of [...order].reverse()) {
+    item.value = Math.min(item.value, limit);
+    limit = item.value - gap;
+  }
+  const out = new Array<number>(anchors.length);
+  for (const item of order) out[item.index] = Math.max(top, item.value);
+  return out;
 }

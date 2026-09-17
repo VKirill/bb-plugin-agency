@@ -37,7 +37,7 @@ describe("UsageDashboard", () => {
     expect(container.textContent).toContain("24 786 713");
     expect(container.textContent).toContain("2 549 105");
     expect(container.querySelector('[data-testid="usage-day-chart"]')).toBeTruthy();
-    expect(container.querySelector('input[type="date"][aria-label="Дата с"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="usage-range-trigger"]')?.textContent).toContain("Весь период");
     expect(container.textContent).toContain("Главная задача");
     expect(container.textContent).toContain("5 задач");
     expect(container.textContent).toContain("1 неизвестно");
@@ -76,6 +76,36 @@ describe("UsageDashboard", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(opened).toEqual(["AG-2201"]);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("gives the chart a window to pick and keeps prices out of the way", async () => {
+    const payload = parseDashboardUsage(JSON.parse(readFileSync(livePath, "utf8")));
+    const filters: { fromDate: string; toDate: string }[] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(UsageDashboard, {
+        payload,
+        groupBy: "root",
+        onFilter: (next: { fromDate: string; toDate: string }) => filters.push(next),
+      }) as ReactNode);
+    });
+    // The chart carries the period buttons, so the window is where the days are.
+    const week = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "7 дн.");
+    expect(week).toBeTruthy();
+    await act(async () => {
+      week?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(filters.at(-1)?.fromDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(filters.at(-1)?.toDate).toBe(new Date().toISOString().slice(0, 10));
+    // Nothing under the chart: no legend row, no day table, no price banner.
+    expect(container.textContent).not.toContain("Дни таблицей");
+    expect(container.querySelector("pre")).toBeNull();
+    // The unpriced models are a line in the diagnostics, not a warning of their own.
+    const unpriced = container.querySelector('[data-testid="usage-unpriced"]');
+    if (unpriced) expect(container.querySelector('[data-testid="usage-technical"]')?.contains(unpriced)).toBe(true);
     await act(async () => { root.unmount(); });
   });
 });

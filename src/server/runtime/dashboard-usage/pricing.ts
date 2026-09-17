@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { TokenUsageTotals } from "../../../shared/contracts/dashboard-usage.js";
+import { normalizeModelId } from "../../../shared/model-id.js";
 
 /**
  * Cost is an estimate at API list prices, USD per million tokens. A subscription
@@ -40,14 +41,7 @@ export const DEFAULT_MODEL_PRICES: ModelPriceTable = {
   "claude-haiku-4-5": price(1, 0.1, 5),
 };
 
-/** `claude-opus-5[1m]` and `claude-haiku-4-5-20251001` price as their base model. */
-export function normalizeModelId(model: string): string {
-  return model
-    .trim()
-    .toLowerCase()
-    .replace(/\[[^\]]*\]$/, "")
-    .replace(/-\d{8}$/, "");
-}
+export { normalizeModelId };
 
 /** Settings JSON adds or overrides prices: `{"model-id": {"input": 1, "cachedInput": 0.1, "output": 5}}`. */
 export function parseModelPriceOverrides(json: string | undefined): { table: ModelPriceTable; error: string | null } {
@@ -80,4 +74,41 @@ export function estimateCostUsdCents(units: TokenUsageTotals, modelPrice: ModelP
       units.outputTokens * modelPrice.output) /
     1_000_000;
   return Math.round(usd * 100 * 100) / 100;
+}
+
+export type ModelPriceRow = ModelPrice & {
+  model: string;
+  /** The owner set this price: it is not a built-in one, or it differs from it. */
+  custom: boolean;
+};
+
+function samePrice(left: ModelPrice, right: ModelPrice): boolean {
+  return left.input === right.input && left.cachedInput === right.cachedInput && left.output === right.output;
+}
+
+/** The whole table as rows for the settings screen: built-in prices with the owner's changes on top. */
+export function modelPriceRows(table: ModelPriceTable): ModelPriceRow[] {
+  return Object.entries(table)
+    .map(([model, value]) => {
+      const builtin = DEFAULT_MODEL_PRICES[model];
+      return { model, ...value, custom: !builtin || !samePrice(builtin, value) };
+    })
+    .sort((left, right) => left.model.localeCompare(right.model));
+}
+
+/**
+ * What the settings field stores: only what differs from the built-in prices, so a later
+ * correction of a built-in price still reaches an owner who never touched that row.
+ */
+export function modelPriceOverridesJson(rows: readonly (ModelPrice & { model: string })[]): string {
+  const overrides: Record<string, ModelPrice> = {};
+  for (const row of rows) {
+    const model = normalizeModelId(row.model);
+    if (!model) continue;
+    const value = { input: row.input, cachedInput: row.cachedInput, output: row.output };
+    const builtin = DEFAULT_MODEL_PRICES[model];
+    if (builtin && samePrice(builtin, value)) continue;
+    overrides[model] = value;
+  }
+  return Object.keys(overrides).length ? JSON.stringify(overrides, null, 2) : "";
 }

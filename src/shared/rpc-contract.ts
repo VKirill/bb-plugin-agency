@@ -261,6 +261,31 @@ export const providerUsageSchema = z
   .strict();
 export type ProviderUsageView = z.infer<typeof providerUsageSchema>;
 
+/** A price of one model, USD per million tokens, as the settings table edits it. */
+export const modelPriceRowSchema = z
+  .object({
+    model: z.string().min(1).max(120),
+    input: z.number().min(0).max(100_000),
+    cachedInput: z.number().min(0).max(100_000),
+    output: z.number().min(0).max(100_000),
+  })
+  .strict();
+
+export const modelPricesViewSchema = z
+  .object({
+    rows: z.array(modelPriceRowSchema.extend({ custom: z.boolean() })),
+    /** Models the employees are set to run: the ones worth a price first. */
+    usedModels: z.array(z.string()),
+    checkedAt: z.string(),
+    source: z.string(),
+    /** The stored settings value could not be read; built-in prices are in use. */
+    error: z.string().nullable(),
+  })
+  .strict();
+
+export type ModelPricesView = z.infer<typeof modelPricesViewSchema>;
+export type ModelPriceRowView = z.infer<typeof modelPricesViewSchema>["rows"][number];
+
 export const starterKitViewSchema = z
   .object({
     departments: z.array(
@@ -973,6 +998,8 @@ export const rpcContract = defineRpcContract({
   agencyLanguage: { input: z.null(), output: z.object({ language: z.enum(["ru", "en"]) }).strict() },
   listBudgets: { input: z.null(), output: domainResultSchema(z.array(budgetStatusSchema)) },
   providerUsage: { input: z.null(), output: domainResultSchema(z.array(providerUsageSchema)) },
+  modelPrices: { input: z.null(), output: modelPricesViewSchema },
+  setModelPrices: { input: z.object({ rows: z.array(modelPriceRowSchema).max(300) }).strict(), output: modelPricesViewSchema },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },
   getSkillPins: { input: z.null(), output: domainResultSchema(skillPinStatusSchema) },
   listBackups: { input: z.null(), output: domainResultSchema(z.array(backupFileSchema)) },

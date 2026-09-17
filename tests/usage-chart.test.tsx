@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { DashboardUsageDay } from "../src/shared/contracts/dashboard-usage";
-import { MAX_CHART_SERIES, niceTicks, sharePercent, usageChartData } from "../src/app/data/usage-chart";
+import {
+  MAX_CHART_SERIES,
+  activePeriod,
+  clipLabel,
+  niceTicks,
+  periodRange,
+  sharePercent,
+  spreadLabels,
+  usageChartData,
+} from "../src/app/data/usage-chart";
 import { UsageAreaChart } from "../src/app/prototype/usage-chart";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -66,6 +75,28 @@ describe("usage chart data", () => {
     expect(sharePercent(1, 3)).toBe(33.3);
     expect(sharePercent(1, 0)).toBe(0);
   });
+
+  it("pushes crowded labels apart without leaving the plot", () => {
+    // Three bands of almost the same height: their middles are one line apart.
+    expect(spreadLabels([100, 104, 108], 15, 0, 200)).toEqual([100, 115, 130]);
+    // Anchored at the bottom edge: the stack walks back up instead of hanging below it.
+    expect(spreadLabels([196, 198], 15, 0, 200)).toEqual([185, 200]);
+    expect(spreadLabels([], 15, 0, 200)).toEqual([]);
+  });
+
+  it("clips long names", () => {
+    expect(clipLabel("grok-4.6", 15)).toBe("grok-4.6");
+    expect(clipLabel("claude-fable-5-1", 15)).toBe("claude-fable-5…");
+  });
+
+  it("reads the window off the filter dates", () => {
+    const today = new Date("2026-09-17T10:00:00Z");
+    expect(periodRange(7, today)).toEqual({ fromDate: "2026-09-11", toDate: "2026-09-17" });
+    expect(activePeriod(periodRange(30, today), today)).toBe(30);
+    expect(activePeriod({ fromDate: "", toDate: "" }, today)).toBeNull();
+    // A hand-picked range is not a preset: no button is lit.
+    expect(activePeriod({ fromDate: "2026-09-01", toDate: "2026-09-05" }, today)).toBeNull();
+  });
 });
 
 describe("UsageAreaChart", () => {
@@ -82,9 +113,12 @@ describe("UsageAreaChart", () => {
       root.render(createElement(UsageAreaChart, { days, dimension: "model", onDimension: () => undefined }) as ReactNode);
     });
     const svg = container.querySelector('[data-testid="usage-day-chart"]') as SVGSVGElement;
-    expect(svg.querySelectorAll("path")).toHaveLength(2);
-    expect(container.textContent).toContain("opus");
-    expect(container.textContent).toContain("grok");
+    // Every series draws its band and the line on top of it.
+    expect(svg.querySelectorAll("path")).toHaveLength(4);
+    expect(svg.querySelectorAll('path[fill="none"]')).toHaveLength(2);
+    // Names stand on the bands themselves, not in a legend under the chart.
+    expect(svg.textContent).toContain("opus");
+    expect(svg.textContent).toContain("grok");
 
     svg.getBoundingClientRect = () => ({ left: 0, width: 720, top: 0, height: 240, right: 720, bottom: 240, x: 0, y: 0, toJSON: () => ({}) });
     await act(async () => {

@@ -15,7 +15,6 @@ import {
   filteredUsageView,
   formatTokenCount,
   groupUsageRows,
-  modelPriceSnippet,
   modelsWithoutPrice,
   technicalUsageLines,
   usageFilterOptions,
@@ -25,7 +24,8 @@ import {
   type UsageGroupBy,
 } from "../data/usage-dashboard";
 import { UsageAreaChart } from "./usage-chart";
-import type { ChartDimension } from "../data/usage-chart";
+import { activePeriod, periodRange, type ChartDimension } from "../data/usage-chart";
+import { DateRangePicker } from "./date-range";
 import { Button, Empty, PageHead } from "./shared";
 import { tr, uiLocale } from "../i18n";
 
@@ -128,7 +128,7 @@ export function UsageDashboard({
       {payload && view && (
         <>
           <section aria-label={tr("Фильтры")} className="rounded-lg border border-border p-3">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
               <NativeSelect
                 label="Группировка"
                 value={groupBy}
@@ -159,26 +159,10 @@ export function UsageDashboard({
                 onChange={(value) => onFilter?.({ ...filter, rootJobId: value === "all" ? "" : value })}
                 options={[{ value: "all", label: "Все главные задачи" }, ...options.roots]}
               />
-              <label className="block text-xs text-muted-foreground">
-                {tr("С")}
-                <input
-                  type="date"
-                  aria-label={tr("Дата с")}
-                  className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-                  value={filter.fromDate}
-                  onChange={(event) => onFilter?.({ ...filter, fromDate: event.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-muted-foreground">
-                {tr("По")}
-                <input
-                  type="date"
-                  aria-label={tr("Дата по")}
-                  className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-                  value={filter.toDate}
-                  onChange={(event) => onFilter?.({ ...filter, toDate: event.target.value })}
-                />
-              </label>
+              <DateRangePicker
+                range={{ fromDate: filter.fromDate, toDate: filter.toDate }}
+                onChange={(next) => onFilter?.({ ...filter, ...next })}
+              />
               <div className="flex items-end">
                 {filtered && onFilter && (
                   <Button size="sm" variant="outline" className="h-8 w-full" onClick={() => onFilter({ ...EMPTY_USAGE_FILTER })}>{tr("Сбросить фильтры")}</Button>
@@ -204,40 +188,16 @@ export function UsageDashboard({
             </Tile>
           </section>
 
-          {unpriced.length > 0 && (
-            <section className="rounded-lg border border-border bg-muted/30 p-3" data-testid="usage-unpriced" aria-label={tr("Модели без цены")}>
-              <p className="text-xs text-muted-foreground">
-                {tr("Токены этих моделей посчитаны, но цены у них нет: {models}. Добавьте её в «Настройки → Плагины → Агентство → Цены моделей», USD за миллион токенов:", { models: unpriced.join(", ") })}
-              </p>
-              <pre className="mt-2 whitespace-pre-wrap break-all rounded-md border border-border bg-background p-2 font-mono text-[11px]">{modelPriceSnippet(unpriced)}</pre>
-            </section>
-          )}
-
           {view.days.length > 0 && (
-            <section aria-label={tr("Расход по дням")} className="space-y-3 rounded-lg border border-border p-3">
-              <UsageAreaChart days={view.days} names={names} dimension={chartDimension} onDimension={setChartDimension} />
-              <p className="text-xs text-muted-foreground">{tr(USAGE_PERIOD_OBSERVED)}</p>
-              <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer">{tr("Дни таблицей")}</summary>
-                <div className="mt-2 overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/40 text-xs text-muted-foreground">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">{tr("День")}</th>
-                        <NumberHeads />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {view.daySeries.map((day) => (
-                        <tr key={day.date}>
-                          <td className="px-3 py-2 text-xs">{day.date}</td>
-                          <TokenCells totals={day} known />
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
+            <section aria-label={tr("Расход по дням")} className="rounded-lg border border-border p-3">
+              <UsageAreaChart
+                days={view.days}
+                names={names}
+                dimension={chartDimension}
+                onDimension={setChartDimension}
+                period={activePeriod(filter)}
+                onPeriod={onFilter ? (next) => onFilter({ ...filter, ...(next ? periodRange(next) : { fromDate: "", toDate: "" }) }) : undefined}
+              />
             </section>
           )}
 
@@ -297,6 +257,12 @@ export function UsageDashboard({
             <summary className="cursor-pointer">{tr("Как это посчитано")}</summary>
             <div className="mt-2 space-y-1" data-testid="usage-coverage">
               {coverageLines(view.coverage).map((line) => <p key={line}>{line}</p>)}
+              <p>{tr(USAGE_PERIOD_OBSERVED)}</p>
+              {unpriced.length > 0 && (
+                <p data-testid="usage-unpriced">
+                  {tr("Без цены: {models}. Цены задаются в «Настройки → Цены моделей».", { models: unpriced.join(", ") })}
+                </p>
+              )}
             </div>
             <div className="mt-2 space-y-1 font-mono">
               {technicalUsageLines(payload).map((line) => <p key={line}>{line}</p>)}

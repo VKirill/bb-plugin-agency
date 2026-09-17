@@ -78,6 +78,10 @@ import type { ServiceContext } from "./services/context";
 import { agencyLanguage, setAgencyLanguage } from "./i18n/language";
 import {
   DEFAULT_MODEL_PRICES,
+  MODEL_PRICES_CHECKED_AT,
+  MODEL_PRICES_SOURCE,
+  modelPriceOverridesJson,
+  modelPriceRows,
   parseModelPriceOverrides,
   type ModelPriceTable,
 } from "./runtime/dashboard-usage/pricing";
@@ -156,7 +160,7 @@ export function registerAgency(bb: BbPluginApi) {
       type: "string",
       label: "Цены моделей для оценки стоимости, JSON",
       description:
-        'USD за миллион токенов. Цены Claude уже встроены (проверены 2026-09-16). Добавить или изменить: {"gpt-5.6-sol": {"input": 1.25, "cachedInput": 0.125, "output": 10}}. Оценка без записи в кеш.',
+        'Заполняется таблицей в Агентстве: Настройки → Цены моделей. Здесь лежит то же самое в виде JSON, USD за миллион токенов: {"gpt-5.6-sol": {"input": 1.25, "cachedInput": 0.125, "output": 10}}. Цены Claude встроены, в настройке хранятся только отличия.',
       experimental_multiline: true,
     },
   });
@@ -165,6 +169,7 @@ export function registerAgency(bb: BbPluginApi) {
   let boardPolicy: BoardPolicy = { ...DEFAULT_BOARD_POLICY };
   let archiveAfterDays = DEFAULT_ARCHIVE_AFTER_DAYS;
   let modelPrices: ModelPriceTable = DEFAULT_MODEL_PRICES;
+  let modelPricesError: string | null = null;
   const applyWorkSettings = (values: {
     delegationInstructions: string;
     hideClosedSubtasksAfterHours: number;
@@ -182,6 +187,7 @@ export function registerAgency(bb: BbPluginApi) {
     const prices = parseModelPriceOverrides(values.modelPricesJson);
     if (prices.error) bb.log.warn(`Model prices ignored: ${prices.error}`);
     modelPrices = prices.table;
+    modelPricesError = prices.error;
     archiveAfterDays = typeof values.archiveClosedAfterDays === "number" && Number.isFinite(values.archiveClosedAfterDays) ? Math.max(0, Math.min(3650, Math.round(values.archiveClosedAfterDays))) : DEFAULT_ARCHIVE_AFTER_DAYS;
     boardPolicy = {
       hideClosedSubtasksAfterHours: clampHours(values.hideClosedSubtasksAfterHours, DEFAULT_BOARD_POLICY.hideClosedSubtasksAfterHours),
@@ -1425,6 +1431,19 @@ export function registerAgency(bb: BbPluginApi) {
     if (!receipt.duplicate) bb.realtime.publish("inbox-changed", null);
     return receipt;
   };
+  /** Prices as the settings table reads them: built-in rows, the owner's on top, models in use first. */
+  const pricesView = () => {
+    const used = (db.prepare(`SELECT DISTINCT model FROM agency_agent_version WHERE model <> ''`).all() as { model: string }[])
+      .map((row) => row.model)
+      .sort();
+    return {
+      rows: modelPriceRows(modelPrices),
+      usedModels: used,
+      checkedAt: MODEL_PRICES_CHECKED_AT,
+      source: MODEL_PRICES_SOURCE,
+      error: modelPricesError,
+    };
+  };
   const rpcHandlers: PluginRpcHandlers<typeof rpcContract> = {
     prepareDemoDocument,
     prepareDocument: prepareDemoDocument,
@@ -1435,6 +1454,12 @@ export function registerAgency(bb: BbPluginApi) {
     machineInventory: ({ hostId }) => machines.inspect(hostId),
     setCliPolicy: machines.setPolicy,
     agencyLanguage: async () => ({ language: agencyLanguage() }),
+    modelPrices: async () => pricesView(),
+    setModelPrices: async ({ rows }) => {
+      const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
+      applyWorkSettings(next);
+      return pricesView();
+    },
     setAgencyLanguage: async ({ language }) => {
       const next = await workSettings.experimental_set({ language });
       applyWorkSettings(next);
