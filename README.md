@@ -157,6 +157,55 @@ plugins that only change the BB interface.
 
 Shared interface rules: [DESIGN.md](DESIGN.md) (Russian).
 
+## Compared with other systems
+
+How the Agency relates to systems that have long automated team work. Other systems
+are rated from their public documentation (September 2026); sources are listed at the
+end of [docs/operating-model.md](docs/operating-model.md). "?" means no data was found,
+not that the feature is missing.
+
+| Capability | Linear | Jira SM | Bitrix24 | Paperclip | Multica | Symphony | Agency |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Departments with a lead | no | partial | yes | yes | yes | no | yes |
+| Intake and triage of incoming work | yes | yes | partial | yes | ? | no | partial |
+| Routing from any chat | partial | no | no | no | no | no | yes |
+| Main job and subtasks with progress | yes | yes | yes | yes | yes | no | yes |
+| Auto-hide or archive of closed work | yes | ? | ? | no | no | no | yes |
+| Heartbeat / stall timeout | yes | no | no | yes | yes | yes | yes |
+| Retry and fallback by error type | no | no | no | partial | yes | yes | no |
+| Independent review and acceptance of a version | no | partial | partial | yes | partial | yes | yes |
+| Budgets per agent or department | no | no | no | yes | no | no | yes |
+| WIP / concurrency limits | no | no | no | no | no | yes | yes |
+| Department knowledge in the context | no | partial | yes | no | yes | no | yes |
+| Schedules and webhooks | partial | yes | yes | yes | yes | no | yes |
+| Question to the owner with continuation | yes | no | no | partial | ? | partial | yes |
+
+### What is built in and where the idea comes from
+
+| Feature | How it works in the Agency | Similar in |
+| --- | --- | --- |
+| Departments and leads | A job goes to the department lead, who splits it into subtasks for executors and reviewers and does not implement | Multica squads, Paperclip org tree, Bitrix24 departments |
+| Routing from chats | Every BB session gets the list of departments and what each accepts, plus the command to hand work over | lane-stack routing |
+| Intake assessment | The lead records size, risk and decision (accept / split / clarify / return) as job data | Linear triage, lane-stack risk |
+| Board hygiene | Closed subtasks leave the board after 1 h, other jobs after 24 h; closed trees go to a searchable archive after 30 days | Linear auto-archive, Plane auto-archive, Vibe Kanban |
+| Launch watch | Silence, stall, failed start, provider error and a ceiling per attempt; a stuck job goes to the lead | Symphony stall timeout, Linear stale sessions, lane-stack idle/max |
+| Review and acceptance | Executor ≠ reviewer, optional automatic review subtask, acceptance of `artifactId + version + hash`, not of the word "done" | Symphony Human Review, Paperclip review stages, lane-stack acceptance receipt |
+| Rework limit | Rework rounds per job are a rule (3 by default), then the owner decides | CrewAI guardrail retries, MetaGPT review loops |
+| Execution contract | May change / must not touch / checks, frozen in the launch snapshot | lane-stack task contract |
+| Budgets | Monthly budget for the Agency, a department and an employee: warning at a threshold, launches pause at 100% | Paperclip budgets |
+| Limits and queue | Concurrent launches per Agency, department and employee; a launch queue by priority; soft WIP limits on kanban columns | Symphony parallel agents, ClickUp WIP limits |
+| Assignment and job team | Lead or the least loaded executor or reviewer; reviewers and observers on a job | Jira load-based assignment, Bitrix24 task roles |
+| Knowledge | Items scoped to the Agency, a department or a project go into launches; a remark repeated in three jobs becomes a knowledge proposal | Bitrix24 knowledge base, lane-stack "repeated fix → project rule" |
+| Goals, hierarchy, metrics | Goals over main jobs, subordinate departments with escalation, employee metrics | Linear Initiatives, Asana Goals, Paperclip `reportsTo`, Bitrix24 efficiency |
+| Questions to the owner | A typed question pauses the job; the answer continues the same thread | Linear agents (the human stays the owner) |
+| Automations | Event → rule → job, cron schedules, signed webhooks, Telegram notifications | Jira automation rules, Multica autopilots |
+| Work order | Dependencies hold a launch until the jobs it waits for are done; a "next step" job for another department is created and queued after acceptance | Jira automation rules |
+| Nightly recheck | A reviewer rechecks the versions accepted that day | lane-stack night review |
+| Messages to the owner | `notify-owner`, summaries and watchdogs without a model; Inbox and Telegram | — |
+| Machines and plugins | Project folders on several machines, an employee workplace on its own machine, BB plugins per employee, a sandbox rule per machine | — (BB-specific) |
+
+lane-stack is the author's own set of Claude Code agents for orchestrating development work; its rules were an input for this design.
+
 ## Not there yet
 
 An honest list of limits, so the alpha is not read as a finished product:
