@@ -3,7 +3,25 @@ import { displayNameSchema, opaqueIdSchema } from "./ids";
 import { changeCommandSchema, createCommandSchema, revisionedRecordSchema } from "./revision";
 
 export const agentStateSchema = z.enum(["active", "paused", "archived"]);
-export const membershipRoleSchema = z.enum(["member", "lead"]);
+/**
+ * Role type inside a department: what the system does differently for the
+ * agent. The free-text job title lives in the agent profile (`role`).
+ * lead — takes department jobs, orchestrates subtasks, hears about them;
+ * executor — does the work and hands in a version;
+ * reviewer — checks someone else's version and may not check their own work.
+ */
+export const MEMBERSHIP_ROLES = ["lead", "executor", "reviewer"] as const;
+export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
+/** `member` is the pre-2026-09-16 name of executor; old payloads keep working. */
+export const membershipRoleSchema = z.preprocess(
+  (value) => (value === "member" ? "executor" : value),
+  z.enum(MEMBERSHIP_ROLES),
+);
+/**
+ * all — the department takes jobs from every connected project (default);
+ * selected — only from projects it is linked to.
+ */
+export const departmentAvailabilitySchema = z.enum(["all", "selected"]);
 
 export const agentSchema = revisionedRecordSchema
   .extend({
@@ -20,6 +38,15 @@ export const departmentSchema = revisionedRecordSchema
     name: displayNameSchema,
     leadAgentId: opaqueIdSchema,
     processVersionId: opaqueIdSchema,
+    /** Omitted means all. */
+    availability: departmentAvailabilitySchema.optional(),
+  })
+  .strict();
+
+export const setDepartmentAvailabilityCommandSchema = changeCommandSchema
+  .extend({
+    departmentId: opaqueIdSchema,
+    availability: departmentAvailabilitySchema,
   })
   .strict();
 
@@ -89,3 +116,5 @@ export type CreateDepartmentCommand = z.infer<typeof createDepartmentCommandSche
 export type UpdateDepartmentCommand = z.infer<typeof updateDepartmentCommandSchema>;
 export type CreateMembershipCommand = z.infer<typeof createMembershipCommandSchema>;
 export type RemoveMembershipCommand = z.infer<typeof removeMembershipCommandSchema>;
+export type DepartmentAvailability = z.infer<typeof departmentAvailabilitySchema>;
+export type SetDepartmentAvailabilityCommand = z.infer<typeof setDepartmentAvailabilityCommandSchema>;

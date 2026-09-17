@@ -69,8 +69,8 @@ const department: Department = {
 
 const memberships: Membership[] = [
   { departmentId: "dep_abcd1234", agentId: "agt_lead0001", role: "lead" },
-  { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member" },
-  { departmentId: "dep_other001", agentId: "agt_writer01", role: "member" },
+  { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor" },
+  { departmentId: "dep_other001", agentId: "agt_writer01", role: "executor" },
 ];
 
 const binding: ProjectBinding = {
@@ -180,13 +180,13 @@ describe("stage-1 exported schemas", () => {
       expectedRevision: 3, requestId, extra: true,
     }).success).toBe(false);
     expect(membershipSchema.safeParse({
-      departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member", name: "Имя",
+      departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor", name: "Имя",
     }).success).toBe(false);
     expect(createMembershipCommandSchema.safeParse({
-      requestId, departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member",
+      requestId, departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor",
     }).success).toBe(true);
     expect(createMembershipCommandSchema.safeParse({
-      departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member",
+      departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor",
     }).success).toBe(false);
     expect(projectBindingSchema.safeParse({ ...binding, projectId: "proj_trusted" }).success).toBe(false);
     expect(jobSchema.safeParse({ ...job, projectId: "proj_trusted" }).success).toBe(false);
@@ -351,7 +351,7 @@ describe("membership", () => {
     expect(assertUniqueMemberships(memberships).ok).toBe(true);
     expect(assertUniqueMemberships([
       ...memberships,
-      { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member" },
+      { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor" },
     ]).ok).toBe(false);
   });
 
@@ -359,8 +359,8 @@ describe("membership", () => {
     expect(assertLeadInMembership(department, memberships).ok).toBe(true);
     expect(assertLeadInMembership(department, memberships.filter((row) => row.role !== "lead")).ok).toBe(false);
     expect(assertLeadInMembership(department, [
-      { departmentId: "dep_abcd1234", agentId: "agt_lead0001", role: "member" },
-      { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "member" },
+      { departmentId: "dep_abcd1234", agentId: "agt_lead0001", role: "executor" },
+      { departmentId: "dep_abcd1234", agentId: "agt_writer01", role: "executor" },
     ])).toMatchObject({ ok: false, error: { code: "lead_role_conflict" } });
     expect(assertLeadInMembership(department, [
       ...memberships,

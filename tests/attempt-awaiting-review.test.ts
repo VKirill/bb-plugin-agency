@@ -272,7 +272,26 @@ function publishVersion(seeded: Awaited<ReturnType<typeof seedRunningJob>>, byte
     author: { kind: "system" },
   });
   if (!published.ok) throw new Error(published.error.message);
+  closingComment(seeded);
   return published.value;
+}
+
+/** The employee's closing comment: without it a version is not handed in. */
+export function closingComment(seeded: Awaited<ReturnType<typeof seedRunningJob>>) {
+  const agentId = seeded.job.assignedAgentId!;
+  const comment = seeded.store.createActivity(
+    { ...seeded.ctx, actor: { kind: "agent", agentId } },
+    {
+      requestId: requestId(),
+      jobId: seeded.job.id,
+      actor: { kind: "agent", agentId },
+      kind: "comment",
+      causationId: null,
+      references: [],
+      comment: "Итог: версия опубликована, проверки пройдены.",
+    },
+  );
+  if (!comment.ok) throw new Error(comment.error.message);
 }
 
 function attestation(seeded: Awaited<ReturnType<typeof seedRunningJob>>) {
@@ -375,9 +394,50 @@ describe("awaiting_review lifecycle", () => {
     expect(unknownRetry.ok).toBe(false);
     if (!unknownRetry.ok) expect(unknownRetry.error.code).toBe("no_automatic_spawn_retry");
     expect(assertAttemptTransition("awaiting_review", "launching").ok).toBe(false);
-    expect(assertAttemptTransition("awaiting_review", "running").ok).toBe(false);
+    // Rework continues the same thread; a new spawn is still refused.
+    expect(assertAttemptTransition("awaiting_review", "running").ok).toBe(true);
+    expect(assertAttemptTransition("awaiting_review", "launching").ok).toBe(false);
     expect(assertAttemptTransition("awaiting_review", "succeeded").ok).toBe(true);
     expect(assertAttemptTransition("running", "awaiting_review").ok).toBe(true);
+  });
+
+  it("closes an awaiting_review attempt once its job is canceled and the thread is idle", async () => {
+    const opened = openFileDb();
+    try {
+      const live = await seedRunningAttempt(opened.db);
+      const bytes = new TextEncoder().encode("replaced-body\n");
+      const version = publishVersion(live.seeded, bytes);
+      const idle = interpretVerifiedCompletion({ threadStatus: "idle", publishedVerified: true, acceptedVerified: false });
+      const apply = (reading: typeof idle) =>
+        applyVerifiedCompletionLifecycle({
+          store: live.seeded.store,
+          runs: live.runs,
+          reads: live.reads,
+          ctx: live.seeded.ctx,
+          jobId: live.seeded.job.id,
+          launchId: live.receipt.launchId,
+          reading,
+          publishedHash: version.hash,
+        });
+      const reviewed = apply(idle);
+      expect(reviewed.ok && reviewed.value.attemptState).toBe("awaiting_review");
+      const job = live.seeded.store.getJob(live.seeded.job.id)!;
+      const canceled = live.seeded.store.transitionJob(live.seeded.ctx, {
+        requestId: requestId(),
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: "canceled",
+      });
+      expect(canceled.ok).toBe(true);
+      const active = apply(interpretVerifiedCompletion({ threadStatus: "active", publishedVerified: true, acceptedVerified: false }));
+      expect(active.ok && active.value.attemptState).toBe("awaiting_review");
+      const closed = apply(idle);
+      expect(closed.ok && closed.value.attemptState).toBe("canceled");
+      const again = apply(idle);
+      expect(again.ok && again.value.attemptState).toBe("canceled");
+    } finally {
+      opened.close();
+    }
   });
 
   it("moves running+job.review+idle+hash to awaiting_review, is idempotent after reopen, and blocks reserve/spawn", async () => {

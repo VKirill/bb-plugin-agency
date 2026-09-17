@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useBbNavigate, useRpc, type PluginFileOpenerProps } from "@get-bb/plugin-sdk/app";
 import { FileWorkspace } from "./file-workspace";
+import { tr } from "../i18n";
 import "./job-detail.css";
 import type { TaskFile } from "./data";
 import { rpcContract } from "../../shared/rpc-contract";
@@ -189,7 +190,7 @@ export function DocumentPanel({ path, source, Original }: PluginFileOpenerProps)
   }
 
   if (loading) {
-    return <p className="p-4 text-sm text-muted-foreground">Восстанавливаем документ…</p>;
+    return <p className="p-4 text-sm text-muted-foreground">{tr("Восстанавливаем документ…")}</p>;
   }
   if (loadError) {
     return <p className="p-4 text-sm text-muted-foreground">{loadError}</p>;

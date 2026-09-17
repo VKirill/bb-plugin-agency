@@ -4,6 +4,7 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server";
 import { SDK_RPC_AUTH } from "../src/server/api/auth";
 import { createDomainRpc } from "../src/server/api/domain-rpc";
+import { withCallerThread } from "../src/server/api/caller";
 import { resolveAgencyBoundFileOp, runBoundArtifactFileOp } from "../src/server/api/bound-files";
 import { createArtifactMetadataPort, createDomainStore } from "../src/server/services";
 import { withCommitFailure } from "../src/server/artifacts";
@@ -551,7 +552,7 @@ describe("agency domain RPC", () => {
         }),
         "membership",
       );
-      expect(membership).toMatchObject({ agentId: second.agent.id, role: "member" });
+      expect(membership).toMatchObject({ agentId: second.agent.id, role: "executor" });
       const renamedJob = await requireOk(
         await rpc<DomainEnvelope<{ title: string }>>(harness, "updateJob", {
           requestId: requestId(),
@@ -584,7 +585,7 @@ describe("agency domain RPC", () => {
         ),
         "dept-detail",
       );
-      expect(detail.memberships.some((row) => row.agentId === second.agent.id && row.role === "member")).toBe(true);
+      expect(detail.memberships.some((row) => row.agentId === second.agent.id && row.role === "executor")).toBe(true);
     } finally {
       await harness.lifecycle.dispose();
     }
@@ -1195,6 +1196,58 @@ describe("agency domain RPC", () => {
     }
   });
 
+  it("authors a version by the calling attempt and refuses a publish into another job", async () => {
+    const host = memoryHost();
+    const { bb, harness } = await load({}, host.call);
+    try {
+      const seeded = await seedWorkspace(harness);
+      const artifact = await requireOk(
+        await rpc<DomainEnvelope<{ id: string }>>(harness, "createArtifact", { requestId: requestId(), jobId: seeded.job.id }),
+        "artifact",
+      );
+      const db = openDatabase(bb);
+      db.pragma("foreign_keys = OFF");
+      const attempt = (id: string, jobId: string, threadId: string) =>
+        db
+          .prepare(
+            `INSERT INTO agency_run_attempt (id, job_id, attempt_no, snapshot_id, digest, thread_id, launch_id, state, revision, created_at, updated_at)
+             VALUES (?, ?, 1, 'snp_fixture', 'digest', ?, ?, 'running', 1, '2026-09-17T00:00:00.000Z', '2026-09-17T00:00:00.000Z')`,
+          )
+          .run(id, jobId, threadId, randomUUID());
+      attempt("run_ownjob01", seeded.job.id, "thr_worker0001");
+      attempt("run_other001", "job_elsewhere01", "thr_other00001");
+      db.pragma("foreign_keys = ON");
+      const domain = createDomainRpc({
+        bb,
+        store: createDomainStore(db),
+        db,
+        onChanged: () => {},
+        documents: bb.hosts.experimental_client({ contract: documentHostContract }),
+      });
+      const body = "result";
+      const payload = {
+        requestId: requestId(),
+        artifactId: artifact.id,
+        jobId: seeded.job.id,
+        relativePath: "result.md",
+        mime: "text/markdown",
+        size: Buffer.byteLength(body),
+        hash: sha256(body),
+        bytesBase64: Buffer.from(body).toString("base64"),
+      };
+      expect(await withCallerThread("thr_other00001", () => domain.publishArtifactVersion(payload))).toMatchObject({
+        ok: false,
+        error: { code: "artifact_foreign_job" },
+      });
+      expect(await withCallerThread("thr_worker0001", () => domain.publishArtifactVersion({ ...payload, requestId: requestId() }))).toMatchObject({
+        ok: true,
+        value: { author: { kind: "run", runId: "run_ownjob01" } },
+      });
+    } finally {
+      await harness.lifecycle.dispose();
+    }
+  });
+
   it("does not expose host fileOp or roots on the plugin RPC contract", () => {
     expect(Object.keys(rpcContract)).not.toContain("fileOp");
     expect(Object.keys(rpcContract)).not.toContain("createBbProject");
@@ -1340,6 +1393,16 @@ describe("agency domain RPC", () => {
         }),
         "other-binding",
       );
+      // Departments are open to all projects by default; this one is restricted to its linked project.
+      await requireOk(
+        await rpc<DomainEnvelope<{ id: string }>>(harness, "setDepartmentAvailability", {
+          requestId: requestId(),
+          expectedRevision: 1,
+          departmentId: seeded.department.id,
+          availability: "selected",
+        }),
+        "restrict-department",
+      );
       expect(
         await rpc<DomainEnvelope>(harness, "createJob", {
           requestId: requestId(),
@@ -1431,7 +1494,7 @@ describe("agency domain RPC", () => {
           }>
         >(harness, "saveDepartmentProfile", {
           requestId: requestId(),
-          expectedRevision: 1,
+          expectedRevision: 2,
           departmentId: seeded.department.id,
           name: seeded.department.name,
           leadAgentId: seeded.agent.id,
@@ -1445,7 +1508,7 @@ describe("agency domain RPC", () => {
       );
       expect(process.process.instructions).toBe("Бриф, черновик, проверка.");
       expect(process.department.processVersionId).toBe(process.process.id);
-      expect(process.department.revision).toBe(2);
+      expect(process.department.revision).toBe(3);
       expect(
         await rpc<DomainEnvelope>(harness, "removeMembership", {
           requestId: requestId(),

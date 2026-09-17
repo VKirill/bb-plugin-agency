@@ -229,6 +229,26 @@ describe("compileContextSnapshot schema 2", () => {
     expect(b.digest).not.toBe(a.digest);
   });
 
+  it("puts the agency rules on top of the agency layer and pins their version", () => {
+    const plain = compileOk();
+    expect("agencyRules" in plain).toBe(false);
+    const ruled = compileOk(baseInput({ agencyRules: { versionId: "rul_v2", version: 2, hash: "ab".repeat(32), text: "Секреты не печатать." } }));
+    expect(ruled.agencyRules).toEqual({ versionId: "rul_v2", hash: "ab".repeat(32) });
+    expect(ruled.prompt.levels.agency.startsWith("agencyRules version=2")).toBe(true);
+    expect(ruled.prompt.levels.agency).toContain("Секреты не печатать.");
+    expect(ruled.digest).not.toBe(plain.digest);
+  });
+
+  it("pins the execution contract in the job prompt and the digest, and leaves contract-less jobs unchanged", () => {
+    const plain = compileOk();
+    expect("contractHash" in plain.job).toBe(false);
+    expect(plain.prompt.levels.job).not.toContain("Execution contract");
+    const bound = compileOk(baseInput({ job: { ...job, contract: { mayChange: ["src/cards/**"], mustNotTouch: ["src/billing/**"], checks: ["npm test"] } } }));
+    expect(bound.job.contractHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(bound.prompt.levels.job).toContain("Нельзя трогать:\n- src/billing/**");
+    expect(bound.digest).not.toBe(plain.digest);
+  });
+
   it("freezes AgentVersion reasoningEffort as spawn reasoningLevel without writing it into prompt", () => {
     const without = compileOk();
     const withEffort = compileOk(baseInput({

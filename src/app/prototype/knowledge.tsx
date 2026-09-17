@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Markdown } from "@get-bb/plugin-sdk/app";
 import { STAGE1_UNAVAILABLE } from "../data/runtime-unavailable";
 import { Button, TextField, Field, Choice, PageHead, SearchInput, Collection } from "./shared";
+import { tr } from "../i18n";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
 
 export interface Material {
@@ -53,7 +54,7 @@ export function KnowledgePage({
     setDraft({
       id: crypto.randomUUID(),
       title: "",
-      scope: scope === "all" ? scopeOptions[0] || "Агентство" : scope,
+      scope: scope === "all" ? scopeOptions[0] || tr("Агентство") : scope,
       source: "",
       body: "",
       status: "proposal",
@@ -92,15 +93,15 @@ export function KnowledgePage({
   return (
     <div className="space-y-5">
       <PageHead title="Знания" description="Материалы и принятые правила. Предложения ждут проверки перед использованием.">
-        <Button data-testid="knowledge-add" onClick={add}>Добавить материал</Button>
+        <Button data-testid="knowledge-add" onClick={add}>{tr("Добавить материал")}</Button>
       </PageHead>
       {live && (
         <p role="status" data-testid="knowledge-unavailable" className="text-sm text-muted-foreground">
-          {STAGE1_UNAVAILABLE.knowledge}
+          {tr(STAGE1_UNAVAILABLE.knowledge)}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <SearchInput aria-label="Поиск знаний" placeholder="Найти материал или источник…" value={q} onChange={(event) => setQ(event.target.value)} />
+        <SearchInput aria-label={tr("Поиск знаний")} placeholder={tr("Найти материал или источник…")} value={q} onChange={(event) => setQ(event.target.value)} />
         <div className="w-44">
           <Choice label="Область знаний" value={scope} onChange={setScope} options={[{ value: "all", label: "Все проекты и отделы" }, ...scopeOptions]} />
         </div>
@@ -113,7 +114,7 @@ export function KnowledgePage({
         rows={visible.map((item) => ({
           id: item.id,
           name: <span className="font-medium">{item.title}</span>,
-          cells: [item.status === "accepted" ? "Принят" : "На проверке", item.scope, item.source],
+          cells: [item.status === "accepted" ? tr("Принят") : tr("На проверке"), item.scope, item.source],
           open: () => setSelected(item.id),
         }))}
       />
@@ -124,15 +125,15 @@ export function KnowledgePage({
               <h2 className="text-base font-semibold">{current.title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{current.scope} · {current.source}</p>
             </div>
-            <Button size="sm" variant="ghost" aria-label="Закрыть материал" onClick={() => setSelected(null)}>Закрыть</Button>
+            <Button size="sm" variant="ghost" aria-label={tr("Закрыть материал")} onClick={() => setSelected(null)}>{tr("Закрыть")}</Button>
           </div>
           <Markdown content={current.body} />
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="outline" data-testid="knowledge-edit" onClick={() => edit(current)}>Редактировать</Button>
+            <Button variant="outline" data-testid="knowledge-edit" onClick={() => edit(current)}>{tr("Редактировать")}</Button>
             {current.status === "proposal" ? (
-              <Button data-testid="knowledge-accept" onClick={() => accept(current.id)}>Принять материал</Button>
+              <Button data-testid="knowledge-accept" onClick={() => accept(current.id)}>{tr("Принять материал")}</Button>
             ) : (
-              <span className="self-center text-xs text-muted-foreground">Принят в текущем примере</span>
+              <span className="self-center text-xs text-muted-foreground">{tr("Принят в текущем примере")}</span>
             )}
           </div>
         </section>
@@ -141,8 +142,8 @@ export function KnowledgePage({
         <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) setDraft(null); }}>
           <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl" data-testid="knowledge-dialog">
             <DialogHeader>
-              <DialogTitle>{items.some((item) => item.id === draft?.id) ? "Изменить материал" : "Новый материал"}</DialogTitle>
-              <DialogDescription>Укажите, где применяются сведения и откуда они получены. Новый материал сначала попадёт в предложения.</DialogDescription>
+              <DialogTitle>{tr(items.some((item) => item.id === draft?.id) ? "Изменить материал" : "Новый материал")}</DialogTitle>
+              <DialogDescription>{tr("Укажите, где применяются сведения и откуда они получены. Новый материал сначала попадёт в предложения.")}</DialogDescription>
             </DialogHeader>
             {draft && (
               <>
@@ -155,8 +156,8 @@ export function KnowledgePage({
               </>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDraft(null)}>Отмена</Button>
-              <Button data-testid="knowledge-save" disabled={!draft?.title.trim() || !draft.body.trim() || !draft.source.trim()} onClick={save}>Сохранить материал</Button>
+              <Button variant="outline" onClick={() => setDraft(null)}>{tr("Отмена")}</Button>
+              <Button data-testid="knowledge-save" disabled={!draft?.title.trim() || !draft.body.trim() || !draft.source.trim()} onClick={save}>{tr("Сохранить материал")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

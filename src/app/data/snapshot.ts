@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentVersion,
+  BoardPolicy,
   Department,
   Job,
   JobState,
@@ -37,6 +38,16 @@ export type WorkspaceSnapshot = {
   processVersions: ProcessVersion[];
   projectDepartments: ProjectDepartment[];
   policies: PolicyVersion[];
+  /** Board hygiene from plugin settings; absent on older servers. */
+  board?: BoardPolicy;
+  /** Hours before a due date the job reads as «due soon», by department id. */
+  dueReminderHours?: Record<string, number>;
+  archivedCount?: number;
+  jobGoals?: Record<string, string>;
+  departmentParents?: Record<string, string>;
+  escalations?: Record<string, string>;
+  /** Jobs waiting in the launch queue, by job id. */
+  launchQueue?: Record<string, { jobId: string; position: number; requestedAt: string; waitingReason: string | null }>;
 };
 
 export const EMPTY_SNAPSHOT: WorkspaceSnapshot = {

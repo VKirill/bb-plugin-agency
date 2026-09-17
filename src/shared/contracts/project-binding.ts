@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { bbEnvironmentIdSchema, bbProjectIdSchema, hostIdSchema, opaqueIdSchema } from "./ids";
+import { bbEnvironmentIdSchema, bbProjectIdSchema, hostIdSchema, opaqueIdSchema, utcInstantSchema } from "./ids";
 import { changeCommandSchema, createCommandSchema, revisionedRecordSchema } from "./revision";
 
 export const canonicalRootSchema = z
@@ -18,6 +18,8 @@ export const projectBindingSchema = revisionedRecordSchema
     canonicalRoot: canonicalRootSchema,
     policyVersionId: opaqueIdSchema,
     sectionId: z.string().trim().min(1).max(160).nullable(),
+    /** Set when the project is disconnected from the Agency: history stays, new jobs and launches stop. */
+    archivedAt: utcInstantSchema.nullable().optional(),
   })
   .strict();
 
@@ -47,6 +49,21 @@ export const updateProjectBindingCommandSchema = changeCommandSchema
   })
   .strict();
 
+/** Disconnect, reconnect or delete a project binding. Delete works only for a binding without jobs. */
+export const bindingLifecycleCommandSchema = changeCommandSchema
+  .extend({
+    bindingId: opaqueIdSchema,
+  })
+  .strict();
+
+/** Remove a department from a project's selected list. Departments open to all projects are not affected. */
+export const unlinkDepartmentCommandSchema = createCommandSchema
+  .extend({
+    bindingId: opaqueIdSchema,
+    departmentId: opaqueIdSchema,
+  })
+  .strict();
+
 /** Client may send a project claim; the server must compare it to the stored binding. */
 export const projectScopedQuerySchema = z
   .object({
@@ -60,3 +77,5 @@ export type ProjectDepartment = z.infer<typeof projectDepartmentSchema>;
 export type CreateProjectBindingCommand = z.infer<typeof createProjectBindingCommandSchema>;
 export type UpdateProjectBindingCommand = z.infer<typeof updateProjectBindingCommandSchema>;
 export type ProjectScopedQuery = z.infer<typeof projectScopedQuerySchema>;
+export type BindingLifecycleCommand = z.infer<typeof bindingLifecycleCommandSchema>;
+export type UnlinkDepartmentCommand = z.infer<typeof unlinkDepartmentCommandSchema>;

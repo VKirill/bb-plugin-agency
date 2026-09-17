@@ -126,6 +126,14 @@ describe("isolated catalog roles config", () => {
     expect(host.ok).toBe(false);
     if (!host.ok) expect(host.error.code).toBe("catalog_host_mismatch");
 
+    const listedHosts = await pinCatalogRolesForPrepare({
+      catalog,
+      listed,
+      config: { ...good, hostId: undefined, hostIds: [HOST, "host_otherhost1"] },
+      hostId: "host_otherhost1",
+    });
+    expect(listedHosts.ok).toBe(true);
+
     const hash = await pinCatalogRolesForPrepare({
       catalog,
       listed,

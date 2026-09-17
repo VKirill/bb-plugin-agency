@@ -1,3 +1,5 @@
+import { TEMPLATE_KEYS } from "./templates";
+import { saveWorkRulesCommandSchema, workRulesScopeSchema, workRulesViewSchema } from "./contracts/work-rules";
 import { listDashboardUsageInputSchema, listDashboardUsageOutputSchema } from "./contracts/dashboard-usage";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
@@ -31,6 +33,7 @@ import {
   departmentSchema,
   hostIdSchema,
   jobDependencySchema,
+  boardPolicySchema,
   jobSchema,
   jobStateSchema,
   jobTransitionCommandSchema,
@@ -68,6 +71,9 @@ import {
   updateDepartmentCommandSchema,
   updateJobCommandSchema,
   updateProjectBindingCommandSchema,
+  bindingLifecycleCommandSchema,
+  setDepartmentAvailabilityCommandSchema,
+  unlinkDepartmentCommandSchema,
 } from "./contracts";
 
 export {
@@ -128,7 +134,13 @@ export const workspaceBindingSchema = projectBindingSchema
     bbProjectName: z.string().min(1),
     environmentName: z.string().nullable(),
     hostName: z.string().nullable(),
+    /** Project Folders sections of the binding folder, «Реклама / Telegram». */
+    sectionPath: z.string().nullable().optional(),
   })
+  .strict();
+
+export const launchQueueEntrySchema = z
+  .object({ jobId: z.string(), position: z.number().int().positive(), requestedAt: z.string(), waitingReason: z.string().nullable() })
   .strict();
 
 export const workspaceSnapshotSchema = z
@@ -145,6 +157,19 @@ export const workspaceSnapshotSchema = z
     processVersions: z.array(processVersionSchema),
     projectDepartments: z.array(projectDepartmentSchema),
     policies: z.array(policyVersionSchema),
+    board: boardPolicySchema.optional(),
+    /** Hours before a due date the job reads as «due soon», by department id (work rules). */
+    dueReminderHours: z.record(z.string(), z.number()).optional(),
+    /** Jobs waiting in the launch queue, by job id. */
+    launchQueue: z.record(z.string(), launchQueueEntrySchema).optional(),
+    /** Jobs of archived trees, left out of `jobs`. */
+    archivedCount: z.number().int().min(0).optional(),
+    /** Goal of each main job that has one, by job id. */
+    jobGoals: z.record(z.string(), z.string()).optional(),
+    /** Parent department of each subordinate department, by department id. */
+    departmentParents: z.record(z.string(), z.string()).optional(),
+    /** Open escalations: department a job was escalated to, by job id. */
+    escalations: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
@@ -263,6 +288,31 @@ export const createJobRpcSchema = createJobCommandSchema.extend(claimed).strict(
 export const updateJobRpcSchema = updateJobCommandSchema.extend(claimed).strict();
 export const transitionJobRpcSchema = jobTransitionCommandSchema.extend(claimed).strict();
 export const updateBindingRpcSchema = updateProjectBindingCommandSchema.extend(claimed).strict();
+export const bindingLifecycleRpcSchema = bindingLifecycleCommandSchema.extend(claimed).strict();
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+export const readProjectRulesInputSchema = z.object({ bindingId: opaqueIdSchema }).strict();
+export const projectRulesRecordSchema = z
+  .object({
+    bindingId: opaqueIdSchema,
+    relativePath: z.string().min(1),
+    exists: z.boolean(),
+    text: z.string().nullable(),
+    hash: sha256Schema.nullable(),
+    size: z.number().int().nonnegative().nullable(),
+    /** project-folders template block is present in the file. */
+    managedBlock: z.boolean(),
+  })
+  .strict();
+export const saveProjectRulesInputSchema = z
+  .object({
+    requestId: requestIdSchema,
+    bindingId: opaqueIdSchema,
+    /** Hash the editor opened; null when the file did not exist. */
+    expectedHash: sha256Schema.nullable(),
+    text: z.string().max(256 * 1024),
+  })
+  .strict();
+export const unlinkDepartmentRpcSchema = unlinkDepartmentCommandSchema.extend(claimed).strict();
 export const createActivityRpcSchema = createActivityCommandSchema
   .omit({ actor: true })
   .extend(claimed)
@@ -366,6 +416,14 @@ export const prepareLaunchRpcSchema = z
     expectedRevision: z.number().int().positive(),
   })
   .strict();
+export const enqueueLaunchRpcSchema = z
+  .object({
+    requestId: requestIdSchema,
+    jobId: opaqueIdSchema,
+    expectedRevision: z.number().int().positive(),
+  })
+  .strict();
+export const dequeueLaunchRpcSchema = z.object({ jobId: opaqueIdSchema }).strict();
 export const getLaunchRpcSchema = z
   .object({
     requestId: requestIdSchema.optional(),
@@ -395,6 +453,168 @@ export const cancelLaunchCommandSchema = z
     reason: z.string().trim().min(1).max(500),
   })
   .strict();
+/** Owner returns a version in review for rework; the same worker thread continues. */
+export const getWorkRulesInputSchema = z.object({ scope: workRulesScopeSchema }).strict();
+
+/** Spend of one budgeted scope this calendar month (UTC), estimated at API prices. */
+export const budgetStatusSchema = z
+  .object({
+    scope: workRulesScopeSchema,
+    label: z.string(),
+    monthStart: z.string(),
+    limitUsd: z.number(),
+    spendUsdCents: z.number(),
+    percent: z.number(),
+    warnPercent: z.number(),
+  })
+  .strict();
+
+export type BudgetStatusView = z.infer<typeof budgetStatusSchema>;
+
+export const templateKeySchema = z.enum(TEMPLATE_KEYS);
+export const templateViewSchema = z
+  .object({ key: templateKeySchema, text: z.string(), custom: z.boolean(), revision: z.number().int().min(0) })
+  .strict();
+export const saveTemplateInputSchema = z
+  .object({ key: templateKeySchema, expectedRevision: z.number().int().min(0), text: z.string().max(40_000).nullable() })
+  .strict();
+export type TemplateView = z.infer<typeof templateViewSchema>;
+
+export const agencyRulesVersionSchema = z
+  .object({ id: z.string(), version: z.number().int().positive(), text: z.string(), hash: z.string(), createdAt: z.string() })
+  .strict();
+export const agencyRulesViewSchema = z
+  .object({
+    /** Rules in force; null when there are none. */
+    current: agencyRulesVersionSchema.nullable(),
+    /** Latest version number, including an empty one; pass it back as expectedVersion. */
+    latestVersion: z.number().int().min(0),
+    versions: z.array(agencyRulesVersionSchema),
+  })
+  .strict();
+export const saveAgencyRulesInputSchema = z.object({ expectedVersion: z.number().int().min(0), text: z.string().max(20_000) }).strict();
+export type AgencyRulesView = z.infer<typeof agencyRulesViewSchema>;
+
+export const skillPinStatusSchema = z
+  .object({
+    origin: z.enum(["settings", "env-file", "data-dir-file", "none"]),
+    editable: z.boolean(),
+    hostIds: z.array(z.string()),
+    rows: z.array(
+      z
+        .object({
+          role: z.enum(["core", "helper"]),
+          id: z.string(),
+          name: z.string().nullable(),
+          source: z.string(),
+          pinnedHash: z.string(),
+          currentHash: z.string().nullable(),
+          problem: z.string().nullable(),
+        })
+        .strict(),
+    ),
+    inSync: z.boolean(),
+    note: z.string().nullable(),
+  })
+  .strict();
+export type SkillPinStatusView = z.infer<typeof skillPinStatusSchema>;
+
+export const ruleScheduleSchema = z
+  .object({
+    ruleId: z.string().trim().min(8).max(80),
+    expression: z.string().trim().min(9).max(120),
+    timezone: z.string().trim().min(1).max(64),
+    misfire: z.enum(["skip", "last", "catch_up"]),
+  })
+  .strict();
+export const previewScheduleInputSchema = z.object({ expression: z.string().trim().min(1).max(120), timezone: z.string().trim().min(1).max(64) }).strict();
+export const webhookSourceViewSchema = z
+  .object({ sourceId: z.string(), url: z.string(), issuedAt: z.string().nullable(), topics: z.array(z.string()) })
+  .strict();
+export const rotatedWebhookSecretSchema = webhookSourceViewSchema.extend({ secret: z.string() }).strict();
+export type RuleScheduleView = z.infer<typeof ruleScheduleSchema>;
+
+export const knowledgeScopeKindSchema = z.enum(["agency", "department", "project"]);
+export const knowledgeItemSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    body: z.string(),
+    source: z.string(),
+    scopeKind: knowledgeScopeKindSchema,
+    scopeId: z.string().nullable(),
+    status: z.enum(["proposal", "accepted", "archived"]),
+    proposedBy: z.string().nullable(),
+    revision: z.number().int(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+export const saveKnowledgeInputSchema = z
+  .object({
+    id: z.string().optional(),
+    expectedRevision: z.number().int().min(0),
+    title: z.string().max(200),
+    body: z.string().max(20_000),
+    source: z.string().max(500),
+    scopeKind: knowledgeScopeKindSchema,
+    scopeId: z.string().nullable(),
+  })
+  .strict();
+export const goalViewSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    status: z.enum(["active", "done", "dropped"]),
+    dueAt: z.string().nullable(),
+    revision: z.number().int(),
+    jobIds: z.array(z.string()),
+    progress: z.object({ total: z.number().int(), done: z.number().int(), open: z.number().int() }).strict(),
+  })
+  .strict();
+export const saveGoalInputSchema = z
+  .object({ id: z.string().optional(), expectedRevision: z.number().int().min(0), title: z.string().max(200), description: z.string().max(4_000), status: z.enum(["active", "done", "dropped"]), dueAt: z.string().nullable() })
+  .strict();
+export const agentMetricsSchema = z
+  .object({
+    agentId: z.string(),
+    open: z.number(),
+    blocked: z.number(),
+    inReview: z.number(),
+    done30d: z.number(),
+    canceled30d: z.number(),
+    medianLeadHours: z.number().nullable(),
+    firstPassPercent: z.number().nullable(),
+    reworkReturns90d: z.number(),
+    attempts30d: z.number(),
+    failedAttempts30d: z.number(),
+    lastActivityAt: z.string().nullable(),
+    spendUsdCents30d: z.number().nullable(),
+  })
+  .strict();
+export const jobSearchHitSchema = z
+  .object({ jobId: z.string(), key: z.string(), title: z.string(), state: z.string(), archived: z.boolean(), field: z.enum(["key", "title", "brief", "comment"]), snippet: z.string() })
+  .strict();
+export const savedViewSchema = z.object({ id: z.string(), name: z.string(), filters: z.record(z.string(), z.string()), updatedAt: z.string() }).strict();
+export type KnowledgeItemView = z.infer<typeof knowledgeItemSchema>;
+export const backupFileSchema = z.object({ name: z.string(), size: z.number().int(), createdAt: z.string() }).strict();
+export type BackupFileView = z.infer<typeof backupFileSchema>;
+export type GoalViewRecord = z.infer<typeof goalViewSchema>;
+export type AgentMetricsView = z.infer<typeof agentMetricsSchema>;
+export type JobSearchHitView = z.infer<typeof jobSearchHitSchema>;
+export type SavedViewRecord = z.infer<typeof savedViewSchema>;
+export type WebhookSourceView = z.infer<typeof webhookSourceViewSchema>;
+
+export const returnJobForReworkCommandSchema = z
+  .object({
+    requestId: requestIdSchema,
+    jobId: opaqueIdSchema,
+    expectedRevision: z.number().int().positive(),
+    comment: z.string().trim().min(1).max(8_000),
+  })
+  .strict();
+export type ReturnJobForReworkCommand = z.infer<typeof returnJobForReworkCommandSchema>;
 export const cancelLaunchRecordSchema = z
   .object({
     jobId: opaqueIdSchema,
@@ -549,6 +769,10 @@ export const isolationReadinessSchema = z
     launchAllowedForAssigned: z.boolean(),
     reason: z.string(),
     reasonCode: launchReasonCodeSchema,
+    /** Budget warnings: the launch is allowed, the owner should know. */
+    warnings: z.array(z.string()).optional(),
+    /** The launch waits for a limit (concurrency or budget): the job can go to the launch queue. */
+    waitable: z.boolean().optional(),
   })
   .strict();
 
@@ -561,12 +785,45 @@ export const rpcContract = defineRpcContract({
   telegramPreferences: { input: z.null(), output: telegramPreferenceSchema },
   configureTelegram: { input: telegramPreferenceSchema, output: z.object({ saved: z.literal(true) }) },
   machines: { input: z.null(), output: z.array(machineSchema) },
+  agencyLanguage: { input: z.null(), output: z.object({ language: z.enum(["ru", "en"]) }).strict() },
+  listBudgets: { input: z.null(), output: domainResultSchema(z.array(budgetStatusSchema)) },
+  listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },
+  getSkillPins: { input: z.null(), output: domainResultSchema(skillPinStatusSchema) },
+  listBackups: { input: z.null(), output: domainResultSchema(z.array(backupFileSchema)) },
+  createBackup: { input: z.null(), output: domainResultSchema(backupFileSchema) },
+  restoreBackup: { input: z.object({ name: z.string().max(200) }).strict(), output: domainResultSchema(z.object({ restored: z.string(), safetyBackup: backupFileSchema, tables: z.number().int() }).strict()) },
+  listKnowledge: { input: z.null(), output: domainResultSchema(z.array(knowledgeItemSchema)) },
+  saveKnowledge: { input: saveKnowledgeInputSchema, output: domainResultSchema(knowledgeItemSchema) },
+  setKnowledgeStatus: { input: z.object({ id: z.string(), expectedRevision: z.number().int(), status: z.enum(["proposal", "accepted", "archived"]) }).strict(), output: domainResultSchema(knowledgeItemSchema) },
+  listGoals: { input: z.null(), output: domainResultSchema(z.array(goalViewSchema)) },
+  saveGoal: { input: saveGoalInputSchema, output: domainResultSchema(goalViewSchema) },
+  setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), output: domainResultSchema(z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict()) },
+  setDepartmentParent: { input: z.object({ departmentId: z.string(), parentDepartmentId: z.string().nullable() }).strict(), output: domainResultSchema(z.object({ departmentId: z.string(), parentDepartmentId: z.string().nullable() }).strict()) },
+  agentMetrics: { input: z.object({ agentId: z.string() }).strict(), output: domainResultSchema(agentMetricsSchema) },
+  searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), output: domainResultSchema(z.array(jobSearchHitSchema)) },
+  listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), output: domainResultSchema(z.object({ total: z.number().int(), jobs: z.array(jobSchema) }).strict()) },
+  listSavedViews: { input: z.null(), output: domainResultSchema(z.array(savedViewSchema)) },
+  saveSavedView: { input: z.object({ id: z.string().optional(), name: z.string().max(80), filters: z.record(z.string(), z.string()) }).strict(), output: domainResultSchema(savedViewSchema) },
+  deleteSavedView: { input: z.object({ id: z.string() }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  saveRuleSchedule: { input: ruleScheduleSchema, output: domainResultSchema(ruleScheduleSchema) },
+  listRuleSchedules: { input: z.null(), output: domainResultSchema(z.array(ruleScheduleSchema)) },
+  previewSchedule: { input: previewScheduleInputSchema, output: domainResultSchema(z.array(z.string())) },
+  getWebhookSource: { input: z.object({ sourceId: z.string() }).strict(), output: domainResultSchema(webhookSourceViewSchema) },
+  rotateWebhookSecret: { input: z.object({ sourceId: z.string() }).strict(), output: domainResultSchema(rotatedWebhookSecretSchema) },
+  saveSourceTopics: { input: z.object({ sourceId: z.string(), topics: z.array(z.string()).max(32) }).strict(), output: domainResultSchema(webhookSourceViewSchema) },
+  enqueueLaunch: { input: enqueueLaunchRpcSchema, output: domainResultSchema(launchQueueEntrySchema) },
+  dequeueLaunch: { input: dequeueLaunchRpcSchema, output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  pinSkills: { input: z.null(), output: domainResultSchema(skillPinStatusSchema) },
+  saveTemplate: { input: saveTemplateInputSchema, output: domainResultSchema(templateViewSchema) },
+  getAgencyRules: { input: z.null(), output: domainResultSchema(agencyRulesViewSchema) },
+  saveAgencyRules: { input: saveAgencyRulesInputSchema, output: domainResultSchema(agencyRulesViewSchema) },
+  setAgencyLanguage: { input: z.object({ language: z.enum(["ru", "en"]) }).strict(), output: z.object({ language: z.enum(["ru", "en"]) }).strict() },
   machineInventory: { input: z.object({ hostId: z.string().min(1) }).strict(), output: machineInventorySchema },
   setCliPolicy: {
     input: z.object({ hostId: z.string().min(1), providerId: z.string().min(1), policy: cliPolicySchema }).strict(),
     output: z.object({ saved: z.literal(true) }),
   },
-  uiContext: { input: z.null(), output: z.object({ hosts: z.array(z.object({ id: z.string(), name: z.string() })) }) },
+  uiContext: { input: z.null(), output: z.object({ hosts: z.array(z.object({ id: z.string(), name: z.string() })), primaryHostId: z.string().nullable().optional() }) },
   status: { input: z.null(), output: statusSchema },
   notify: { input: notificationSchema, output: receiptSchema },
   sidebarExecutingJobCount: { input: z.null(), output: sidebarExecutingJobCountSchema },
@@ -609,6 +866,23 @@ export const rpcContract = defineRpcContract({
   createProjectBinding: { input: createProjectBindingCommandSchema, output: domainResultSchema(projectBindingSchema) },
   updateProjectBinding: { input: updateBindingRpcSchema, output: domainResultSchema(projectBindingSchema) },
   linkDepartment: { input: linkDepartmentRpcSchema, output: domainResultSchema(projectDepartmentSchema) },
+  unlinkDepartment: { input: unlinkDepartmentRpcSchema, output: domainResultSchema(projectDepartmentSchema) },
+  archiveProjectBinding: { input: bindingLifecycleRpcSchema, output: domainResultSchema(projectBindingSchema) },
+  restoreProjectBinding: { input: bindingLifecycleRpcSchema, output: domainResultSchema(projectBindingSchema) },
+  deleteProjectBinding: {
+    input: bindingLifecycleRpcSchema,
+    output: domainResultSchema(z.object({ bindingId: opaqueIdSchema }).strict()),
+  },
+  setDepartmentAvailability: { input: setDepartmentAvailabilityCommandSchema, output: domainResultSchema(departmentSchema) },
+  getWorkRules: { input: getWorkRulesInputSchema, output: domainResultSchema(workRulesViewSchema) },
+  saveWorkRules: { input: saveWorkRulesCommandSchema, output: domainResultSchema(workRulesViewSchema) },
+  readProjectRules: { input: readProjectRulesInputSchema, output: domainResultSchema(projectRulesRecordSchema) },
+  saveProjectRules: {
+    input: saveProjectRulesInputSchema,
+    output: domainResultSchema(
+      z.object({ bindingId: opaqueIdSchema, relativePath: z.string().min(1), hash: sha256Schema, size: z.number().int().nonnegative() }).strict(),
+    ),
+  },
   createJob: { input: createJobRpcSchema, output: domainResultSchema(jobSchema) },
   updateJob: { input: updateJobRpcSchema, output: domainResultSchema(jobSchema) },
   transitionJob: { input: transitionJobRpcSchema, output: domainResultSchema(jobSchema) },
@@ -664,6 +938,10 @@ export const rpcContract = defineRpcContract({
   cancelLaunch: {
     input: cancelLaunchCommandSchema,
     output: domainResultSchema(cancelLaunchRecordSchema),
+  },
+  returnJobForRework: {
+    input: returnJobForReworkCommandSchema,
+    output: domainResultSchema(jobSchema),
   },
   saveEventDefinition: { input: saveEventDefinitionCommandSchema, output: domainResultSchema(eventDefinitionRecordSchema) },
   saveEventSource: { input: saveEventSourceCommandSchema, output: domainResultSchema(eventSourceRecordSchema) },

@@ -19,6 +19,7 @@ export function resolveLiveAssignedProvider(
   if (!job.assignedAgentId) return fail("assignee_required", "job.assignedAgentId is required");
   const agent = store.getAgent(job.assignedAgentId);
   if (!agent) return fail("not_found", `agent ${job.assignedAgentId} not found`);
+  if (agent.state === "paused" || agent.state === "archived") return fail("agent_inactive", `agent ${agent.name} is ${agent.state}; activate the profile before launching`);
   const version = store.getAgentVersion(agent.currentVersionId);
   if (!version) return fail("not_found", `agent version ${agent.currentVersionId} not found`);
   if (version.agentId !== agent.id) return fail("version_mismatch", "currentVersionId must belong to this agent");

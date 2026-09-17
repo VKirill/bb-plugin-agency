@@ -1,3 +1,6 @@
+import { tr } from "../i18n";
+import { policySummary } from "./role-types";
+import { charterPurpose } from "./charter";
 import type { Activity, Job as DomainJob, JobPriority, JobState } from "../../shared/contracts";
 import { stateNames, type Agent, type Group, type Job, type State, type TaskActivity, type TaskFile } from "../prototype/data";
 import type { JobDetail } from "./agency-api";
@@ -25,13 +28,20 @@ export function asUiState(state: JobState): State {
   return UI_STATES.has(state as State) ? (state as State) : "blocked";
 }
 
+/** The due date as the person picked it: the local calendar day of the instant. */
 export function dueDate(dueAt: string | null): string {
-  return dueAt ? dueAt.slice(0, 10) : "";
+  if (!dueAt) return "";
+  const at = new Date(dueAt);
+  if (Number.isNaN(at.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
+/** A picked day is due at its local end: «до 18 сентября» includes the 18th. */
 export function dueAtFromDate(due: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
-  return `${due}T00:00:00Z`;
+  const at = new Date(`${due}T23:59:00`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
 }
 
 export function jobDescription(job: DomainJob): string {
@@ -65,8 +75,8 @@ function actorLabel(row: Activity, agents: readonly NamedActor[]): string {
     const found = agents.find((agent) => agent.id === actor.agentId);
     return found ? found.name : actor.agentId;
   }
-  if (actor.kind === "user") return "Вы";
-  return "Система";
+  if (actor.kind === "user") return tr("Вы");
+  return tr("Система");
 }
 
 export function transitionTargetState(refs: Activity["references"]): string | null {
@@ -79,8 +89,8 @@ export function activityEventText(row: Activity): string {
   if (row.kind === "job_transitioned") {
     const to = transitionTargetState(row.references);
     if (!to) return humanActivityLabel(row.kind);
-    if (UI_STATES.has(to as State)) return `Статус: ${stateNames[to as State]}`;
-    return `Статус: ${to}`;
+    const label = UI_STATES.has(to as State) ? tr(stateNames[to as State]) : to;
+    return tr("Статус: {state}", { state: label });
   }
   return row.comment || humanActivityLabel(row.kind);
 }
@@ -96,7 +106,7 @@ export const ACTIVITY_KIND_LABEL: Record<string, string> = {
 };
 
 export function humanActivityLabel(kind: string): string {
-  return ACTIVITY_KIND_LABEL[kind] ?? kind.replaceAll("_", " ");
+  return tr(ACTIVITY_KIND_LABEL[kind] ?? kind.replaceAll("_", " "));
 }
 
 export function mapActivity(rows: Activity[], agents: readonly NamedActor[]): TaskActivity[] {
@@ -111,7 +121,7 @@ export function mapActivity(rows: Activity[], agents: readonly NamedActor[]): Ta
       text: activityEventText(row),
       at: row.timestamp,
       author,
-      role: actor.kind === "agent" ? (agent?.role || "Сотрудник") : actor.kind === "user" ? "Участник" : undefined,
+      role: actor.kind === "agent" ? (agent?.role || tr("Сотрудник")) : actor.kind === "user" ? tr("Участник") : undefined,
       providerId: agent?.selection?.providerId,
       model: agent?.selection?.model,
       reasoningEffort: agent?.selection?.reasoningLevel,
@@ -143,14 +153,21 @@ export function mapJobs(snapshot: WorkspaceSnapshot): Job[] {
       title: job.title,
       state: asUiState(job.state),
       sourceState: job.state,
-      project: binding?.bbProjectName || binding?.bbProjectId || "Проект",
+      project: binding?.bbProjectName || binding?.bbProjectId || tr("Проект"),
       department: department?.name || job.departmentId,
-      agent: agent?.name || "Не назначен",
+      agent: agent?.name || tr("Не назначен"),
       priority: PRIORITY_LABEL[job.priority],
       due: dueDate(job.dueAt),
+      dueAt: job.dueAt,
+      dueWindowHours: snapshot.dueReminderHours?.[job.departmentId],
+      ...(job.contract ? { contract: job.contract } : {}),
+      ...(snapshot.escalations?.[job.id] ? { escalatedToId: snapshot.escalations[job.id] } : {}),
+      ...(snapshot.jobGoals?.[job.id] ? { goalId: snapshot.jobGoals[job.id] } : {}),
+      ...(snapshot.launchQueue?.[job.id] ? { launchQueue: { position: snapshot.launchQueue[job.id].position, waitingReason: snapshot.launchQueue[job.id].waitingReason } } : {}),
       description: jobDescription(job),
       comments: [],
       parentId: job.parentJobId ? snapshot.jobs.find((item) => item.id === job.parentJobId)?.key : undefined,
+      ...(job.closedAt ? { closedAt: job.closedAt } : {}),
     };
   });
 }
@@ -158,6 +175,8 @@ export function mapJobs(snapshot: WorkspaceSnapshot): Job[] {
 export function mapAgents(snapshot: WorkspaceSnapshot): Agent[] {
   return snapshot.agents.map((agent) => {
     const version = snapshot.agentVersions.find((item) => item.id === agent.currentVersionId);
+    const membership = snapshot.memberships.find((row) => row.agentId === agent.id);
+    const policy = snapshot.policies.find((item) => item.id === version?.policyVersionId);
     const department = snapshot.memberships
       .filter((row) => row.agentId === agent.id)
       .map((row) => snapshot.departments.find((item) => item.id === row.departmentId)?.name)
@@ -167,12 +186,25 @@ export function mapAgents(snapshot: WorkspaceSnapshot): Agent[] {
       recordId: agent.id,
       revision: agent.revision,
       name: agent.name,
-      role: version?.role || "Роль уточняется в карточке",
+      role: version?.role || tr("Должность уточняется в карточке"),
       department: department || "",
+      ...(membership ? { roleType: membership.role } : {}),
+      memberships: snapshot.memberships
+        .filter((row) => row.agentId === agent.id)
+        .map((row) => ({
+          departmentId: row.departmentId,
+          departmentName: snapshot.departments.find((item) => item.id === row.departmentId)?.name ?? row.departmentId,
+          roleType: row.role,
+        })),
+      ...(policy ? { policySummary: policySummary(policy), policyVersionId: policy.id } : {}),
+      liveJobs: snapshot.jobs.filter((job) => job.assignedAgentId === agent.id && (job.state === "running" || job.state === "waiting_input")).length,
+      ...(version?.reasoningEffort && version.reasoningEffort !== "none" && version.reasoningEffort !== "ultra" && version.reasoningEffort !== "ultracode"
+        ? { reasoningEffort: version.reasoningEffort }
+        : {}),
       instructions: version?.instructions || "Задайте инструкции сотрудника.",
       skills: version?.skillIds ?? [],
       mcps: version?.mcpIds ?? [],
-      selection: { providerId: version?.providerId || "codex", model: version?.model || "", reasoningLevel: "high" },
+      selection: { providerId: version?.providerId || "", model: version?.model || "", reasoningLevel: version?.reasoningEffort ?? "medium" },
       permission: "auto",
       hostId: "",
       concurrency: 1,
@@ -189,12 +221,20 @@ export function mapDepartments(snapshot: WorkspaceSnapshot): Group[] {
       recordId: department.id,
       revision: department.revision,
       name: department.name,
-      description: process?.instructions || "Отдел агентства",
+      description: charterPurpose(process?.instructions) || tr("Отдел агентства"),
       lead: department.leadAgentId,
       members: snapshot.memberships.filter((row) => row.departmentId === department.id).map((row) => row.agentId),
+      memberRoles: Object.fromEntries(
+        snapshot.memberships
+          .filter((row) => row.departmentId === department.id && row.role === "reviewer")
+          .map((row) => [row.agentId, "reviewer" as const]),
+      ),
       instructions: process?.instructions || "",
       acceptance: process?.acceptance,
+      reviewRequired: process?.reviewPolicy.required ?? true,
+      parentDepartmentId: snapshot.departmentParents?.[department.id] ?? null,
       enabled: true,
+      ...(department.availability === "selected" ? { availability: "selected" as const } : {}),
     };
   });
 }
@@ -211,6 +251,12 @@ export function mapProjects(snapshot: WorkspaceSnapshot): Group[] {
       bbProjectId: binding.bbProjectId,
       name: bindingPlacementLabel(binding),
       hostName: binding.hostName,
+      bbProjectName: binding.bbProjectName,
+      hostId: binding.hostId,
+      environmentId: binding.environmentId,
+      root: binding.canonicalRoot,
+      environmentName: binding.environmentName,
+      ...(binding.archivedAt ? { archivedAt: binding.archivedAt } : {}),
       description: binding.canonicalRoot,
       lead: "",
       members: departmentIds,

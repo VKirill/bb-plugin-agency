@@ -18,8 +18,8 @@ RPC apply, spawn, disable Tasks, acceptArtifact и register.
 
 Не выдуманы. Сверены с локальным BB 0.43.1:
 
-- RPC: `/Users/vechkasov/.local/share/bb-source-agy-16-0431/plugins/tasks/shared/contract.ts`
-- SQL: `/Users/vechkasov/.local/share/bb-source-agy-16-0431/plugins/tasks/db/schema.ts`
+- RPC: `<исходники BB>/plugins/tasks/shared/contract.ts`
+- SQL: `<исходники BB>/plugins/tasks/db/schema.ts`
 - Agency Job: `src/shared/contracts/job.ts` (`backlog|queued|running|review|waiting_input|blocked|done|canceled`)
 
 Tasks id = Crockford ULID. Agency id = opaque `kind_…`. Приведение типов запрещено.
@@ -77,7 +77,7 @@ Tasks id = Crockford ULID. Agency id = opaque `kind_…`. Приведение �
 Root:
 
 ```sh
-cd /Users/vechkasov/Documents/BB-сервис/plugins/bb-plugin-agency
+cd <папка плагина agency>
 ./node_modules/.bin/vitest run tests/tasks-import-resolver.test.ts tests/tasks-import-plan.test.ts tests/tasks-import-reader.test.ts
 ./node_modules/.bin/tsc --noEmit
 ```

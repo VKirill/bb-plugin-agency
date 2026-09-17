@@ -1,4 +1,32 @@
+import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
+import { listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
+import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
+import { agentMetrics } from "./insights/metrics";
+import { deleteSavedView, listSavedViews, saveSavedView, searchJobs } from "./insights/archive";
+import { listJobsForBindings } from "./api/catalog";
+import { archivedJobIds, DEFAULT_ARCHIVE_AFTER_DAYS } from "./insights/archive";
+import { sweepTelegramOutbox } from "./triggers/telegram-outbox";
+import { listRuleSchedules, previewSchedule, saveRuleSchedule, tickSchedules } from "./triggers/schedules";
+import { rotateWebhookSecret, saveSourceTopics, sourceTopics, WEBHOOK_SECRETS_FILENAME, webhookSecretBytes, webhookSecretIssuedAt } from "./triggers/webhook-secrets";
+import { createCatalogWebhookSourcePort, createDurableWebhookInbox } from "./triggers/durable-inbox";
+import { handleWebhookIngress } from "./triggers/webhook-ingress/ingress";
+import { createWebhookRateLimiter } from "./triggers/webhook-ingress/rate-limit";
+import { reviewJobText, startAutoReview, type AutoReviewPorts } from "./runtime/auto-review/service";
+import { claimActionIntent, completeActionIntent, dispatchTick, listActionIntents } from "./dispatcher/engine";
+import { createIntentJobPort } from "./dispatcher/job-port";
+import { dequeueLaunch, enqueueLaunch, LAUNCH_QUEUE_SWEEP_MS, listLaunchQueue, sweepLaunchQueue } from "./runtime/launch-queue/service";
+import { uuidV5 } from "./runtime/launch/operation-ids";
+
+const LAUNCH_QUEUE_NAMESPACE = "3d5f1c2e-7a4b-4c8d-9e6f-0a1b2c3d4e5f";
+const DISPATCHER_SWEEP_MS = 30_000;
+import { pinCurrentSkills, readSkillPinStatus, type SkillPinDeps } from "./runtime/isolated-sdk/skill-pin";
+import { createSdkSkillCatalogPort } from "./runtime/isolated-sdk";
+import { withCallerThread } from "./api/caller";
 import { attachDashboardUsageCollector, USAGE_CHANGED_CHANNEL } from "./api/dashboard-usage-rpc";
+import { createDashboardUsageReader, dashboardUsageCatalogFromSql } from "./runtime/dashboard-usage";
+import { listStoredBindings } from "./api/catalog";
+import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
@@ -20,6 +48,7 @@ import {
   bindOfficialThreads,
   createIsolatedSendPort,
   createCompletionWatch,
+  createReadingChangeGate,
   isolatedViewFromRecord,
   ISOLATED_CATALOG_ROLES_FILENAME,
   readJobPublishedArtifact,
@@ -30,6 +59,19 @@ import { flushParentWakes, recoverParentWakesFromActivities } from "./runtime/pa
 import { bindJobCommentHandler, readCliThreadId } from "./comments/register-glue";
 import { CLI_COMMAND_SPECS, runAgencyCli, type CliOperation } from "./cli";
 import { resolveRpcAccess } from "./api/auth";
+import { randomUUID } from "node:crypto";
+import { remindIncompleteWorker, type ReminderPorts } from "./runtime/completion-reminder/service";
+import type { Job } from "../shared/contracts";
+import { agencyLanguage, setAgencyLanguage } from "./i18n/language";
+import {
+  DEFAULT_MODEL_PRICES,
+  parseModelPriceOverrides,
+  type ModelPriceTable,
+} from "./runtime/dashboard-usage/pricing";
+import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
+import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
+import { DEFAULT_BOARD_POLICY, type BoardPolicy } from "../shared/contracts";
+import { buildAgencyInstructions, DELEGATION_MODES, parseDelegationMode, type DelegationMode } from "./delegation/instructions";
 
 export function registerAgency(bb: BbPluginApi) {
   const documents = bb.hosts.experimental_client({ contract: documentHostContract });
@@ -50,6 +92,101 @@ export function registerAgency(bb: BbPluginApi) {
   const onChanged = () => bb.realtime.publish("domain-changed", null);
   const officialThreads = bindOfficialThreads(bb.sdk.threads);
   const send = createIsolatedSendPort(officialThreads);
+  const workSettings = bb.settings.define({
+    delegationInstructions: {
+      type: "select",
+      label: "Инструкция делегирования в сессиях",
+      description:
+        "delegate — агент сам поручает крупную работу подходящему отделу; suggest — только предлагает владельцу; off — не добавлять. Треды исполнителей Агентства получают роль руководителя или исполнителя в режимах delegate и suggest.",
+      options: [...DELEGATION_MODES],
+      default: "delegate",
+    },
+    hideClosedSubtasksAfterHours: {
+      type: "number",
+      label: "Скрывать готовые подзадачи через, ч",
+      description: "Готовые и отменённые подзадачи уходят с доски в «Скрытые». 0 — не скрывать.",
+      default: DEFAULT_BOARD_POLICY.hideClosedSubtasksAfterHours,
+    },
+    hideClosedMainTasksAfterHours: {
+      type: "number",
+      label: "Скрывать готовые задачи без родителя через, ч",
+      description: "Главные и самостоятельные задачи. 0 — не скрывать.",
+      default: DEFAULT_BOARD_POLICY.hideClosedMainTasksAfterHours,
+    },
+    archiveClosedAfterDays: {
+      type: "number",
+      label: "Убирать закрытые задачи в архив через, дней",
+      description: "Главная задача и все её подзадачи закрыты дольше этого срока — дерево уходит из рабочей доски в архив (поиск и «Архив»). 0 — не архивировать.",
+      default: DEFAULT_ARCHIVE_AFTER_DAYS,
+    },
+    language: {
+      type: "select",
+      label: "Язык Агентства / Agency language",
+      description:
+        "ru — сотрудники пишут отчёты, комментарии и вопросы на русском, системные сообщения агентам на русском. en — the same in English. Интерфейс Агентства пока на русском.",
+      options: ["ru", "en"],
+      default: "ru",
+    },
+    modelPricesJson: {
+      type: "string",
+      label: "Цены моделей для оценки стоимости, JSON",
+      description:
+        'USD за миллион токенов. Цены Claude уже встроены (проверены 2026-09-16). Добавить или изменить: {"gpt-5.6-sol": {"input": 1.25, "cachedInput": 0.125, "output": 10}}. Оценка без записи в кеш.',
+      experimental_multiline: true,
+    },
+  });
+  // Instruction providers are synchronous; keep the last known settings in memory.
+  let delegationMode: DelegationMode = "delegate";
+  let boardPolicy: BoardPolicy = { ...DEFAULT_BOARD_POLICY };
+  let archiveAfterDays = DEFAULT_ARCHIVE_AFTER_DAYS;
+  let modelPrices: ModelPriceTable = DEFAULT_MODEL_PRICES;
+  const applyWorkSettings = (values: {
+    delegationInstructions: string;
+    hideClosedSubtasksAfterHours: number;
+    hideClosedMainTasksAfterHours: number;
+    archiveClosedAfterDays?: number;
+    modelPricesJson?: string;
+    language?: string;
+  }) => {
+    setAgencyLanguage(values.language);
+    delegationMode = parseDelegationMode(values.delegationInstructions);
+    const prices = parseModelPriceOverrides(values.modelPricesJson);
+    if (prices.error) bb.log.warn(`Model prices ignored: ${prices.error}`);
+    modelPrices = prices.table;
+    archiveAfterDays = typeof values.archiveClosedAfterDays === "number" && Number.isFinite(values.archiveClosedAfterDays) ? Math.max(0, Math.min(3650, Math.round(values.archiveClosedAfterDays))) : DEFAULT_ARCHIVE_AFTER_DAYS;
+    boardPolicy = {
+      hideClosedSubtasksAfterHours: clampHours(values.hideClosedSubtasksAfterHours, DEFAULT_BOARD_POLICY.hideClosedSubtasksAfterHours),
+      hideClosedMainTasksAfterHours: clampHours(values.hideClosedMainTasksAfterHours, DEFAULT_BOARD_POLICY.hideClosedMainTasksAfterHours),
+    };
+  };
+  void workSettings.get().then(applyWorkSettings, () => undefined);
+  workSettings.onChange((next) => {
+    applyWorkSettings(next);
+    onChanged();
+  });
+  // Machine names for instructions; the provider is synchronous, so keep a refreshed copy.
+  let hostNames = new Map<string, string>();
+  let hostNamesAt = 0;
+  const refreshHostNames = () => {
+    hostNamesAt = Date.now();
+    void Promise.resolve()
+      .then(() => bb.sdk.hosts.list())
+      .then(
+      (hosts) => {
+        hostNames = new Map(hosts.map((host) => [host.id, host.name]));
+      },
+      () => undefined,
+    );
+  };
+  bb.agents.contributeInstructions((ctx) => {
+    try {
+      if (Date.now() - hostNamesAt > 10 * 60 * 1000) refreshHostNames();
+      return buildAgencyInstructions(db, ctx, delegationMode, (hostId) => hostNames.get(hostId));
+    } catch (error) {
+      bb.log.warn(`Agency instructions for ${ctx.threadId}: ${String(error)}`);
+      return null;
+    }
+  });
   const domain = createDomainRpc({
     bb,
     store,
@@ -57,6 +194,8 @@ export function registerAgency(bb: BbPluginApi) {
     onChanged,
     documents,
     send,
+    boardPolicy: () => boardPolicy,
+    archivedJobIds: () => archivedJobIds(db, archiveAfterDays, new Date()),
   });
   const catalogRolesSettings = bb.settings.define({
     isolatedCatalogRolesJson: {
@@ -67,6 +206,50 @@ export function registerAgency(bb: BbPluginApi) {
       experimental_multiline: true,
     },
   });
+  const dashboardUsage = attachDashboardUsageCollector({
+    db,
+    events: bb.sdk.threads.events,
+    onUsageChanged: () => bb.realtime.publish(USAGE_CHANGED_CHANNEL, null),
+    prices: () => modelPrices,
+  });
+  bb.onDispose(() => dashboardUsage.dispose());
+  // Monthly spend for budgets counts every binding, not only the caller's.
+  const spendReader = createDashboardUsageReader({
+    reads: createInternalRunStoreReads(db),
+    catalog: dashboardUsageCatalogFromSql(db),
+    events: dashboardUsage.collector.events,
+    prices: () => modelPrices,
+  });
+  const limitDeps: LimitDeps = {
+    db,
+    spend: async (filter) => {
+      const ctx = { actor: { kind: "system" as const }, allowedBindingIds: listStoredBindings(db).map((row) => row.id) };
+      const usage = await spendReader.listDashboardUsage(ctx, filter);
+      return usage.ok ? usage.value.costUsdCents : null;
+    },
+  };
+  const catalogRolesFile = join(bb.server.experimental_dataDir, ISOLATED_CATALOG_ROLES_FILENAME);
+  const resolveCatalogRoles = async () => {
+    const settings = await catalogRolesSettings.get();
+    return resolveIsolatedCatalogRolesPath({
+      settingsJson: settings.isolatedCatalogRolesJson,
+      envFilePath: process.env.AGENCY_ISOLATED_CATALOG_ROLES_FILE,
+      dataDirFilePath: catalogRolesFile,
+    });
+  };
+  const skillPinDeps: SkillPinDeps = {
+    catalog: createSdkSkillCatalogPort(bb.sdk.skills),
+    scope: () => {
+      const binding = listStoredBindings(db).find((row) => !row.archivedAt);
+      return binding ? { projectId: binding.bbProjectId, environmentId: binding.environmentId, hostId: binding.hostId } : null;
+    },
+    load: resolveCatalogRoles,
+    dataDirFilePath: catalogRolesFile,
+    writeSettings: async (json) => {
+      await catalogRolesSettings.experimental_set({ isolatedCatalogRolesJson: json });
+    },
+    now: () => new Date(),
+  };
   const launch = createIsolatedLaunchRpc({
     bb,
     store,
@@ -74,30 +257,313 @@ export function registerAgency(bb: BbPluginApi) {
     documents,
     onChanged,
     send,
+    checkHost: (input) => machines.checkLaunch(input),
+    checkLimits: (job) => checkLaunchLimits(limitDeps, job),
     loadCatalogRoles: async () => {
-      const settings = await catalogRolesSettings.get();
-      const resolved = resolveIsolatedCatalogRolesPath({
-        settingsJson: settings.isolatedCatalogRolesJson,
-        envFilePath: process.env.AGENCY_ISOLATED_CATALOG_ROLES_FILE,
-        dataDirFilePath: join(bb.server.experimental_dataDir, ISOLATED_CATALOG_ROLES_FILENAME),
-      });
+      const resolved = await resolveCatalogRoles();
       if (!resolved.ok) return resolved;
       return { ok: true, value: resolved.value?.config };
     },
   });
-  const dispatcher = createDispatcherRpc({ db });
+  /** Backlog → queued, then into the launch queue; the sweep launches it through every launch check. */
+  const queueJobForLaunch = (job: Job, requestId: string) => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return access;
+    if (job.state === "backlog") {
+      const moved = store.transitionJob(access.value.ctx, { requestId, jobId: job.id, expectedRevision: job.revision, to: "queued" });
+      if (!moved.ok) return moved;
+    } else if (job.state !== "queued") {
+      return { ok: false as const, error: { code: "illegal_job_state", message: "В очередь запуска ставится задача в бэклоге или в очереди." } };
+    }
+    enqueueLaunch(db, job.id, new Date().toISOString());
+    onChanged();
+    void runLaunchQueue();
+    return { ok: true as const, value: job.id };
+  };
+  const autoReviewPorts = (): AutoReviewPorts => ({
+    db,
+    getJob: (jobId) => store.getJob(jobId),
+    enabled: (job) => store.rulesForDepartment(job.departmentId).autoReview,
+    memberRole: (departmentId, agentId) => store.memberRole(departmentId, agentId),
+    latestVersion: (jobId) => {
+      const row = db
+        .prepare(`SELECT artifact_id, version, hash FROM agency_artifact_version WHERE job_id = ? ORDER BY rowid DESC LIMIT 1`)
+        .get(jobId) as { artifact_id: string; version: number; hash: string } | undefined;
+      return row ? { artifactId: row.artifact_id, version: row.version, hash: row.hash } : null;
+    },
+    createReview: (job, version) => {
+      const text = reviewJobText(job, version);
+      return store.createJob(
+        { actor: { kind: "system" }, allowedBindingIds: [job.bindingId] },
+        {
+          requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review:${job.id}:${version.hash}`),
+          bindingId: job.bindingId,
+          departmentId: job.departmentId,
+          title: text.title,
+          brief: text.brief,
+          acceptance: text.acceptance,
+          parentJobId: job.parentJobId ?? job.id,
+          assignedAgentId: null,
+          assignment: "reviewer",
+          priority: job.priority,
+          dueAt: job.dueAt,
+        },
+      );
+    },
+    attachInput: async (review, job, version) =>
+      (await domain.attachJobInput({
+        requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review-input:${review.id}:${version.hash}`),
+        expectedRevision: review.revision,
+        targetJobId: review.id,
+        sourceJobId: job.id,
+        artifactId: version.artifactId,
+        version: version.version,
+        hash: version.hash,
+      })) as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } },
+    queue: (review) => queueJobForLaunch(review, uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review-queue:${review.id}`)),
+    discard: (review) => {
+      store.transitionJob(
+        { actor: { kind: "system" }, allowedBindingIds: [review.bindingId] },
+        { requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review-discard:${review.id}`), jobId: review.id, expectedRevision: review.revision, to: "canceled" },
+      );
+    },
+    comment: systemComment,
+    now: () => new Date().toISOString(),
+  });
+  const intentJobs = createIntentJobPort({ db, store, queueLaunch: async (job, requestId) => queueJobForLaunch(job, requestId) });
+  const dispatcher = createDispatcherRpc({ db, launch: intentJobs });
   const executingActivity = createExecutingActivityRpc({
     db,
     threads: officialThreads,
   });
-  const dashboardUsage = attachDashboardUsageCollector({
-    db,
-    events: bb.sdk.threads.events,
-    onUsageChanged: () => bb.realtime.publish(USAGE_CHANGED_CHANNEL, null),
+  const webhookSecretsFile = join(bb.server.experimental_dataDir, WEBHOOK_SECRETS_FILENAME);
+  const webhookUrl = () => `${(bb.server.experimental_appUrl ?? bb.server.loopbackBaseUrl).replace(/\/$/, "")}/api/v1/plugins/agency/http/notify`;
+  const webhookView = (sourceId: string) => ({
+    sourceId,
+    url: webhookUrl(),
+    issuedAt: webhookSecretIssuedAt(webhookSecretsFile, sourceId),
+    topics: sourceTopics(db, sourceId),
   });
-  bb.onDispose(() => dashboardUsage.dispose());
-  const handlers = { ...domain, ...launch, ...dispatcher } satisfies Pick<
+  const webhookSourceRow = (sourceId: string) =>
+    db.prepare(`SELECT id, kind FROM agency_event_source WHERE id = ?`).get(sourceId) as { id: string; kind: string } | undefined;
+  const ownerOnly = () => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return access;
+    if (access.value.ctx.caller) return { ok: false as const, error: { code: "forbidden", message: "Это действие доступно только владельцу." } };
+    return access;
+  };
+  const readOnly = () => resolveRpcAccess(db);
+  const organization = {
+    listBackups: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listBackups(backupsDirFor(db)) };
+    },
+    createBackup: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: await createBackup(db, backupsDirFor(db), "manual", new Date()) };
+    },
+    restoreBackup: async (input: { name: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const restored = await restoreBackup(db, backupsDirFor(db), input.name, new Date());
+      if (restored.ok) onChanged();
+      return restored;
+    },
+    listKnowledge: async () => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listKnowledge(db) };
+    },
+    saveKnowledge: async (input: SaveKnowledgeInput) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      // An employee's material is a proposal until the owner accepts it.
+      const saved = saveKnowledge(db, input, { proposedBy: access.value.ctx.caller?.agentId ?? null }, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    setKnowledgeStatus: async (input: { id: string; expectedRevision: number; status: "proposal" | "accepted" | "archived" }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = setKnowledgeStatus(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    listGoals: async () => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listGoals(db) };
+    },
+    saveGoal: async (input: { id?: string; expectedRevision: number; title: string; description: string; status: "active" | "done" | "dropped"; dueAt: string | null }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = saveGoal(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    setJobGoal: async (input: { jobId: string; goalId: string | null }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const saved = setJobGoal(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    setDepartmentParent: async (input: { departmentId: string; parentDepartmentId: string | null }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = setDepartmentParent(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    agentMetrics: async (input: { agentId: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const now = new Date();
+      const spend = await limitDeps.spend({ agentId: input.agentId, attemptsFrom: new Date(now.getTime() - 30 * 86_400_000).toISOString() });
+      return { ok: true as const, value: { ...agentMetrics(db, input.agentId, now), spendUsdCents30d: spend } };
+    },
+    searchJobs: async (input: { query: string; limit?: number }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: searchJobs(db, { query: input.query, limit: input.limit, archivedIds: archivedJobIds(db, archiveAfterDays, new Date()), bindingIds: access.value.ctx.allowedBindingIds }) };
+    },
+    listArchivedJobs: async (input: { limit?: number; offset?: number }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const archived = archivedJobIds(db, archiveAfterDays, new Date());
+      const jobs = listJobsForBindings(db, access.value.ctx.allowedBindingIds)
+        .filter((job) => archived.has(job.id))
+        .sort((a, b) => (b.closedAt ?? "").localeCompare(a.closedAt ?? ""));
+      const offset = input.offset ?? 0;
+      return { ok: true as const, value: { total: jobs.length, jobs: jobs.slice(offset, offset + (input.limit ?? 100)) } };
+    },
+    listSavedViews: async () => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listSavedViews(db) };
+    },
+    saveSavedView: async (input: { id?: string; name: string; filters: Record<string, string> }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return saveSavedView(db, input, new Date().toISOString());
+    },
+    deleteSavedView: async (input: { id: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: { removed: deleteSavedView(db, input.id) } };
+    },
+  };
+  const budgets = {
+    ...organization,
+    saveRuleSchedule: async (input: { ruleId: string; expression: string; timezone: string; misfire: "skip" | "last" | "catch_up" }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = saveRuleSchedule(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    listRuleSchedules: async () => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      return { ok: true as const, value: listRuleSchedules(db) };
+    },
+    previewSchedule: async (input: { expression: string; timezone: string }) => previewSchedule(input, new Date().toISOString()),
+    getWebhookSource: async (input: { sourceId: string }) => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      if (webhookSourceRow(input.sourceId)?.kind !== "webhook") return { ok: false as const, error: { code: "not_found", message: "Источник с внешним адресом не найден." } };
+      return { ok: true as const, value: webhookView(input.sourceId) };
+    },
+    rotateWebhookSecret: async (input: { sourceId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      if (webhookSourceRow(input.sourceId)?.kind !== "webhook") return { ok: false as const, error: { code: "not_found", message: "Источник с внешним адресом не найден." } };
+      const issued = rotateWebhookSecret(webhookSecretsFile, input.sourceId, new Date().toISOString());
+      onChanged();
+      return { ok: true as const, value: { ...webhookView(input.sourceId), secret: issued.secret } };
+    },
+    saveSourceTopics: async (input: { sourceId: string; topics: string[] }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      if (webhookSourceRow(input.sourceId)?.kind !== "webhook") return { ok: false as const, error: { code: "not_found", message: "Источник с внешним адресом не найден." } };
+      const saved = saveSourceTopics(db, input.sourceId, input.topics, new Date().toISOString());
+      if (!saved.ok) return saved;
+      onChanged();
+      return { ok: true as const, value: webhookView(input.sourceId) };
+    },
+    listBudgets: async () => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      return { ok: true as const, value: await listBudgets(limitDeps) };
+    },
+    getSkillPins: async () => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      return readSkillPinStatus(skillPinDeps);
+    },
+    enqueueLaunch: async (input: { requestId: string; jobId: string; expectedRevision: number }) => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      const job = store.getJob(input.jobId);
+      if (!job) return { ok: false as const, error: { code: "not_found", message: `job ${input.jobId} not found` } };
+      if (job.state !== "backlog" && job.state !== "queued") {
+        return { ok: false as const, error: { code: "illegal_job_state", message: "В очередь запуска ставится задача в бэклоге или в очереди." } };
+      }
+      if (job.revision !== input.expectedRevision) {
+        return { ok: false as const, error: { code: "revision_conflict", message: "expectedRevision does not match the live job revision" } };
+      }
+      const queued = queueJobForLaunch(job, input.requestId);
+      if (!queued.ok) return queued;
+      const entry = listLaunchQueue(db).find((row) => row.jobId === job.id);
+      return entry ? { ok: true as const, value: entry } : { ok: false as const, error: { code: "not_found", message: "queue entry not found" } };
+    },
+    dequeueLaunch: async (input: { jobId: string }) => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      const removed = dequeueLaunch(db, input.jobId);
+      if (removed) onChanged();
+      return { ok: true as const, value: { removed } };
+    },
+    pinSkills: async () => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      // Re-pinning changes what every launch checks: only the owner does it, never an employee thread.
+      if (access.value.ctx.caller) return { ok: false as const, error: { code: "forbidden", message: "Закреплять версии навыков может только владелец." } };
+      return pinCurrentSkills(skillPinDeps);
+    },
+  };
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
+    | "listBudgets"
+    | "getSkillPins"
+    | "listBackups"
+    | "createBackup"
+    | "restoreBackup"
+    | "listKnowledge"
+    | "saveKnowledge"
+    | "setKnowledgeStatus"
+    | "listGoals"
+    | "saveGoal"
+    | "setJobGoal"
+    | "setDepartmentParent"
+    | "agentMetrics"
+    | "searchJobs"
+    | "listArchivedJobs"
+    | "listSavedViews"
+    | "saveSavedView"
+    | "deleteSavedView"
+    | "saveRuleSchedule"
+    | "listRuleSchedules"
+    | "previewSchedule"
+    | "getWebhookSource"
+    | "rotateWebhookSecret"
+    | "saveSourceTopics"
+    | "enqueueLaunch"
+    | "dequeueLaunch"
+    | "pinSkills"
+    | "listDashboardUsage"
     | "listWorkspace"
     | "listBbCatalog"
     | "listCapabilityCatalog"
@@ -119,6 +585,19 @@ export function registerAgency(bb: BbPluginApi) {
     | "removeMembership"
     | "createProjectBinding"
     | "updateProjectBinding"
+    | "archiveProjectBinding"
+    | "restoreProjectBinding"
+    | "deleteProjectBinding"
+    | "unlinkDepartment"
+    | "setDepartmentAvailability"
+    | "getWorkRules"
+    | "saveWorkRules"
+    | "listTemplates"
+    | "saveTemplate"
+    | "getAgencyRules"
+    | "saveAgencyRules"
+    | "readProjectRules"
+    | "saveProjectRules"
     | "linkDepartment"
     | "createJob"
     | "updateJob"
@@ -139,6 +618,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "listJobAttempts"
     | "getIsolationReadiness"
     | "cancelLaunch"
+    | "returnJobForRework"
     | "saveEventDefinition"
     | "saveEventSource"
     | "saveRuleVersion"
@@ -154,6 +634,218 @@ export function registerAgency(bb: BbPluginApi) {
   >;
   const runs = createRunStore(db);
   const runReads = createInternalRunStoreReads(db);
+  const attemptForLaunch = (launchId: string) =>
+    db.prepare(`SELECT id, state FROM agency_run_attempt WHERE launch_id = ?`).get(launchId) as
+      | { id: string; state: string }
+      | undefined;
+  const systemComment = (job: Job, comment: string): boolean => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return false;
+    return store.createActivity(access.value.ctx, {
+      requestId: randomUUID(),
+      jobId: job.id,
+      actor: { kind: "system" },
+      kind: "comment",
+      causationId: null,
+      references: [],
+      comment,
+    }).ok;
+  };
+  /** Blocked with a system reason; parent wake tells the lead. */
+  const blockWithReason = (job: Job, comment: string): boolean => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return false;
+    const moved = store.transitionJob(access.value.ctx, {
+      requestId: randomUUID(),
+      expectedRevision: job.revision,
+      jobId: job.id,
+      to: "blocked",
+    });
+    if (!moved.ok) return false;
+    systemComment(job, comment);
+    void flushParentWakes({ db, send, now: new Date().toISOString() }).catch(() => undefined);
+    return true;
+  };
+  const reminderPorts = (): ReminderPorts => ({
+    db,
+    getJob: (jobId) => store.getJob(jobId),
+    openChildren: (jobId) =>
+      (db
+        .prepare(`SELECT COUNT(*) AS n FROM agency_job WHERE parent_job_id = ? AND state NOT IN ('done', 'canceled')`)
+        .get(jobId) as { n: number }).n,
+    attemptForLaunch,
+    send: (threadId, text) => send.send({ threadId, text }),
+    block: blockWithReason,
+    now: () => new Date().toISOString(),
+    limit: (job) => store.rulesForDepartment(job.departmentId).completionReminders,
+  });
+  const runWatchPorts = (): RunWatchPorts => ({
+    db,
+    getJob: (jobId) => store.getJob(jobId),
+    attemptForLaunch,
+    lastProgressAt: (threadId, jobId) => lastProgressFromDatabase(db, threadId, jobId),
+    comment: systemComment,
+    block: blockWithReason,
+    now: () => new Date().toISOString(),
+    thresholds: (job) => {
+      const rules = store.rulesForDepartment(job.departmentId);
+      return {
+        quietMs: rules.watchQuietMinutes * 60_000,
+        stallMs: rules.watchStallMinutes * 60_000,
+        startMs: rules.watchStartMinutes * 60_000,
+        errorMs: rules.watchErrorMinutes * 60_000,
+        ceilingMs: rules.watchCeilingHours * 3_600_000,
+      };
+    },
+  });
+  // Launch queue: waiting jobs start as soon as their limits allow.
+  let queueBusy = false;
+  const runLaunchQueue = async () => {
+    if (queueBusy) return;
+    queueBusy = true;
+    try {
+      const result = await sweepLaunchQueue({
+        db,
+        getJob: (jobId) => store.getJob(jobId),
+        checkLimits: (job) => checkLaunchLimits(limitDeps, job),
+        launch: async (job, requestedAt) => {
+          const prepared = (await launch.prepareLaunch({
+            requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `${job.id}:${requestedAt}:${job.revision}`),
+            jobId: job.id,
+            expectedRevision: job.revision,
+          })) as { ok: true; value: { launched: unknown; reason: string } } | { ok: false; error: { code: string; message: string } };
+          if (prepared.ok && !prepared.value.launched) return { ok: false, error: { code: "launch_not_started", message: prepared.value.reason } };
+          return prepared as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
+        },
+        comment: systemComment,
+        now: () => new Date().toISOString(),
+      });
+      if (result.launched || result.removed) onChanged();
+    } catch (error) {
+      bb.log.warn(`Launch queue: ${String(error)}`);
+    } finally {
+      queueBusy = false;
+    }
+  };
+  const queueSweep = setInterval(() => void runLaunchQueue(), LAUNCH_QUEUE_SWEEP_MS);
+  bb.onDispose(() => clearInterval(queueSweep));
+  // Dispatcher: accepted events → rule matches → intents; queued intents (auto mode or approved) become jobs.
+  const dispatcherEngine = { db, launch: intentJobs };
+  let dispatcherBusy = false;
+  const runDispatcher = async () => {
+    if (dispatcherBusy) return;
+    dispatcherBusy = true;
+    try {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return;
+      const ctx = access.value.ctx;
+      let changed = false;
+      const scheduled = tickSchedules(dispatcherEngine, ctx, new Date().toISOString());
+      if (scheduled.emitted > 0) changed = true;
+      for (const problem of scheduled.errors) bb.log.warn(`Schedule: ${problem}`);
+      const tick = dispatchTick(dispatcherEngine, ctx, { requestId: randomUUID(), live: true, limit: 50 });
+      if (tick.ok && tick.value.evaluated > 0) changed = true;
+      for (const state of ["queued", "claimed"] as const) {
+        const intents = listActionIntents(dispatcherEngine, { state });
+        if (!intents.ok) continue;
+        for (const intent of intents.value) {
+          const claimed = await claimActionIntent(dispatcherEngine, ctx, {
+            requestId: randomUUID(),
+            intentId: intent.id,
+            live: true,
+            leaseOwner: "agency-dispatcher",
+            leaseMs: 120_000,
+          });
+          if (!claimed.ok) continue;
+          changed = true;
+          if (claimed.value.state === "claimed" && claimed.value.jobId && claimed.value.fencingToken) {
+            completeActionIntent(dispatcherEngine, ctx, {
+              requestId: randomUUID(),
+              intentId: intent.id,
+              fencingToken: claimed.value.fencingToken,
+              fencingGeneration: claimed.value.fencingGeneration,
+              outcome: "succeeded",
+            });
+          }
+        }
+      }
+      const escalated = sweepEscalations({
+        db,
+        escalateAfterHours: (departmentId) => store.rulesForDepartment(departmentId).escalateAfterHours,
+        comment: (jobId, text) => {
+          const job = store.getJob(jobId);
+          if (job) systemComment(job, text);
+        },
+        now: () => new Date(),
+      });
+      if (escalated > 0) changed = true;
+      if (changed) onChanged();
+      await sweepTelegramOutbox({
+        db,
+        preferences: () => telegram.preferences(),
+        enqueue: (input) => telegram.enqueue(input),
+        now: () => new Date(),
+      }).catch((error) => bb.log.warn(`Telegram queue: ${String(error)}`));
+    } catch (error) {
+      bb.log.warn(`Dispatcher: ${String(error)}`);
+    } finally {
+      dispatcherBusy = false;
+    }
+  };
+  const dispatcherSweep = setInterval(() => void runDispatcher(), DISPATCHER_SWEEP_MS);
+  // Webhook v1: the source authenticates itself (HMAC over timestamp and raw body), so the route needs no BB session.
+  const webhookRateLimit = createWebhookRateLimiter({ nowMs: () => Date.now() });
+  bb.http.route(
+    "POST",
+    "/notify",
+    async (c) => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return c.json({ code: "webhook_unavailable" }, 503);
+      const response = await handleWebhookIngress(
+        {
+          sources: createCatalogWebhookSourcePort(db, {
+            resolveSecret: (sourceId) => webhookSecretBytes(webhookSecretsFile, sourceId),
+            resolveAllowedTopics: (sourceId) => sourceTopics(db, sourceId),
+          }),
+          inbox: createDurableWebhookInbox(dispatcherEngine, access.value.ctx),
+          rateLimit: webhookRateLimit,
+        },
+        { headers: c.req.raw.headers, body: c.req.raw.body ?? new Uint8Array(), nowMs: Date.now() },
+      );
+      if (response.status === 202) void runDispatcher();
+      return c.json(
+        { code: response.code, ...(response.receiptId ? { receiptId: response.receiptId } : {}), ...(response.duplicate !== undefined ? { duplicate: response.duplicate } : {}) },
+        response.status,
+        response.headers,
+      );
+    },
+    { auth: "none" },
+  );
+  bb.onDispose(() => clearInterval(dispatcherSweep));
+  const dueSweep = setInterval(() => {
+    void sweepDueReminders({
+      db,
+      listDueJobs: () =>
+        (db.prepare(`SELECT id FROM agency_job WHERE due_at IS NOT NULL AND state NOT IN ('done', 'canceled')`).all() as { id: string }[])
+          .map((row) => store.getJob(row.id))
+          .filter((job): job is Job => Boolean(job)),
+      reminderHours: (job) => store.rulesForDepartment(job.departmentId).dueReminderHours,
+      comment: systemComment,
+      workingThread: (jobId) =>
+        (db
+          .prepare(`SELECT thread_id FROM agency_run_attempt WHERE job_id = ? AND state = 'running' AND thread_id IS NOT NULL ORDER BY attempt_no DESC LIMIT 1`)
+          .get(jobId) as { thread_id: string } | undefined)?.thread_id ?? null,
+      send: (threadId, text) => send.send({ threadId, text }),
+      now: () => new Date(),
+    }).then(
+      (sent) => {
+        if (sent > 0) onChanged();
+      },
+      (error) => bb.log.warn(`Due reminders: ${String(error)}`),
+    );
+  }, DUE_SWEEP_INTERVAL_MS);
+  bb.onDispose(() => clearInterval(dueSweep));
+  const readingChanged = createReadingChangeGate();
   const completionWatch = createCompletionWatch({
     threads: officialThreads,
     listBoundLaunches: () => listBoundLaunchWatches(db),
@@ -168,45 +860,80 @@ export function registerAgency(bb: BbPluginApi) {
         ? published.value
         : { publishedVerified: false, acceptedVerified: false, publishedHash: null };
     },
-    applyReading: async (row, reading, publishedHash) => {
-      const access = resolveRpcAccess(db);
-      if (!access.ok) {
-        return {
-          ...reading,
-          jobState: null,
-          reviewApplied: false,
+    applyReading: async (row, reading, publishedHash, thread) => {
+      const applied = await (async () => {
+        const access = resolveRpcAccess(db);
+        if (!access.ok) {
+          return {
+            ...reading,
+            jobState: null,
+            reviewApplied: false,
+            publishedHash,
+            attemptState: null,
+            attemptReviewApplied: false,
+            attemptAcceptedApplied: false,
+          };
+        }
+        const applied = applyVerifiedCompletionLifecycle({
+          store,
+          runs,
+          reads: runReads,
+          ctx: access.value.ctx,
+          jobId: row.jobId,
+          launchId: row.launchId,
+          reading,
           publishedHash,
-          attemptState: null,
-          attemptReviewApplied: false,
-          attemptAcceptedApplied: false,
-        };
+        });
+        if (!applied.ok) {
+          const job = store.getJob(row.jobId);
+          return {
+            ...reading,
+            jobState: job?.state ?? null,
+            reviewApplied: false,
+            publishedHash,
+            attemptState: null,
+            attemptReviewApplied: false,
+            attemptAcceptedApplied: false,
+          };
+        }
+        await flushParentWakes({ db, send, now: new Date().toISOString() });
+        return applied.value;
+      })();
+      if (applied.reviewApplied) {
+        void startAutoReview(autoReviewPorts(), row.jobId).then(
+          (outcome) => {
+            if (outcome !== "skipped") onChanged();
+          },
+          (error) => bb.log.warn(`Auto review for ${row.jobId}: ${String(error)}`),
+        );
       }
-      const applied = applyVerifiedCompletionLifecycle({
-        store,
-        runs,
-        reads: runReads,
-        ctx: access.value.ctx,
-        jobId: row.jobId,
-        launchId: row.launchId,
-        reading,
-        publishedHash,
-      });
-      if (!applied.ok) {
-        const job = store.getJob(row.jobId);
-        return {
+      try {
+        // A published version without the closing comment still needs a reminder, about the comment.
+        const commentMissing = reading.publishedVerified && store.handInCommentMissing(row.jobId);
+        const outcome = await remindIncompleteWorker(reminderPorts(), row, {
           ...reading,
-          jobState: job?.state ?? null,
-          reviewApplied: false,
-          publishedHash,
-          attemptState: null,
-          attemptReviewApplied: false,
-          attemptAcceptedApplied: false,
-        };
+          publishedVerified: reading.publishedVerified && !commentMissing,
+          missing: commentMissing ? "comment" : "version",
+        });
+        if (outcome !== "skipped" && outcome !== "waiting") onChanged();
+      } catch (error) {
+        bb.log.warn(`Completion reminder for ${row.jobId}: ${String(error)}`);
       }
-      await flushParentWakes({ db, send, now: new Date().toISOString() });
-      return applied.value;
+      try {
+        const watched = superviseRun(runWatchPorts(), row, {
+          threadStatus: reading.threadStatus,
+          threadUpdatedAt: thread?.updatedAt ? new Date(thread.updatedAt).toISOString() : null,
+          backgroundAgents: thread?.activeBackgroundAgentCount ?? 0,
+        });
+        if (watched === "warned" || watched === "blocked") onChanged();
+      } catch (error) {
+        bb.log.warn(`Run watch for ${row.jobId}: ${String(error)}`);
+      }
+      return applied;
     },
-    onReading: () => onChanged(),
+    onReading: (jobId, reading) => {
+      if (readingChanged(jobId, reading)) onChanged();
+    },
   });
   attachDisposableThreadHints(
     {
@@ -239,7 +966,23 @@ export function registerAgency(bb: BbPluginApi) {
     machines: machines.list,
     machineInventory: ({ hostId }) => machines.inspect(hostId),
     setCliPolicy: machines.setPolicy,
-    uiContext: async () => ({ hosts: (await bb.sdk.hosts.list()).map((host) => ({ id: host.id, name: host.name })) }),
+    agencyLanguage: async () => ({ language: agencyLanguage() }),
+    setAgencyLanguage: async ({ language }) => {
+      const next = await workSettings.experimental_set({ language });
+      applyWorkSettings(next);
+      return { language: agencyLanguage() };
+    },
+    uiContext: async () => {
+      const hosts = (await bb.sdk.hosts.list()).map((host) => ({ id: host.id, name: host.name }));
+      // The machine BB itself runs on: model pickers read its catalog; no guessing by machine name.
+      let primaryHostId: string | null = null;
+      try {
+        primaryHostId = (await bb.sdk.system.config()).primaryHostId ?? null;
+      } catch {
+        primaryHostId = null;
+      }
+      return { hosts, primaryHostId };
+    },
     status,
     notify: (input) => notify(input, "rpc"),
     ...executingActivity,
@@ -267,10 +1010,15 @@ export function registerAgency(bb: BbPluginApi) {
           }),
           dispatch: (operation: CliOperation, input: unknown) => {
             const handler = handlers[operation] as (value: unknown) => Promise<unknown> | unknown;
-            return Promise.resolve(handler(input));
+            // The calling thread travels with the call: the server knows which employee acts.
+            return withCallerThread(readCliThreadId(ctx), () => Promise.resolve(handler(input)));
           },
         },
         argv,
       ),
   });
+}
+
+function clampHours(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(8_760, Math.max(0, value)) : fallback;
 }

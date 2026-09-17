@@ -45,7 +45,7 @@ bb agency department create --input-json '{...provisionDepartment}'
 bb agency project bind --input-json '{...createProjectBinding}'   # существующий каталог
 bb agency project link-department --input-json '{...}'
 bb agency workspace --binding-id <bindingId>
-bb agency job create --input-json '{...}'
+bb agency job create --input-json '{"requestId":"<uuid>","bindingId":"<id>","departmentId":"<id>","assignedAgentId":"<руководитель>","title":"...","brief":"...","acceptance":"..."}'
 bb agency job assign --input-json '{...updateJob, assignedAgentId}'
 bb agency job get --job-id <id>
 bb agency job attach-input --input-json '{...attachJobInput}'

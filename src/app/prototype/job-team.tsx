@@ -18,6 +18,7 @@ import {
   type JobTeamPerson,
 } from "../data/job-team";
 import { UNASSIGNED_AGENT, assigneeChoiceOptions } from "../data/job-placement";
+import { tr } from "../i18n";
 
 const PICK = "__pick_team_agent__";
 
@@ -90,7 +91,7 @@ function RolePicker({
               <li key={id} className="flex items-center justify-between gap-2">
                 <PersonValue person={{ id, name }} onOpen={onOpen} />
                 <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onChange(removeTeamAgentId(ids, id))}>
-                  Убрать
+                  {tr("Убрать")}
                 </Button>
               </li>
             );
@@ -99,7 +100,7 @@ function RolePicker({
       )}
       {addable.length > 0 && (
         <select
-          aria-label={`Добавить: ${label}`}
+          aria-label={tr("Добавить: {label}", { label })}
           className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-0.5"
           disabled={disabled}
           value={PICK}
@@ -109,7 +110,7 @@ function RolePicker({
             onChange(addTeamAgentId(ids, value));
           }}
         >
-          <option value={PICK}>Добавить из отдела</option>
+          <option value={PICK}>{tr("Добавить из отдела")}</option>
           {addable.map((item) => (
             <option key={item.value} value={item.value}>{item.label}</option>
           ))}
@@ -117,7 +118,7 @@ function RolePicker({
       )}
       {ids.length > 0 && (
         <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onChange([])}>
-          Очистить
+          {tr("Очистить")}
         </Button>
       )}
     </div>
@@ -175,21 +176,21 @@ export function JobTeamBlock({
   const pickers = Boolean(onPersistRoles) && !demoMode;
   const historical = historicalAttemptNote({ job, assigned: team.assigned, attempt });
   return (
-    <section aria-label="Команда" data-testid="job-team-block" className="agency-rail-section space-y-2">
-      <h3>Команда</h3>
+    <section aria-label={tr("Команда")} data-testid="job-team-block" className="agency-rail-section space-y-2">
+      <h3>{tr("Команда")}</h3>
       <Field label="Руководитель">
         <PersonValue person={team.lead} onOpen={openAgent} />
       </Field>
-      <Field label="Кто работает">
+      <Field label="Кто работает" info={<p>{tr("Исполнитель задачи и состояние его последнего запуска.")}</p>}>
         <span>{currentWorkLabel({ job, assigned: team.assigned, attemptLabel: team.attemptLabel })}</span>
       </Field>
-      <Field label="Проверяющие">
+      <Field label="Проверяющие" info={<><p>{tr("Кто из отдела проверяет результат этой задачи. Руководитель назначает проверку подзадачей на проверяющего.")}</p><p>{tr("Исполнитель не может быть проверяющим своей задачи.")}</p></>}>
         {pickers ? (
           <RolePicker
             label="проверяющего"
             ids={draftReviewers}
             agents={agents}
-            options={memberOptions}
+            options={memberOptions.filter((item) => item.value !== job.assignedAgentId)}
             disabled={persistPending}
             onChange={(ids) => void commit(ids, draftWatchers)}
             onOpen={openAgent}
@@ -198,7 +199,7 @@ export function JobTeamBlock({
           <RoleList people={team.reviewers} pending={team.reviewersPending} onOpen={openAgent} />
         )}
       </Field>
-      <Field label="Наблюдатели">
+      <Field label="Наблюдатели" info={<p>{tr("Кого держать в курсе задачи. Наблюдатель ничего не исполняет и не принимает.")}</p>}>
         {pickers ? (
           <RolePicker
             label="наблюдателя"
@@ -214,10 +215,10 @@ export function JobTeamBlock({
         )}
       </Field>
       <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Технические подробности</summary>
-        <p className="mt-1">{TEAM_ATTEMPT_HINT}</p>
+        <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
+        <p className="mt-1">{tr(TEAM_ATTEMPT_HINT)}</p>
         {historical && <p className="mt-1">{historical}</p>}
-        {demoMode && (team.reviewersPending || team.watchersPending) && <p className="mt-1">{TEAM_ROLES_PENDING}</p>}
+        {demoMode && (team.reviewersPending || team.watchersPending) && <p className="mt-1">{tr(TEAM_ROLES_PENDING)}</p>}
       </details>
     </section>
   );

@@ -200,6 +200,7 @@ function displayRow(partial: Partial<UsageDisplayRow> & Pick<UsageDisplayRow, "a
       totalTokens: 1,
     },
     sessionLatestTotal: null,
+    costUsdCents: null,
     ...partial,
   };
 }

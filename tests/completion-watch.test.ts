@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openMigratedDatabase, type SqlDatabase } from "../src/server/db";
 import { createDomainStore, type ServiceContext } from "../src/server/services";
 import { applyVerifiedReviewToStore } from "../src/server/runtime/isolated-sdk/completion-apply";
-import { createCompletionWatch } from "../src/server/runtime/isolated-sdk/completion-watch";
+import { createCompletionWatch, createReadingChangeGate } from "../src/server/runtime/isolated-sdk/completion-watch";
 import { interpretVerifiedCompletion } from "../src/server/runtime/isolated-sdk/completion";
 import type { IsolatedThreadsApi, IsolatedThreadView } from "../src/server/runtime/isolated-sdk/sdk-ports";
 import { hashBytes } from "../src/host/guarded-fs";
@@ -421,5 +421,31 @@ describe("completion watch store review", () => {
     expect(appliedThen).toBe(1);
     expect(notifiedThen).toBe(0);
     watch.dispose();
+  });
+});
+
+describe("createReadingChangeGate", () => {
+  it("lets a job's reading through only when it changed", () => {
+    const changed = createReadingChangeGate();
+    const running = {
+      runSucceeded: false as const,
+      runFailed: false,
+      mayEnterReview: false,
+      publishedVerified: false,
+      acceptedVerified: false,
+      threadStatus: "running",
+      reason: "running",
+      jobState: "running",
+      reviewApplied: false,
+      publishedHash: null,
+      attemptState: "running",
+      attemptReviewApplied: false,
+      attemptAcceptedApplied: false,
+    };
+    expect(changed("job_a", running)).toBe(true);
+    expect(changed("job_a", { ...running })).toBe(false);
+    expect(changed("job_b", running)).toBe(true);
+    expect(changed("job_a", { ...running, threadStatus: "idle", publishedVerified: true, jobState: "review" })).toBe(true);
+    expect(changed("job_a", { ...running, threadStatus: "idle", publishedVerified: true, jobState: "review" })).toBe(false);
   });
 });

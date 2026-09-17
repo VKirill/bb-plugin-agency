@@ -67,6 +67,10 @@ export type CompileContextSnapshotInput = {
   helperSkillIds: readonly CatalogSkillId[];
   providerLimits: ProviderLimits;
   handoff: HandoffPackage | null;
+  /** Agency-wide rules in force: the top prompt layer. Absent when the owner has none. */
+  agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
+  /** Accepted knowledge by scope, already cut to the launch limit. */
+  knowledge?: { agency: string; project: string; department: string; ids: { id: string; hash: string }[] } | null;
 };
 
 export type SelectedSkill = {
@@ -148,6 +152,8 @@ export type ContextSnapshot = {
     assignedAgentId: string;
     briefHash: string;
     acceptanceHash: string;
+    /** Present when the job has an execution contract. */
+    contractHash?: string;
   };
   agentVersion: {
     id: string;
@@ -177,6 +183,13 @@ export type ContextSnapshot = {
     versionId: string;
     hash: string;
   };
+  /** Pinned agency rules version; present only when the owner has rules. */
+  agencyRules?: {
+    versionId: string;
+    hash: string;
+  };
+  /** Knowledge materials delivered to this launch; present only when there are any. */
+  knowledge?: { id: string; hash: string }[];
   authorizedInputJobIds: string[];
   selectedSkills: SelectedSkill[];
   selectedSkillsHash: string;

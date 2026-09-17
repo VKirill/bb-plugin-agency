@@ -871,7 +871,7 @@ describe("artifact storage integration sqlite+fs", () => {
         },
         memberships: [
           { agentId: seeded.agent.id, role: "lead" },
-          { agentId: reviewer.value.agent.id, role: "member" },
+          { agentId: reviewer.value.agent.id, role: "executor" },
         ],
       });
       expect(departmentFailed).toMatchObject({ ok: false, error: { code: "membership_write_failed" } });

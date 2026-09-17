@@ -1,3 +1,4 @@
+import { parseContract } from "../db/repositories";
 import type {
   Agent,
   AgentVersion,
@@ -23,6 +24,7 @@ type BindingRow = {
   section_id: string | null;
   revision: number;
   updated_at: string;
+  archived_at?: string | null;
 };
 
 type JobRow = {
@@ -40,8 +42,10 @@ type JobRow = {
   observer_agent_ids?: string | null;
   priority: Job["priority"];
   due_at: string | null;
+  contract_json?: string | null;
   revision: number;
   updated_at: string;
+  closed_at?: string | null;
 };
 
 type AgentRow = {
@@ -60,6 +64,7 @@ type DepartmentRow = {
   process_version_id: string;
   revision: number;
   updated_at: string;
+  availability?: string | null;
 };
 
 function mapBinding(row: BindingRow): ProjectBinding {
@@ -73,6 +78,7 @@ function mapBinding(row: BindingRow): ProjectBinding {
     sectionId: row.section_id,
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
   };
 }
 
@@ -102,8 +108,10 @@ function mapJob(row: JobRow): Job {
     observerAgentIds: parseTeamIds(row.observer_agent_ids),
     priority: row.priority,
     dueAt: row.due_at,
+    ...parseContract(row.contract_json),
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.closed_at ? { closedAt: row.closed_at } : {}),
   };
 }
 
@@ -146,6 +154,7 @@ export function listStoredDepartments(db: SqlDatabase): Department[] {
     processVersionId: row.process_version_id,
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.availability === "selected" ? { availability: "selected" as const } : {}),
   }));
 }
 
@@ -153,7 +162,10 @@ export function listJobsForBindings(db: SqlDatabase, bindingIds: readonly string
   if (bindingIds.length === 0) return [];
   const placeholders = bindingIds.map(() => "?").join(", ");
   return (
-    db.prepare(`SELECT * FROM agency_job WHERE binding_id IN (${placeholders}) ORDER BY key`).all(...bindingIds) as JobRow[]
+    db.prepare(
+      `SELECT * FROM agency_job WHERE binding_id IN (${placeholders})
+       ORDER BY CAST(SUBSTR(key, 4) AS INTEGER), key`,
+    ).all(...bindingIds) as JobRow[]
   ).map(mapJob);
 }
 

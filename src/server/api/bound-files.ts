@@ -1,7 +1,7 @@
 import { callBoundFileOp, resolveBoundFileOp, type BoundHostTarget, type HostFileRpcClient } from "../../host";
 
 export type BoundFileOpInput = {
-  op: "writeAtomic" | "read" | "stat" | "remove";
+  op: "writeAtomic" | "read" | "stat" | "remove" | "replace";
   relativePath: string;
   bytesBase64?: string;
   canonicalRoot?: string;

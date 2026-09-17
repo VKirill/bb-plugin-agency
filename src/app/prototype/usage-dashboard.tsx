@@ -1,3 +1,4 @@
+import type { BudgetStatusView } from "../../shared/rpc-contract";
 import type { ListDashboardUsageOutput } from "../../shared/contracts/dashboard-usage";
 import {
   EMPTY_USAGE_FILTER,
@@ -5,7 +6,7 @@ import {
   USAGE_CACHE_SEPARATE,
   USAGE_EMPTY,
   USAGE_GROUP_BY,
-  USAGE_NO_COST,
+  USAGE_COST_BASIS,
   USAGE_PERIOD,
   USAGE_PERIOD_OBSERVED,
   USAGE_UNKNOWN,
@@ -21,6 +22,7 @@ import {
   type UsageGroupBy,
 } from "../data/usage-dashboard";
 import { Button, Empty, PageHead } from "./shared";
+import { tr } from "../i18n";
 
 const GROUP_LABEL: Record<UsageGroupBy, string> = {
   project: "Проект",
@@ -42,15 +44,15 @@ function NativeSelect({
 }) {
   return (
     <label className="block w-40 min-w-0 text-xs text-muted-foreground">
-      {label}
+      {tr(label)}
       <select
-        aria-label={label}
+        aria-label={tr(label)}
         className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map((item) => (
-          <option key={item.value} value={item.value}>{item.label}</option>
+          <option key={item.value} value={item.value}>{tr(item.label)}</option>
         ))}
       </select>
     </label>
@@ -84,7 +86,10 @@ export function UsageDashboard({
   onGroupBy,
   onFilter,
   onOpenJob,
+  budgets = [],
 }: {
+  /** Scopes with a monthly budget and their spend this month. */
+  budgets?: readonly BudgetStatusView[];
   payload: ListDashboardUsageOutput | null;
   names?: UsageCatalogNames;
   groupBy: UsageGroupBy;
@@ -103,8 +108,9 @@ export function UsageDashboard({
   return (
     <div className="space-y-5" data-testid="usage-dashboard">
       <PageHead title="Дашборд" description="Расход по запускам Агентства." />
+      {budgets.length > 0 && <BudgetsPanel budgets={budgets} />}
       {error && <p role="alert" className="text-sm">{error}</p>}
-      {loading && <p className="text-xs text-muted-foreground">Загружаем расход…</p>}
+      {loading && <p className="text-xs text-muted-foreground">{tr("Загружаем расход…")}</p>}
       {!payload && !error && !loading && <Empty title="Нет данных" description={USAGE_EMPTY} />}
       {payload && view && (
         <>
@@ -140,49 +146,50 @@ export function UsageDashboard({
               options={[{ value: "all", label: "Все главные задачи" }, ...options.roots]}
             />
             <label className="block text-xs text-muted-foreground">
-              С
+              {tr("С")}
               <input
                 type="date"
-                aria-label="Дата с"
+                aria-label={tr("Дата с")}
                 className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                 value={filter.fromDate}
                 onChange={(event) => onFilter?.({ ...filter, fromDate: event.target.value })}
               />
             </label>
             <label className="block text-xs text-muted-foreground">
-              По
+              {tr("По")}
               <input
                 type="date"
-                aria-label="Дата по"
+                aria-label={tr("Дата по")}
                 className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                 value={filter.toDate}
                 onChange={(event) => onFilter?.({ ...filter, toDate: event.target.value })}
               />
             </label>
           </div>
-          <section aria-label="Покрытие" className="space-y-1 text-xs text-muted-foreground" data-testid="usage-coverage">
+          <section aria-label={tr("Покрытие")} className="space-y-1 text-xs text-muted-foreground" data-testid="usage-coverage">
             {coverageLines(view.coverage).map((line) => <p key={line}>{line}</p>)}
           </section>
-          <section aria-label={USAGE_AVAILABLE} className="space-y-1">
-            <h2 className="text-sm font-medium">{USAGE_AVAILABLE}</h2>
+          <section aria-label={tr(USAGE_AVAILABLE)} className="space-y-1">
+            <h2 className="text-sm font-medium">{tr(USAGE_AVAILABLE)}</h2>
             <p className="text-sm" data-testid="usage-all-time">{view.availableLabel}</p>
-            <p className="text-xs text-muted-foreground">{USAGE_CACHE_SEPARATE}</p>
+            <p className="text-xs text-muted-foreground">{tr(USAGE_CACHE_SEPARATE)}</p>
             {view.availableTotals && (
               <p className="text-xs text-muted-foreground">
-                Входные без кэша {formatTokenCount(view.availableTotals.inputTokens, true)}
-                {" · "}Кэш {formatTokenCount(view.availableTotals.cachedInputTokens, true)}
-                {" · "}Ответы {formatTokenCount(view.availableTotals.outputTokens, true)}
+                {tr("Входные без кэша {value}", { value: formatTokenCount(view.availableTotals.inputTokens, true) })}
+                {" · "}{tr("Кэш {value}", { value: formatTokenCount(view.availableTotals.cachedInputTokens, true) })}
+                {" · "}{tr("Ответы {value}", { value: formatTokenCount(view.availableTotals.outputTokens, true) })}
               </p>
             )}
-            <p className="text-xs text-muted-foreground">{USAGE_NO_COST}</p>
+            <p className="text-sm" data-testid="usage-cost">{tr("Стоимость: {cost}", { cost: view.costLabel })}</p>
+            <p className="text-xs text-muted-foreground">{tr(USAGE_COST_BASIS)}</p>
           </section>
-          <section aria-label={USAGE_PERIOD} className="space-y-3">
-            <h2 className="text-sm font-medium">{USAGE_PERIOD}</h2>
+          <section aria-label={tr(USAGE_PERIOD)} className="space-y-3">
+            <h2 className="text-sm font-medium">{tr(USAGE_PERIOD)}</h2>
             <p className="text-sm" data-testid="usage-period">{view.periodLabel}</p>
             {view.daySeries.length > 0 && (
               <>
-                <p className="text-xs text-muted-foreground">{USAGE_PERIOD_OBSERVED}</p>
-                <div className="flex h-24 items-end gap-1" data-testid="usage-day-chart" role="img" aria-label="Расход по дням">
+                <p className="text-xs text-muted-foreground">{tr(USAGE_PERIOD_OBSERVED)}</p>
+                <div className="flex h-24 items-end gap-1" data-testid="usage-day-chart" role="img" aria-label={tr("Расход по дням")}>
                   {view.daySeries.map((day) => (
                     <div key={day.date} className="flex min-w-0 flex-1 flex-col items-center justify-end">
                       <div
@@ -197,11 +204,11 @@ export function UsageDashboard({
                   <table className="w-full text-left text-sm">
                     <thead className="bg-muted/40 text-xs text-muted-foreground">
                       <tr>
-                        <th className="px-3 py-2 font-medium">День</th>
-                        <th className="px-3 py-2 font-medium">Входные без кэша</th>
-                        <th className="px-3 py-2 font-medium">Кэш</th>
-                        <th className="px-3 py-2 font-medium">Ответы</th>
-                        <th className="px-3 py-2 font-medium">Всего</th>
+                        <th className="px-3 py-2 font-medium">{tr("День")}</th>
+                        <th className="px-3 py-2 font-medium">{tr("Входные без кэша")}</th>
+                        <th className="px-3 py-2 font-medium">{tr("Кэш")}</th>
+                        <th className="px-3 py-2 font-medium">{tr("Ответы")}</th>
+                        <th className="px-3 py-2 font-medium">{tr("Всего")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -224,12 +231,12 @@ export function UsageDashboard({
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/40 text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2 font-medium">Группа</th>
-                    <th className="px-3 py-2 font-medium">Треды</th>
-                    <th className="px-3 py-2 font-medium">Входные без кэша</th>
-                    <th className="px-3 py-2 font-medium">Кэш</th>
-                    <th className="px-3 py-2 font-medium">Ответы</th>
-                    <th className="px-3 py-2 font-medium">Всего</th>
+                    <th className="px-3 py-2 font-medium">{tr("Группа")}</th>
+                    <th className="px-3 py-2 font-medium">{tr("Треды")}</th>
+                    <th className="px-3 py-2 font-medium">{tr("Входные без кэша")}</th>
+                    <th className="px-3 py-2 font-medium">{tr("Кэш")}</th>
+                    <th className="px-3 py-2 font-medium">{tr("Ответы")}</th>
+                    <th className="px-3 py-2 font-medium">{tr("Всего")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -244,7 +251,7 @@ export function UsageDashboard({
                       </td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {group.threadCount}
-                        {group.unknownThreads > 0 ? ` · ${group.unknownThreads} неизвестно` : ""}
+                        {group.unknownThreads > 0 ? tr(" · {count} неизвестно", { count: group.unknownThreads }) : ""}
                       </td>
                       <TokenCells totals={group.peaks} known={Boolean(group.peaks)} />
                     </tr>
@@ -254,7 +261,7 @@ export function UsageDashboard({
             </div>
           )}
           <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer">Технические подробности</summary>
+            <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
             <div className="mt-1 space-y-1 font-mono">
               {technicalUsageLines(payload).map((line) => <p key={line}>{line}</p>)}
             </div>
@@ -263,8 +270,8 @@ export function UsageDashboard({
                 <li key={row.attemptId}>
                   <button type="button" className="text-left hover:underline" onClick={() => onOpenJob?.(row.jobKey)}>
                     {row.jobKey} · {row.attemptState}
-                    {row.unknown ? ` · ${USAGE_UNKNOWN}` : ""}
-                    {row.resetObserved ? " · сброс" : ""}
+                    {row.unknown ? ` · ${tr(USAGE_UNKNOWN)}` : ""}
+                    {row.resetObserved ? tr(" · сброс") : ""}
                   </button>
                 </li>
               ))}
@@ -273,5 +280,34 @@ export function UsageDashboard({
         </>
       )}
     </div>
+  );
+}
+
+/** Monthly budgets: spend against the limit, amber past the warning threshold, red when spent. */
+function BudgetsPanel({ budgets }: { budgets: readonly BudgetStatusView[] }) {
+  return (
+    <section aria-label={tr("Бюджеты за месяц")} className="space-y-2">
+      <h2 className="text-sm font-semibold">{tr("Бюджеты за месяц")}</h2>
+      <div className="divide-y divide-border rounded-lg border border-border">
+        {budgets.map((budget) => {
+          const spent = budget.percent >= 100;
+          const warn = !spent && budget.percent >= budget.warnPercent;
+          const tone = spent ? "bg-red-500" : warn ? "bg-amber-500" : "bg-emerald-500";
+          const label = budget.scope === "agency" ? tr("Всё Агентство") : budget.label.replace(/^отдела /, tr("Отдел ")).replace(/^сотрудника /, tr("Сотрудник "));
+          return (
+            <div key={budget.scope} className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
+              <span className="truncate text-sm">{label}</span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                <span className={`block h-full ${tone}`} style={{ width: `${Math.min(100, budget.percent)}%` }} />
+              </span>
+              <span className={`whitespace-nowrap text-xs tabular-nums ${spent ? "text-red-600 dark:text-red-400" : warn ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+                {tr("{spent} из {limit} · {percent}%", { spent: `$${(budget.spendUsdCents / 100).toFixed(2)}`, limit: `$${budget.limitUsd}`, percent: budget.percent })}{spent ? tr(" · запуски остановлены") : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">{tr("Оценка по ценам API за календарный месяц (UTC): стоимость попытки считается в месяц её запуска. Лимиты — «Настройки → Правила работы», карточка отдела и профиль сотрудника.")}</p>
+    </section>
   );
 }

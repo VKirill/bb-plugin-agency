@@ -18,7 +18,12 @@ export type CompletionWatchDeps = {
   threads: IsolatedThreadsApi;
   listBoundLaunches: () => BoundLaunchWatch[];
   readPublishedForJob: (jobId: string) => Promise<PublishedJobReading>;
-  applyReading: (row: BoundLaunchWatch, reading: CompletionReading, publishedHash: string | null) => Promise<AppliedCompletion>;
+  applyReading: (
+    row: BoundLaunchWatch,
+    reading: CompletionReading,
+    publishedHash: string | null,
+    thread?: IsolatedThreadView | null,
+  ) => Promise<AppliedCompletion>;
   onReading?: (jobId: string, reading: AppliedCompletion) => void;
   pollMs?: number;
 };
@@ -37,8 +42,9 @@ export function createCompletionWatch(deps: CompletionWatchDeps) {
 
   async function reconcileOne(row: BoundLaunchWatch): Promise<AppliedCompletion | null> {
     let threadStatus: string | null = null;
+    let thread: IsolatedThreadView | null = null;
     try {
-      const thread = await deps.threads.get({ threadId: row.threadId, include: "environment,host" });
+      thread = await deps.threads.get({ threadId: row.threadId, include: "environment,host" });
       threadStatus = thread.status ?? null;
     } catch {
       threadStatus = null;
@@ -60,7 +66,7 @@ export function createCompletionWatch(deps: CompletionWatchDeps) {
       publishedVerified: artifact.publishedVerified,
       acceptedVerified: artifact.acceptedVerified,
     });
-    const applied = await deps.applyReading(row, reading, artifact.publishedHash);
+    const applied = await deps.applyReading(row, reading, artifact.publishedHash, thread);
     if (disposed) return null;
     return applied;
   }
@@ -120,6 +126,21 @@ export function createCompletionWatch(deps: CompletionWatchDeps) {
     get disposed() {
       return disposed;
     },
+  };
+}
+
+/**
+ * The watch reads every bound launch each pass. Screens only need to hear about a
+ * job when its reading changed; publishing every pass makes each open page reload
+ * several times a second while launches are bound.
+ */
+export function createReadingChangeGate(): (jobId: string, reading: AppliedCompletion) => boolean {
+  const last = new Map<string, string>();
+  return (jobId, reading) => {
+    const signature = JSON.stringify(reading);
+    if (last.get(jobId) === signature) return false;
+    last.set(jobId, signature);
+    return true;
   };
 }
 

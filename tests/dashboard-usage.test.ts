@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { compileContextSnapshot } from "../src/server/runtime/context-snapshot";
+import { DEFAULT_MODEL_PRICES, estimateCostUsdCents } from "../src/server/runtime/dashboard-usage/pricing";
 import type { ContextSnapshot } from "../src/server/runtime/context-snapshot/types";
 import {
   collectJobSubtree,
@@ -388,7 +389,9 @@ describe("dashboard usage reader", () => {
       expect(parsed.days[0]?.model).toBe("claude-sonnet-4-6");
       expect(parsed.rows.every((row) => row.modelSource === "snapshot")).toBe(true);
       expect(parsed.rows.some((row) => row.threadId === "thr_outsider1")).toBe(false);
-      expect(parsed.costUsdCents).toBeNull();
+      // Snapshot model claude-sonnet-4-6 has a list price: the estimate follows the peaks.
+      expect(parsed.costUsdCents).toBe(estimateCostUsdCents(parsed.totals!, DEFAULT_MODEL_PRICES["claude-sonnet-4-6"]!));
+      expect(parsed.cost).toMatchObject({ pricedThreads: 1, unpricedThreads: 0, unpricedModels: [] });
 
       const windowed = await reader.listDashboardUsage(seeded.ctx, {
         rootJobId: seeded.job.id,
@@ -400,6 +403,14 @@ describe("dashboard usage reader", () => {
       expect(windowed.value.totals?.totalTokens).toBe(6_697_149);
       expect(windowed.value.days).toEqual([]);
       expect(windowed.value.coverage.dayChart).toBe("omitted");
+
+      // Budgets: the employee from the attempt snapshot, the month by attempt start.
+      const byAgent = await reader.listDashboardUsage(seeded.ctx, { agentId: seeded.agent.id });
+      expect(byAgent.ok && byAgent.value.coverage.attemptCount).toBe(4);
+      const byOther = await reader.listDashboardUsage(seeded.ctx, { agentId: "agt_nobody01" });
+      expect(byOther.ok && byOther.value.costUsdCents).toBe(null);
+      const future = await reader.listDashboardUsage(seeded.ctx, { attemptsFrom: "2999-01-01T00:00:00.000Z" });
+      expect(future.ok && future.value.coverage.attemptCount).toBe(0);
     } finally {
       close();
     }

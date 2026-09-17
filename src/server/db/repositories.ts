@@ -1,3 +1,5 @@
+import { currentAgencyRules } from "../templates/store";
+import { contractIsEmpty, jobContractSchema, type JobContract } from "../../shared/contracts/job";
 import type {
   Activity,
   ActivityActor,
@@ -17,6 +19,10 @@ import type {
   ProjectDepartment,
 } from "../../shared/contracts";
 import { parseJson, toJson, type SqlDatabase } from "./sql";
+
+function isClosedJobState(state: JobState): boolean {
+  return state === "done" || state === "canceled";
+}
 import { optionalReasoningEffort, reasoningEffortSchema } from "../../shared/contracts/versions";
 
 type AgentRow = {
@@ -35,6 +41,7 @@ type DepartmentRow = {
   process_version_id: string;
   revision: number;
   updated_at: string;
+  availability?: string | null;
 };
 
 type BindingRow = {
@@ -47,6 +54,7 @@ type BindingRow = {
   section_id: string | null;
   revision: number;
   updated_at: string;
+  archived_at?: string | null;
 };
 
 type JobRow = {
@@ -64,6 +72,7 @@ type JobRow = {
   observer_agent_ids?: string | null;
   priority: Job["priority"];
   due_at: string | null;
+  contract_json?: string | null;
   revision: number;
   updated_at: string;
 };
@@ -146,6 +155,7 @@ function mapDepartment(row: DepartmentRow): Department {
     processVersionId: row.process_version_id,
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.availability === "selected" ? { availability: "selected" as const } : {}),
   };
 }
 
@@ -160,6 +170,7 @@ function mapBinding(row: BindingRow): ProjectBinding {
     sectionId: row.section_id,
     revision: row.revision,
     updatedAt: row.updated_at,
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
   };
 }
 
@@ -189,13 +200,32 @@ function mapJob(row: JobRow): Job {
     observerAgentIds: parseTeamIds(row.observer_agent_ids),
     priority: row.priority,
     dueAt: row.due_at,
+    ...parseContract(row.contract_json),
     revision: row.revision,
     updatedAt: row.updated_at,
   };
 }
 
+/** A stored contract, or nothing when it is absent, empty or unreadable. */
+export function parseContract(raw: string | null | undefined): { contract?: JobContract } {
+  if (!raw) return {};
+  try {
+    const parsed = jobContractSchema.safeParse(JSON.parse(raw));
+    return parsed.success && !contractIsEmpty(parsed.data) ? { contract: parsed.data } : {};
+  } catch {
+    return {};
+  }
+}
+
+function contractJson(contract: JobContract | null | undefined): string | null {
+  return contract && !contractIsEmpty(contract) ? JSON.stringify(contract) : null;
+}
+
 export function createRepositories(db: SqlDatabase) {
   return {
+    agencyRules: {
+      current: () => currentAgencyRules(db),
+    },
     policy: {
       insert(row: PolicyVersion): void {
         db.prepare(
@@ -270,9 +300,10 @@ export function createRepositories(db: SqlDatabase) {
       },
       update(row: Department): void {
         db.prepare(
-          `UPDATE agency_department SET name = ?, lead_agent_id = ?, process_version_id = ?, revision = ?, updated_at = ?
+          `UPDATE agency_department SET name = ?, lead_agent_id = ?, process_version_id = ?, revision = ?, updated_at = ?,
+             availability = ?
            WHERE id = ?`,
-        ).run(row.name, row.leadAgentId, row.processVersionId, row.revision, row.updatedAt, row.id);
+        ).run(row.name, row.leadAgentId, row.processVersionId, row.revision, row.updatedAt, row.availability ?? "all", row.id);
       },
       get(id: string): Department | undefined {
         const row = db.prepare(`SELECT * FROM agency_department WHERE id = ?`).get(id) as DepartmentRow | undefined;
@@ -348,9 +379,31 @@ export function createRepositories(db: SqlDatabase) {
       update(row: ProjectBinding): void {
         db.prepare(
           `UPDATE agency_project_binding
-           SET section_id = ?, policy_version_id = ?, revision = ?, updated_at = ?
+           SET section_id = ?, policy_version_id = ?, revision = ?, updated_at = ?, archived_at = ?
            WHERE id = ?`,
-        ).run(row.sectionId, row.policyVersionId, row.revision, row.updatedAt, row.id);
+        ).run(row.sectionId, row.policyVersionId, row.revision, row.updatedAt, row.archivedAt ?? null, row.id);
+      },
+      /** Only for a binding without jobs: removes its department links, then the binding. */
+      delete(id: string): void {
+        db.prepare(`DELETE FROM agency_project_department WHERE binding_id = ?`).run(id);
+        db.prepare(`DELETE FROM agency_project_binding WHERE id = ?`).run(id);
+      },
+      usage(id: string): { jobs: number; publishIntents: number } {
+        const jobs = db.prepare(`SELECT COUNT(*) AS n FROM agency_job WHERE binding_id = ?`).get(id) as { n: number };
+        const intents = db
+          .prepare(`SELECT COUNT(*) AS n FROM agency_artifact_publish_intent WHERE binding_id = ?`)
+          .get(id) as { n: number };
+        return { jobs: jobs.n, publishIntents: intents.n };
+      },
+      findActiveByPlacement(environmentId: string, canonicalRoot: string): ProjectBinding | undefined {
+        // Filter in code: also readable on a database migrated before archived_at existed.
+        const rows = db
+          .prepare(
+            `SELECT * FROM agency_project_binding WHERE environment_id = ? AND canonical_root = ? ORDER BY updated_at`,
+          )
+          .all(environmentId, canonicalRoot) as BindingRow[];
+        const row = rows.find((candidate) => !candidate.archived_at);
+        return row ? mapBinding(row) : undefined;
       },
       get(id: string): ProjectBinding | undefined {
         const row = db.prepare(`SELECT * FROM agency_project_binding WHERE id = ?`).get(id) as BindingRow | undefined;
@@ -362,6 +415,20 @@ export function createRepositories(db: SqlDatabase) {
         db.prepare(
           `INSERT INTO agency_project_department (binding_id, department_id) VALUES (?, ?)`,
         ).run(row.bindingId, row.departmentId);
+      },
+      remove(bindingId: string, departmentId: string): boolean {
+        return (
+          db
+            .prepare(`DELETE FROM agency_project_department WHERE binding_id = ? AND department_id = ?`)
+            .run(bindingId, departmentId).changes > 0
+        );
+      },
+      listByDepartment(departmentId: string): ProjectDepartment[] {
+        return (
+          db.prepare(`SELECT binding_id, department_id FROM agency_project_department WHERE department_id = ?`).all(
+            departmentId,
+          ) as Array<{ binding_id: string; department_id: string }>
+        ).map((row) => ({ bindingId: row.binding_id, departmentId: row.department_id }));
       },
       listByBinding(bindingId: string): ProjectDepartment[] {
         return (
@@ -376,8 +443,9 @@ export function createRepositories(db: SqlDatabase) {
         db.prepare(
           `INSERT INTO agency_job
             (id, key, binding_id, department_id, title, brief, acceptance, state, parent_job_id,
-             assigned_agent_id, reviewer_agent_ids, observer_agent_ids, priority, due_at, revision, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             assigned_agent_id, reviewer_agent_ids, observer_agent_ids, priority, due_at, revision, updated_at,
+             closed_at, contract_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           row.id,
           row.key,
@@ -395,14 +463,23 @@ export function createRepositories(db: SqlDatabase) {
           row.dueAt,
           row.revision,
           row.updatedAt,
+          isClosedJobState(row.state) ? row.updatedAt : null,
+          contractJson(row.contract),
         );
       },
       update(row: Job): void {
         db.prepare(
-          `UPDATE agency_job SET title = ?, brief = ?, acceptance = ?, state = ?, binding_id = ?, department_id = ?,
-            assigned_agent_id = ?, reviewer_agent_ids = ?, observer_agent_ids = ?, priority = ?, due_at = ?, revision = ?, updated_at = ?
+          `UPDATE agency_job SET
+            closed_at = CASE WHEN ? = 0 THEN NULL WHEN state = ? THEN COALESCE(closed_at, ?) ELSE ? END,
+            title = ?, brief = ?, acceptance = ?, state = ?, binding_id = ?, department_id = ?,
+            assigned_agent_id = ?, reviewer_agent_ids = ?, observer_agent_ids = ?, priority = ?, due_at = ?, revision = ?, updated_at = ?,
+            contract_json = ?
            WHERE id = ?`,
         ).run(
+          isClosedJobState(row.state) ? 1 : 0,
+          row.state,
+          row.updatedAt,
+          row.updatedAt,
           row.title,
           row.brief,
           row.acceptance,
@@ -416,12 +493,20 @@ export function createRepositories(db: SqlDatabase) {
           row.dueAt,
           row.revision,
           row.updatedAt,
+          contractJson(row.contract),
           row.id,
         );
       },
       get(id: string): Job | undefined {
         const row = db.prepare(`SELECT * FROM agency_job WHERE id = ?`).get(id) as JobRow | undefined;
         return row ? mapJob(row) : undefined;
+      },
+      /** Next free AG-N; call inside the create transaction. */
+      nextKey(): Job["key"] {
+        const row = db
+          .prepare(`SELECT MAX(CAST(SUBSTR(key, 4) AS INTEGER)) AS n FROM agency_job WHERE key LIKE 'AG-%'`)
+          .get() as { n: number | null } | undefined;
+        return `AG-${(row?.n ?? 0) + 1}` as Job["key"];
       },
       getByKey(key: string): Job | undefined {
         const row = db.prepare(`SELECT * FROM agency_job WHERE key = ?`).get(key) as JobRow | undefined;

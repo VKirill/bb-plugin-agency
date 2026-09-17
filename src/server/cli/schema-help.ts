@@ -42,7 +42,9 @@ export const CLI_COMMAND_SPECS = [
   { name: "agent", summary: "Сотрудник", usage: "bb agency agent create|get|save" },
   { name: "department", summary: "Отдел и membership", usage: "bb agency department create|get|save|membership" },
   { name: "project", summary: "Привязка существующего каталога", usage: "bb agency project bind|get|link-department" },
-  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|report-needs-input|answer-needs-input|attempts|comment" },
+  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|report-needs-input|answer-needs-input|attempts|comment|usage|return" },
+  { name: "rules", summary: "Правила работы: лимиты, пороги, модели по умолчанию", usage: "bb agency rules get|save --input-json '<payload>'" },
+  { name: "usage", summary: "Токены и оценка стоимости; rootJobId — задача с подзадачами", usage: "bb agency usage --input-json '{\"rootJobId\":\"<jobId>\"}'" },
   { name: "artifact", summary: "Версии файлов", usage: "bb agency artifact create|publish|open|accept|versions" },
   { name: "launch", summary: "prepare/get/reconcile/cancel; готовность — launch readiness этого instance", usage: "bb agency launch prepare|get|reconcile|cancel|readiness" },
   { name: "status", summary: "runtime + requires_readiness; не grant, смотри launch readiness с jobId", usage: "bb agency status [--json]" },
@@ -66,6 +68,7 @@ const JOB_COMMENT_SCHEMA_NOTES = [
   "Без proof — честный user/system из service context, не выдуманный сотрудник.",
   "Пишет в существующую activity историю задачи.",
   "register run(argv, ctx) передаёт cliThreadId и jobComment port; не RPC и не handlers[operation].",
+  "Оценка на входе — тот же комментарий с references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return), все три ровно по одному.",
 ];
 
 export function schemaDocument(operation: CliRoutedOperation) {

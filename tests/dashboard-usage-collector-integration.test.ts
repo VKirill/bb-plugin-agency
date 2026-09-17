@@ -209,7 +209,8 @@ function liveEvents(byThread: Record<string, unknown[] | "unavailable" | "throw"
 
 describe("dashboard usage collector integration", () => {
   it("appends the collector migration without rewriting earlier statements", () => {
-    expect(migrations.at(-1)).toBe(USAGE_COLLECTOR_MIGRATION);
+    // Applied in production as migration 51; later statements are appended after it.
+    expect(migrations.indexOf(USAGE_COLLECTOR_MIGRATION)).toBe(51);
     const { db, close } = openFileDb();
     try {
       const row = db.prepare(`SELECT count(*) AS n FROM agency_usage_event`).get() as { n: number };

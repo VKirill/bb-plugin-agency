@@ -40,6 +40,7 @@ export function resolveBoundFileOp(
     relativePath: string;
     bytesBase64?: string;
     canonicalRoot?: string;
+    expectedHash?: string | null;
   },
 ): DomainResult<{ hostId: string; input: HostFileOpInput }> {
   const bound = resolveBoundFileCall(binding);
@@ -54,6 +55,7 @@ export function resolveBoundFileOp(
       relativePath: input.relativePath,
       canonicalRoot: bound.value.canonicalRoot,
       ...(input.bytesBase64 === undefined ? {} : { bytesBase64: input.bytesBase64 }),
+      ...(input.expectedHash === undefined ? {} : { expectedHash: input.expectedHash }),
     },
   });
 }
@@ -91,6 +93,7 @@ export async function callBoundFileOp(
     relativePath: string;
     bytesBase64?: string;
     canonicalRoot?: string;
+    expectedHash?: string | null;
   },
 ): Promise<DomainResult<HostFileOpOutput & { ok: true }>> {
   const resolved = resolveBoundFileOp(binding, input);

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { experimental_SourceCode as SourceCode } from "@get-bb/plugin-sdk/app";
 import { Button, Icon } from "./shared";
 import type { TaskFile } from "./data";
+import { tr } from "../i18n";
 
 export function FileWorkspace({
   file,
@@ -36,7 +37,7 @@ export function FileWorkspace({
   }, [dirty]);
   return (
     <section
-      aria-label={`Документ ${file.name}`}
+      aria-label={tr("Документ {name}", { name: file.name })}
       className={`agency-file-workspace flex h-full min-h-0 flex-col rounded-lg border border-border bg-background ${nativePanel ? "agency-native-doc" : ""}`}
     >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
@@ -51,16 +52,16 @@ export function FileWorkspace({
           {file.kind === "text" && (
             <>
               <span role="status" className="text-xs text-muted-foreground">
-                {saving ? "Сохраняем…" : dirty ? "Есть изменения" : persisted ? "Сохранено" : "Сохранено в примере"}
+                {saving ? tr("Сохраняем…") : dirty ? tr("Есть изменения") : persisted ? tr("Сохранено") : tr("Сохранено в примере")}
               </span>
               <Button size="sm" disabled={!dirty || saving} onClick={() => onSave(draft)}>
-                Сохранить файл
+                {tr("Сохранить файл")}
               </Button>
             </>
           )}
           {!nativePanel && (
             <Button size="sm" variant="ghost" onClick={close}>
-              ← К задаче
+              {tr("← К задаче")}
             </Button>
           )}
         </div>
@@ -76,11 +77,11 @@ export function FileWorkspace({
       <p className="shrink-0 border-t border-border px-4 py-2 text-xs text-muted-foreground">
         {persisted
           ? file.kind === "text"
-            ? "Правки сохраняются как новая версия файла."
-            : "Вложение открыто из сохранённого файла."
+            ? tr("Правки сохраняются как новая версия файла.")
+            : tr("Вложение открыто из сохранённого файла.")
           : file.kind === "text"
-            ? "Правки и предыдущие версии хранятся в примере до перезагрузки."
-            : "Вложение хранится в примере до перезагрузки."}
+            ? tr("Правки и предыдущие версии хранятся в примере до перезагрузки.")
+            : tr("Вложение хранится в примере до перезагрузки.")}
       </p>
     </section>
   );

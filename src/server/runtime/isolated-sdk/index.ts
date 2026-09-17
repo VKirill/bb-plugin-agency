@@ -26,7 +26,7 @@ export {
 } from "./completion-apply.js";
 export type { AppliedCompletion } from "./completion-apply.js";
 export { readCompletionFromCore, readJobPublishedArtifact } from "./completion-artifact.js";
-export { attachDisposableThreadHints, createCompletionWatch } from "./completion-watch.js";
+export { attachDisposableThreadHints, createCompletionWatch, createReadingChangeGate } from "./completion-watch.js";
 export {
   CORE_SPAWN_CONTRACT_PATH,
   CORE_SPAWN_CONTRACT_PROTOCOL,

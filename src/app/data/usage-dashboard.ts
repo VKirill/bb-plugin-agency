@@ -1,5 +1,6 @@
 /** Adapter: listDashboardUsage value → UI. Do not re-sum cache into input. */
 
+import { tr, uiLocale } from "../i18n";
 import {
   listDashboardUsageOutputSchema,
   type DashboardUsageCoverage,
@@ -98,6 +99,7 @@ export type UsageDisplayRow = {
   resetObserved: boolean;
   units: TokenUsageTotals | null;
   sessionLatestTotal: TokenUsageTotals | null;
+  costUsdCents: number | null;
 };
 
 export type UsageGroup = {
@@ -130,28 +132,61 @@ export function usageUnitsKnown(units: DashboardUsageUnits): units is DashboardU
 }
 
 export function formatTokenCount(value: number | null | undefined, known: boolean): string {
-  if (!known || value === undefined || value === null) return USAGE_UNKNOWN;
-  return value.toLocaleString("ru-RU");
+  if (!known || value === undefined || value === null) return tr(USAGE_UNKNOWN);
+  return value.toLocaleString(uiLocale());
 }
 
 /** Incomplete all-time: floor headline, never exact lifetime. */
 export function formatAtLeastTokens(total: number): string {
   if (total >= 1_000_000) {
     const millions = total / 1_000_000;
-    const compact = millions.toLocaleString("ru-RU", {
+    const compact = millions.toLocaleString(uiLocale(), {
       minimumFractionDigits: millions >= 10 ? 0 : 1,
       maximumFractionDigits: 1,
     });
-    return `Не менее ${compact} млн`;
+    return tr("Не менее {compact} млн", { compact });
   }
-  return `Не менее ${total.toLocaleString("ru-RU")}`;
+  return tr("Не менее {total}", { total: total.toLocaleString(uiLocale()) });
 }
 
 export function availableHeadline(totals: TokenUsageTotals | null, incomplete: boolean): string {
-  if (!totals) return USAGE_UNKNOWN;
+  if (!totals) return tr(USAGE_UNKNOWN);
   if (incomplete) return formatAtLeastTokens(totals.totalTokens);
   return formatTokenCount(totals.totalTokens, true);
 }
+
+/** "≈ $3.42" at API list prices; never a bill. */
+export function formatCostUsd(cents: number | null | undefined): string | null {
+  if (cents === null || cents === undefined) return null;
+  const usd = cents / 100;
+  if (usd > 0 && usd < 0.01) return "≈ <$0.01";
+  return `≈ $${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Cost of the visible rows, one thread counted once. Partial when some usage has no price. */
+export function costForRows(rows: readonly UsageDisplayRow[]): { cents: number | null; partial: boolean } {
+  const seen = new Map<string, number | null>();
+  for (const row of rows) {
+    if (row.unknown) continue;
+    const key = peakDedupKey(row);
+    if (!seen.has(key)) seen.set(key, row.costUsdCents);
+  }
+  const values = [...seen.values()];
+  const priced = values.filter((value): value is number => value !== null);
+  if (priced.length === 0) return { cents: null, partial: values.length > 0 };
+  return {
+    cents: Math.round(priced.reduce((sum, value) => sum + value, 0) * 100) / 100,
+    partial: priced.length < values.length,
+  };
+}
+
+export function costHeadline(cost: { cents: number | null; partial: boolean }): string {
+  const formatted = formatCostUsd(cost.cents);
+  if (!formatted) return tr(USAGE_NO_COST);
+  return cost.partial ? tr("{cost}, не все модели с ценой", { cost: formatted }) : formatted;
+}
+
+export const USAGE_COST_BASIS = "Оценка по ценам API без записи в кеш. На подписке это не счёт, а эквивалент.";
 
 export function allTimeHeadline(payload: ListDashboardUsageOutput): string {
   return availableHeadline(payload.allTime.totals ?? payload.totals, payload.allTime.incomplete || payload.coverage.lifetimeIncomplete);
@@ -162,9 +197,9 @@ export function periodHeadlineFromDays(
   available: boolean,
   omitted: boolean,
 ): string {
-  if (!available || omitted || days.length === 0) return USAGE_PERIOD_UNAVAILABLE;
+  if (!available || omitted || days.length === 0) return tr(USAGE_PERIOD_UNAVAILABLE);
   const total = sumDayTotals(days);
-  return total ? formatTokenCount(total.totalTokens, true) : USAGE_UNKNOWN;
+  return total ? formatTokenCount(total.totalTokens, true) : tr(USAGE_UNKNOWN);
 }
 
 export function periodHeadline(payload: ListDashboardUsageOutput): string {
@@ -240,17 +275,24 @@ export function coverageFromRows(
 }
 
 export function coverageLines(coverage: UsageCoverageView | DashboardUsageCoverage): string[] {
-  const known = `${coverage.threadsWithUsage} известно · ${coverage.threadsUnknown} неизвестно`;
-  const epoch = coverage.epochCount == null ? known : `${known} · ${coverage.epochCount} эпох`;
+  const known = tr("{known} известно · {unknown} неизвестно", {
+    known: coverage.threadsWithUsage,
+    unknown: coverage.threadsUnknown,
+  });
+  const epoch = coverage.epochCount == null ? known : tr("{known} · {epoch} эпох", { known, epoch: coverage.epochCount });
   const lines = [
-    `${coverage.jobCount} задач · ${coverage.attemptCount} попыток · ${coverage.uniqueThreadCount} тредов`,
+    tr("{jobs} задач · {attempts} попыток · {threads} тредов", {
+      jobs: coverage.jobCount,
+      attempts: coverage.attemptCount,
+      threads: coverage.uniqueThreadCount,
+    }),
     epoch,
   ];
   if (coverage.attemptsWithoutThread > 0) {
-    lines.push(`Без треда: ${coverage.attemptsWithoutThread}`);
+    lines.push(tr("Без треда: {count}", { count: coverage.attemptsWithoutThread }));
   }
-  if (coverage.resetObserved) lines.push(USAGE_RESET_OBSERVED);
-  if (coverage.lifetimeIncomplete) lines.push(USAGE_INCOMPLETE);
+  if (coverage.resetObserved) lines.push(tr(USAGE_RESET_OBSERVED));
+  if (coverage.lifetimeIncomplete) lines.push(tr(USAGE_INCOMPLETE));
   return lines;
 }
 
@@ -289,11 +331,11 @@ export function toDisplayRows(
       rootTitle: root?.title || root?.key || row.rootJobId,
       threadId: row.threadId,
       projectId,
-      projectName: (projectId && names.projects?.[projectId]) || projectId || USAGE_UNKNOWN,
+      projectName: (projectId && names.projects?.[projectId]) || projectId || tr(USAGE_UNKNOWN),
       departmentId,
-      departmentName: (departmentId && names.departments?.[departmentId]) || departmentId || USAGE_UNKNOWN,
-      providerId: row.providerId || USAGE_UNKNOWN,
-      model: row.model || USAGE_UNKNOWN,
+      departmentName: (departmentId && names.departments?.[departmentId]) || departmentId || tr(USAGE_UNKNOWN),
+      providerId: row.providerId || tr(USAGE_UNKNOWN),
+      model: row.model || tr(USAGE_UNKNOWN),
       attemptState: row.attemptState,
       unknown: !isKnown,
       unknownReason: isKnown ? null : units.reason,
@@ -308,6 +350,7 @@ export function toDisplayRows(
           }
         : null,
       sessionLatestTotal: row.sessionLatestTotal,
+      costUsdCents: row.costUsdCents,
     };
   });
 }
@@ -376,6 +419,7 @@ export function filteredUsageView(payload: ListDashboardUsageOutput, filter: Usa
   daySeries: Array<TokenUsageTotals & { date: string }>;
   availableTotals: TokenUsageTotals | null;
   availableLabel: string;
+  costLabel: string;
   periodLabel: string;
   coverage: UsageCoverageView;
 } {
@@ -392,6 +436,7 @@ export function filteredUsageView(payload: ListDashboardUsageOutput, filter: Usa
     daySeries: mergeDaysByDate(days),
     availableTotals,
     availableLabel: availableHeadline(availableTotals, incomplete),
+    costLabel: costHeadline(costForRows(rows)),
     periodLabel: periodHeadlineFromDays(days, payload.period.available, payload.coverage.dayChart === "omitted" && days.length === 0),
     coverage: coverageFromRows(rows, payload.coverage, { includeEpochCount: sameAttempts }),
   };
@@ -410,7 +455,7 @@ export function usageFilterOptions(rows: readonly UsageDisplayRow[]): {
   for (const row of rows) {
     if (row.projectId) projects.set(row.projectId, row.projectName);
     if (row.departmentId) departments.set(row.departmentId, row.departmentName);
-    if (row.model !== USAGE_UNKNOWN) models.set(`${row.providerId}/${row.model}`, `${row.providerId} · ${row.model}`);
+    if (row.model !== tr(USAGE_UNKNOWN)) models.set(`${row.providerId}/${row.model}`, `${row.providerId} · ${row.model}`);
     roots.set(row.rootJobId, row.rootTitle);
   }
   const asOptions = (map: Map<string, string>) => [...map.entries()].map(([value, label]) => ({ value, label }));

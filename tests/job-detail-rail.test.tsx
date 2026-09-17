@@ -105,16 +105,16 @@ describe("JobDetail rail", () => {
     expect(railRow(container, "Отдел")).toBe("Программисты");
     expect(railRow(container, "Приоритет")).toBe("Высокий");
     expect(railRow(container, "Срок")).toBe("не задан");
-    expect(railRow(container, "Хост")).toBe("MAC Mini");
+    expect(railRow(container, "Машина")).toBe("MAC Mini");
     await act(async () => { root.unmount(); });
   });
 
   it("keeps form controls out of the rail", async () => {
     const { container, root } = await renderRail();
     const rail = container.querySelector(".agency-task-sidebar-content") as HTMLElement;
-    // The only input left is the hidden file field behind "+ Добавить".
+    // No form controls in the rail; the fixture job is done, so even "+ Добавить" is gone.
     expect(rail.querySelectorAll("select, [role=combobox], input:not([type=file])").length).toBe(0);
-    expect(rail.querySelectorAll('input[type=file]').length).toBe(1);
+    expect(rail.querySelectorAll('input[type=file]').length).toBe(0);
     await act(async () => { root.unmount(); });
   });
 
@@ -127,7 +127,7 @@ describe("JobDetail rail", () => {
     const dialog = document.querySelector('[data-testid="job-edit-dialog"]');
     expect(dialog).toBeTruthy();
     const text = dialog?.textContent ?? "";
-    for (const label of ["Название", "Описание и критерии", "Статус", "Приоритет", "Исполнитель", "Срок", "Проект и отдел"]) {
+    for (const label of ["Название", "Что нужно сделать", "Критерии приёмки", "Статус", "Приоритет", "Исполнитель", "Срок", "Проект и отдел"]) {
       expect(text).toContain(label);
     }
     await act(async () => { root.unmount(); });

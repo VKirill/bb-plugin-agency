@@ -1,5 +1,6 @@
 /** UI contract aligned with isolated clone `launch-rpc.ts` (2026-09-14). Shared/server stay owned by backend. */
 
+import { tr } from "../i18n";
 import type { JobState } from "../../shared/contracts";
 import { productLaunchCopy, productServerReason } from "./product-reasons";
 import { asUiState } from "./view-models";
@@ -20,7 +21,7 @@ export const LAUNCH_LIST_UNREGISTERED =
   "Список попыток появится, когда instance отдаст listJobAttempts по jobId в scope. Сейчас доска пустая.";
 
 export const LAUNCH_HANDSHAKE_HINT =
-  "Запуск откроется, когда среда подтвердит изолированную работу. Версия программы и название сервера кнопку не открывают. Сейчас проверен только сотрудник на Claude.";
+  "Запуск откроется, когда среда подтвердит изолированную работу. Сейчас проверен только сотрудник на Claude.";
 
 /** Wire states from shared `RUN_ATTEMPT_STATE_VALUES`. Unknown enum → blocked, not prepare. */
 export const KNOWN_RUN_ATTEMPT_STATES = [
@@ -137,6 +138,10 @@ export type IsolationReadiness = {
   launchAllowedForAssigned: boolean;
   reason: string;
   reasonCode?: string;
+  /** Budget warnings: the launch is allowed, the owner should know. */
+  warnings?: readonly string[];
+  /** Blocked by a limit: the job can wait in the launch queue. */
+  waitable?: boolean;
 };
 
 export type JobLaunchItem = {
@@ -307,6 +312,8 @@ export function parseIsolationReadiness(value: unknown): IsolationReadiness | nu
     launchAllowedForAssigned: row.launchAllowedForAssigned,
     reason: row.reason,
     reasonCode: typeof row.reasonCode === "string" ? row.reasonCode : undefined,
+    ...(Array.isArray(row.warnings) ? { warnings: row.warnings.filter((item): item is string => typeof item === "string") } : {}),
+    ...(row.waitable === true ? { waitable: true } : {}),
   };
 }
 
@@ -357,12 +364,12 @@ export function launchReadinessNotice(
   if (!providerId) {
     return productLaunchCopy({
       reasonCode: readiness?.reasonCode,
-      reason: readiness?.reason || LAUNCH_PROVIDER_UNAVAILABLE,
+      reason: readiness?.reason || tr(LAUNCH_PROVIDER_UNAVAILABLE),
     });
   }
   return productLaunchCopy({
     reasonCode: readiness?.reasonCode,
-    reason: readiness?.reason ?? LAUNCH_PROVIDER_UNAVAILABLE,
+    reason: readiness?.reason ?? tr(LAUNCH_PROVIDER_UNAVAILABLE),
   });
 }
 
@@ -414,16 +421,16 @@ export function completionNeverSucceeded(view: CompletionView): boolean {
 }
 
 export function launchStateLabel(state: string): string {
-  if (state === "prepared") return "Подготовлен";
-  if (state === "launching") return "Стартует";
-  if (state === "running") return "В работе";
-  if (state === "waiting_input") return "Ждёт ввода";
-  if (state === "failed") return "Ошибка";
-  if (state === "canceled") return "Отменён";
-  if (state === "unknown") return "Неизвестно — сверка";
-  if (state === "awaiting_review") return LAUNCH_STATE_AWAITING_REVIEW;
-  if (state === "succeeded") return LAUNCH_STATE_SUCCEEDED;
-  return LAUNCH_STATE_UNSUPPORTED;
+  if (state === "prepared") return tr("Подготовлен");
+  if (state === "launching") return tr("Стартует");
+  if (state === "running") return tr("В работе");
+  if (state === "waiting_input") return tr("Ждёт ввода");
+  if (state === "failed") return tr("Ошибка");
+  if (state === "canceled") return tr("Отменён");
+  if (state === "unknown") return tr("Неизвестно — сверка");
+  if (state === "awaiting_review") return tr(LAUNCH_STATE_AWAITING_REVIEW);
+  if (state === "succeeded") return tr(LAUNCH_STATE_SUCCEEDED);
+  return tr(LAUNCH_STATE_UNSUPPORTED);
 }
 
 export function readinessBlocksLaunch(prepare: PrepareLaunchView | null): string | null {

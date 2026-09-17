@@ -11,6 +11,7 @@ export { isDisplayName, isJobKey, isOpaqueId, sameEntity } from "./ids";
 export { matchRevision, nextRevision } from "./revision";
 export { assertLeadInMembership, assertUniqueMemberships, departmentsForAgent } from "./membership";
 export {
+  assertBindingActive,
   assertDepartmentOnBinding,
   assertJobBelongsToBinding,
   assertTrustedProject,

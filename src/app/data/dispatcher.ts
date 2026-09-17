@@ -28,6 +28,7 @@ import {
   type SaveEventSourceCommand,
   type SaveRuleVersionCommand,
 } from "../../shared/contracts";
+import { tr } from "../i18n";
 import type { AgencyApi } from "./agency-api";
 import type { MutationOutcome } from "./envelope";
 
@@ -37,11 +38,11 @@ export const INTENT_LAUNCH_UNAVAILABLE =
 export const INTENT_NO_SPAWN =
   "Задачу из этого правила сейчас запустить нельзя.";
 
-export const INTENT_APPROVE_HINT = "Правило согласовано. Исполнитель сам не запускается.";
+export const INTENT_APPROVE_HINT = "Действие согласовано: в течение полуминуты Агентство создаст задачу и поставит её в очередь запуска.";
 
-export const INTENT_CLAIM_HINT = "Запись взята в работу. Задачу отсюда запустить нельзя.";
+export const INTENT_CLAIM_HINT = "Действие взято в работу: задача создаётся и встаёт в очередь запуска.";
 
-export const INTENT_TICK_HINT = "Проверили новые события.";
+export const INTENT_TICK_HINT = "Проверили новые события. Агентство и само проверяет их каждые 30 секунд.";
 
 export const INTENT_FILTER_HINT =
   "Показывается то, что вернул сервер.";
@@ -65,7 +66,7 @@ export const DISPATCHER_SHARED_BB_SCOPE =
   "Несколько привязок смотрят на один проект BB. Источники и правила общие — это не отдельные области.";
 
 export const DISPATCHER_PAGE_HINT =
-  "Можно выбрать сохранённые типы, источники и правила или добавить новые.";
+  "Событие → правило → задача отделу. Источник принимает события (уведомление, внешний адрес или расписание), правило решает, что с ними делать. Созданные задачи проходят обычные проверки запуска и лимиты.";
 
 export const INGEST_ACCEPTED = "Событие принято.";
 
@@ -170,20 +171,20 @@ export const SOURCE_KIND_LABEL: Record<string, string> = {
 };
 
 export function sourceKindLabel(kind: string): string {
-  return SOURCE_KIND_LABEL[kind] ?? kind;
+  return tr(SOURCE_KIND_LABEL[kind] ?? kind);
 }
 
 export function intentCatalogHeading(intent: ListedActionIntent): string {
   const name = intent.definitionLabel?.trim() || intent.ruleLabel?.trim();
   if (name) return name;
-  return INTENT_STATE_LABEL[intent.state];
+  return tr(INTENT_STATE_LABEL[intent.state]);
 }
 
 export function intentCatalogSubline(intent: ListedActionIntent): string {
   const parts = [intent.topic?.trim(), intent.sourceKind ? sourceKindLabel(intent.sourceKind) : ""].filter(Boolean);
   const status = intentStatusNotice(intent);
   if (!parts.length) return status;
-  if (status === INTENT_STATE_LABEL[intent.state]) return parts.join(" · ");
+  if (status === tr(INTENT_STATE_LABEL[intent.state])) return parts.join(" · ");
   return `${parts.join(" · ")} · ${status}`;
 }
 
@@ -261,11 +262,11 @@ export function intentLaunchBlocked(intent: Pick<ActionIntentRecord, "jobId" | "
 }
 
 export function intentStatusNotice(intent: ActionIntentRecord): string {
-  if (intent.lastError === "capability_unavailable") return INTENT_LAUNCH_UNAVAILABLE;
+  if (intent.lastError === "capability_unavailable") return tr(INTENT_LAUNCH_UNAVAILABLE);
   if (intent.jobId == null && (intent.state === "failed" || intent.state === "claimed" || intent.state === "queued")) {
-    return INTENT_NO_SPAWN;
+    return tr(INTENT_NO_SPAWN);
   }
-  return INTENT_STATE_LABEL[intent.state];
+  return tr(INTENT_STATE_LABEL[intent.state]);
 }
 
 export function parseActionIntents(value: unknown): ActionIntentRecord[] | null {
@@ -296,7 +297,8 @@ export type DispatcherApi = Pick<
   | "listRuleVersions"
   | "claimActionIntent"
   | "approveActionIntent"
->;
+> &
+  Partial<Pick<AgencyApi, "saveRuleSchedule" | "listRuleSchedules" | "previewSchedule" | "getWebhookSource" | "rotateWebhookSecret" | "saveSourceTopics">>;
 
 export function intentsAwaitingApproval<T extends ActionIntentRecord>(intents: readonly T[]): T[] {
   return intents.filter((item) => item.state === "awaiting_approval");

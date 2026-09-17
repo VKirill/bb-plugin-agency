@@ -3,10 +3,12 @@ import { z } from "zod";
 
 export const hostFileOpInput = z
   .object({
-    op: z.enum(["writeAtomic", "read", "stat", "remove"]),
+    op: z.enum(["writeAtomic", "read", "stat", "remove", "replace"]),
     canonicalRoot: z.string().min(1).max(1024),
     relativePath: z.string().min(1).max(512),
     bytesBase64: z.string().max(8 * 1024 * 1024).optional(),
+    /** replace only: hash the file must have now; null means the file must not exist yet. */
+    expectedHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
   })
   .strict();
 

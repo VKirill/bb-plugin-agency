@@ -1,3 +1,4 @@
+import type { ModelPriceTable } from "../runtime/dashboard-usage/pricing.js";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { SqlDatabase } from "../db/sql";
 import { resolveRpcAccess } from "./auth";
@@ -111,7 +112,7 @@ export function startUsageCollectorCapture(deps: {
   };
 }
 
-export function createDashboardUsageRpc(deps: { db: SqlDatabase; events: EventsPort }) {
+export function createDashboardUsageRpc(deps: { db: SqlDatabase; events: EventsPort; prices?: () => ModelPriceTable }) {
   const live = createDashboardUsageEventPort(deps.events);
   const collector = createUsageCollector({
     db: deps.db,
@@ -122,6 +123,7 @@ export function createDashboardUsageRpc(deps: { db: SqlDatabase; events: EventsP
     reads: createInternalRunStoreReads(deps.db),
     catalog: dashboardUsageCatalogFromSql(deps.db),
     events: collector.events,
+    prices: deps.prices,
   });
   return {
     collector,
@@ -138,6 +140,7 @@ export function attachDashboardUsageCollector(deps: {
   db: SqlDatabase;
   events: EventsPort;
   onUsageChanged?: () => void;
+  prices?: () => ModelPriceTable;
 }) {
   const { collector, listDashboardUsage } = createDashboardUsageRpc(deps);
   const poll = startUsageCollectorCapture({

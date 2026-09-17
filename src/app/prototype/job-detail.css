@@ -40,7 +40,59 @@
     justify-content: flex-end;
   }
 }
-.agency-task-content { grid-area: content; min-width: 0; }
+.agency-task-content { grid-area: content; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.agency-task-content > * { margin-top: 0; margin-bottom: 0; }
+/* Content sections share one width and one divider rhythm under the decision block. */
+.agency-task-section { border-top: 1px solid var(--border, hsl(var(--border))); padding-top: 20px; min-width: 0; }
+.agency-prose { max-width: 72ch; overflow-wrap: anywhere; }
+.agency-prose :where(p, ul, ol, pre) { margin-top: 0; margin-bottom: 0.5em; }
+.agency-prose :where(p:last-child, ul:last-child, ol:last-child, pre:last-child) { margin-bottom: 0; }
+
+/* Subtasks: one grid for rows, like the board — status · key · title · executor. */
+.agency-subtasks { border-top: 1px solid var(--border, hsl(var(--border))); padding-top: 20px; min-width: 0; }
+.agency-subtasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.agency-subtasks-progress { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+.agency-subtasks-bar { position: relative; flex: 0 0 120px; height: 4px; border-radius: 999px; overflow: hidden; background: var(--muted, hsl(var(--muted))); }
+.agency-subtasks-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: #10b981; }
+.agency-subtasks-list { list-style: none; margin: 0; padding: 0; }
+.agency-subtask-row {
+  display: grid;
+  grid-template-columns: 16px 3.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, hsl(var(--border)));
+  border-radius: 6px;
+  text-align: left;
+  font-size: 0.875rem;
+  background: transparent;
+}
+/* The whole row lights up on hover: it is one link, not underlined text. */
+.agency-subtask-row:not([data-current]):hover { background: var(--muted, hsl(var(--muted))); }
+.agency-subtask-row:focus-visible { outline: 2px solid var(--ring, hsl(var(--ring))); outline-offset: -2px; }
+.agency-subtask-row { cursor: pointer; }
+/* The current subtask is marked by a left accent, so it does not look like a hovered row. */
+.agency-subtask-row[data-current] { cursor: default; box-shadow: inset 3px 0 0 var(--foreground, hsl(var(--foreground))); background: color-mix(in srgb, var(--muted, #f4f4f5) 50%, transparent); }
+.agency-subtask-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+/* Titles wrap to two lines instead of losing their ending. */
+.agency-subtask-title { min-width: 0; overflow: hidden; overflow-wrap: anywhere; font-weight: 500; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.agency-subtask-meta { font-size: 12px; white-space: nowrap; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+@container agency-task (max-width: 560px) {
+  .agency-subtask-row { grid-template-columns: 16px 3.25rem minmax(0, 1fr); }
+  .agency-subtask-meta { grid-column: 3; white-space: normal; }
+}
+
+/* Long messages: first lines visible, the rest on click. */
+.agency-collapsible-body { overflow: hidden; }
+.agency-collapsible:not([data-open]) .agency-collapsible-body { max-height: calc(var(--agency-collapsible-lines, 6) * 1.5rem); }
+.agency-collapsible[data-overflows]:not([data-open]) .agency-collapsible-body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.agency-collapsible-toggle { height: auto; min-height: 24px; margin-top: 2px; padding: 0; font-size: 12px; color: var(--muted-foreground, hsl(var(--muted-foreground))); }
+.agency-collapsible-toggle:hover { background: transparent; color: var(--foreground, hsl(var(--foreground))); }
 .agency-task-sidebar { grid-area: sidebar; min-width: 0; max-width: 100%; align-self: start; overflow-x: hidden; font-size: 12.5px; line-height: 18px; }
 .agency-task-sidebar h2,
 .agency-task-sidebar h3 {
@@ -74,14 +126,13 @@
   margin-bottom: 8px;
 }
 .agency-rail-card-head > .agency-rail-card-title { margin-bottom: 0; }
+/* Same heading voice as the main column: sentence case, not shouted. */
 .agency-rail-card-title {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
-  line-height: 16px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-foreground, hsl(var(--muted-foreground)));
+  line-height: 18px;
+  color: var(--foreground, hsl(var(--foreground)));
 }
 .agency-rail-card-head :where(button) { height: auto; min-height: 24px; padding: 0 8px; font-size: 11px; }
 .agency-rail-row {
@@ -198,7 +249,7 @@
   .agency-task-grid {
     grid-template-areas: "title sidebar" "content sidebar";
     grid-template-columns: minmax(0, 1fr) 288px;
-    column-gap: 32px;
+    column-gap: 40px;
     align-items: start;
   }
   .agency-task-sidebar-toggle { display: none; }

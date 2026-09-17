@@ -1,5 +1,11 @@
+import { jobGoals } from "../organization/goals";
+import { departmentParents, openEscalations } from "../organization/hierarchy";
+import { createProjectSections } from "./project-sections";
+import { listLaunchQueue } from "../runtime/launch-queue/service";
+import { nowUtc } from "../services/context";
+import { currentAgencyRules, listAgencyRulesVersions, listTemplates, saveAgencyRules, saveTemplate } from "../templates/store";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
-import { STAGE1_CONTRACT_VERSION } from "../../shared/contracts";
+import { STAGE1_CONTRACT_VERSION, type BoardPolicy } from "../../shared/contracts";
 import { fail, ok, type DomainResult } from "../../domain";
 import { rpcContract } from "../../shared/rpc-contract";
 import { assessIsolation } from "../runtime/isolation";
@@ -25,6 +31,7 @@ import {
 import { labelBinding, loadProvisioningCatalog, toBbCatalog } from "./bb-catalog";
 import { emptyCapabilityCatalog, loadCapabilityCatalog } from "./capability-catalog";
 import { resolveArtifactPreview } from "./resolve-preview";
+import { readProjectRulesFile, saveProjectRulesFile } from "./project-rules";
 import {
   countJobsByState,
   listArtifactIdsForJob,
@@ -61,6 +68,19 @@ type DomainMethod =
   | "removeMembership"
   | "createProjectBinding"
   | "updateProjectBinding"
+  | "archiveProjectBinding"
+  | "restoreProjectBinding"
+  | "deleteProjectBinding"
+  | "unlinkDepartment"
+  | "setDepartmentAvailability"
+  | "getWorkRules"
+  | "saveWorkRules"
+  | "listTemplates"
+  | "saveTemplate"
+  | "getAgencyRules"
+  | "saveAgencyRules"
+  | "readProjectRules"
+  | "saveProjectRules"
   | "linkDepartment"
   | "createJob"
   | "updateJob"
@@ -98,6 +118,10 @@ export function createDomainRpc(deps: {
   documents: HostFileRpcClient;
   createMetadataPort?: (ctx: ServiceContext) => ArtifactMetadataPort;
   send?: IsolatedSendPort;
+  /** Current board hygiene from plugin settings; omitted in tests and older hosts. */
+  boardPolicy?: () => BoardPolicy;
+  /** Jobs of archived trees: kept out of the working snapshot. */
+  archivedJobIds?: () => Set<string>;
 }): DomainHandlers {
   const { bb, store, db, onChanged, documents } = deps;
   const runs = createRunStore(db);
@@ -128,15 +152,20 @@ export function createDomainRpc(deps: {
     return result;
   }
 
+  const sections = createProjectSections(bb);
+
   async function labeledBindings(bindings: ReturnType<typeof listStoredBindings>) {
     if (bindings.length === 0) {
       return bindings.map((binding) => ({ ...binding, ...labelBinding(binding, undefined) }));
     }
     const catalog = await loadProvisioningCatalog(bb, db);
-    return bindings.map((binding) => ({
-      ...binding,
-      ...labelBinding(binding, catalog.ok ? catalog.value : undefined),
-    }));
+    return Promise.all(
+      bindings.map(async (binding) => ({
+        ...binding,
+        ...labelBinding(binding, catalog.ok ? catalog.value : undefined),
+        sectionPath: await sections.sectionPath(binding),
+      })),
+    );
   }
 
   return {
@@ -163,7 +192,15 @@ export function createDomainRpc(deps: {
           contractVersion: STAGE1_CONTRACT_VERSION,
           isolation: isolationNote(),
           bindings,
-          jobs: listJobsForBindings(db, scopedIds),
+          ...(() => {
+            const archived = deps.archivedJobIds?.() ?? new Set<string>();
+            const scopedJobs = listJobsForBindings(db, scopedIds);
+            const jobs = scopedJobs.filter((job) => !archived.has(job.id));
+            return { jobs, archivedCount: scopedJobs.length - jobs.length };
+          })(),
+          jobGoals: jobGoals(db),
+          departmentParents: departmentParents(db),
+          escalations: openEscalations(db),
           counts: countJobsByState(db, scopedIds),
           agents,
           departments,
@@ -172,6 +209,9 @@ export function createDomainRpc(deps: {
           processVersions: listCurrentProcessVersions(db, departments),
           projectDepartments: listStoredProjectDepartments(db, scopedIds),
           policies: listStoredPolicies(db),
+          ...(deps.boardPolicy ? { board: deps.boardPolicy() } : {}),
+          dueReminderHours: Object.fromEntries(departments.map((department) => [department.id, store.rulesForDepartment(department.id).dueReminderHours])),
+          launchQueue: Object.fromEntries(listLaunchQueue(db).map((entry) => [entry.jobId, entry])),
         });
       }),
 
@@ -277,6 +317,37 @@ export function createDomainRpc(deps: {
 
     updateProjectBinding: (input) => withAccess((access) => mutated(store.updateProjectBinding(access.ctx, input))),
     linkDepartment: (input) => withAccess((access) => mutated(store.linkDepartment(access.ctx, input))),
+    unlinkDepartment: (input) => withAccess((access) => mutated(store.unlinkDepartment(access.ctx, input))),
+    archiveProjectBinding: (input) => withAccess((access) => mutated(store.archiveProjectBinding(access.ctx, input))),
+    restoreProjectBinding: (input) => withAccess((access) => mutated(store.restoreProjectBinding(access.ctx, input))),
+    deleteProjectBinding: (input) => withAccess((access) => mutated(store.deleteProjectBinding(access.ctx, input))),
+    setDepartmentAvailability: (input) => withAccess((access) => mutated(store.setDepartmentAvailability(access.ctx, input))),
+    getWorkRules: (input) => withAccess(() => store.getWorkRules(input.scope)),
+    listTemplates: () => withAccess(() => ok(listTemplates(db))),
+    saveTemplate: (input) => withAccess((access) => mutated(saveTemplate(db, input, nowUtc(access.ctx)))),
+    getAgencyRules: () => withAccess(() => ok(agencyRulesView(db))),
+    saveAgencyRules: (input) =>
+      withAccess((access) => {
+        const saved = saveAgencyRules(db, input, nowUtc(access.ctx));
+        return saved.ok ? mutated(ok(agencyRulesView(db))) : saved;
+      }),
+    saveWorkRules: (input) => withAccess((access) => mutated(store.saveWorkRules(access.ctx, input))),
+    readProjectRules: (input) =>
+      withAccess(async (access) => {
+        const allowed = store.assertBindingAccess(access.ctx, input.bindingId);
+        if (!allowed.ok) return allowed;
+        const binding = store.getBinding(input.bindingId);
+        if (!binding) return fail("not_found", `binding ${input.bindingId} not found`);
+        return readProjectRulesFile(documents, binding);
+      }),
+    saveProjectRules: (input) =>
+      withAccess(async (access) => {
+        const allowed = store.assertBindingAccess(access.ctx, input.bindingId);
+        if (!allowed.ok) return allowed;
+        const binding = store.getBinding(input.bindingId);
+        if (!binding) return fail("not_found", `binding ${input.bindingId} not found`);
+        return saveProjectRulesFile(documents, binding, { text: input.text, expectedHash: input.expectedHash });
+      }),
     createJob: (input) => withAccess((access) => mutated(store.createJob(access.ctx, input))),
     updateJob: (input) => withAccess((access) => mutated(store.updateJob(access.ctx, input))),
     transitionJob: (input) =>
@@ -304,7 +375,15 @@ export function createDomainRpc(deps: {
       withAccess(async (access) => {
         const scoped = store.scopedJob(access.ctx, input.jobId, input.claimedBbProjectId);
         if (!scoped.ok) return scoped;
-        const author = publishAuthorFromActor(access.ctx.actor);
+        // An employee publishes only into the job of its own attempt, and the version is authored by that attempt.
+        const caller = access.ctx.caller;
+        if (caller && caller.jobId !== input.jobId) {
+          return fail(
+            "artifact_foreign_job",
+            `Версию публикует исполнитель задачи: попытка ${caller.attemptId} работает над другой задачей. Материалы для подзадачи передаются через attach-input или бриф.`,
+          );
+        }
+        const author = caller ? ok({ kind: "run" as const, runId: caller.attemptId }) : publishAuthorFromActor(access.ctx.actor);
         if (!author.ok) return author;
         const bytes = new Uint8Array(Buffer.from(input.bytesBase64, "base64"));
         const actualHash = hashBytes(bytes);
@@ -397,4 +476,9 @@ export function createDomainRpc(deps: {
     resolveArtifactPreview: (input) =>
       withAccess((access) => resolveArtifactPreview(store, db, access.ctx, input)),
   };
+}
+
+function agencyRulesView(db: SqlDatabase) {
+  const versions = listAgencyRulesVersions(db);
+  return { current: currentAgencyRules(db), latestVersion: versions[0]?.version ?? 0, versions };
 }

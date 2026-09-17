@@ -28,13 +28,24 @@ export function departmentsForBinding(
   return links.filter((row) => row.bindingId === bindingId).map((row) => row.departmentId);
 }
 
+/** A department open to all projects takes jobs everywhere; a selected one only where it is linked. */
 export function assertDepartmentOnBinding(
   bindingId: string,
   departmentId: string,
   links: readonly ProjectDepartment[],
+  availability: "all" | "selected" = "selected",
 ): DomainResult<string> {
+  if (availability === "all") return ok(departmentId);
   if (!links.some((row) => row.bindingId === bindingId && row.departmentId === departmentId)) {
     return fail("department_not_on_binding", `department ${departmentId} is not linked to ${bindingId}`);
   }
   return ok(departmentId);
+}
+
+/** A disconnected project keeps its history but takes no new jobs, links or launches. */
+export function assertBindingActive(binding: ProjectBinding): DomainResult<ProjectBinding> {
+  if (binding.archivedAt) {
+    return fail("binding_archived", `project binding ${binding.id} is disconnected from the Agency`);
+  }
+  return ok(binding);
 }

@@ -1,3 +1,4 @@
+import { contractText } from "../../../shared/contracts/job";
 import { fail, ok, type DomainResult } from "../../../domain";
 import type { Job, PolicyVersion, ProjectBinding } from "../../../shared/contracts";
 import type { Repositories } from "../../db/repositories";
@@ -118,9 +119,14 @@ export function verifyLiveLaunchIdentity(
     snapshot.job.key !== job.key ||
     snapshot.job.title !== job.title ||
     snapshot.job.briefHash !== sha256Hex(job.brief) ||
-    snapshot.job.acceptanceHash !== sha256Hex(job.acceptance)
+    snapshot.job.acceptanceHash !== sha256Hex(job.acceptance) ||
+    (snapshot.job.contractHash ?? null) !== (contractText(job.contract) ? sha256Hex(contractText(job.contract)) : null)
   ) {
     return fail("live_job_mismatch", "snapshot job assignee/department/content does not match live record");
+  }
+  // Agency rules changed after the launch was prepared: the employee would work by an outdated top layer.
+  if ((snapshot.agencyRules?.versionId ?? null) !== (repos.agencyRules.current()?.id ?? null)) {
+    return fail("live_agency_rules_mismatch", "snapshot agency rules version is not the rules in force");
   }
   const agent = job.assignedAgentId ? repos.agent.get(job.assignedAgentId) : undefined;
   if (!agent) return fail("live_job_mismatch", "live job has no assigned agent");

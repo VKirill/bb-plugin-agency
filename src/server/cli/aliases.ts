@@ -14,6 +14,29 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
   if (head === "catalog" && rest.length === 0) return "listBbCatalog";
   if (head === "catalog" && rest[0] === "capabilities" && rest.length === 1) return "listCapabilityCatalog";
   if (head === "workspace" && rest.length === 0) return "listWorkspace";
+  if (head === "usage" && rest.length === 0) return "listDashboardUsage";
+  if (head === "rules" && rest.length === 1) {
+    if (rest[0] === "get") return "getWorkRules";
+    if (rest[0] === "save") return "saveWorkRules";
+    if (rest[0] === "budgets") return "listBudgets";
+    if (rest[0] === "agency-get") return "getAgencyRules";
+    if (rest[0] === "agency-save") return "saveAgencyRules";
+  }
+  if (head === "knowledge" && rest.length === 1) {
+    if (rest[0] === "list") return "listKnowledge";
+    if (rest[0] === "save") return "saveKnowledge";
+  }
+  if (head === "goal" && rest.length === 1) {
+    if (rest[0] === "list") return "listGoals";
+    if (rest[0] === "link") return "setJobGoal";
+  }
+  if (head === "job" && rest.length === 1 && rest[0] === "search") return "searchJobs";
+  if (head === "job" && rest.length === 1 && rest[0] === "archive") return "listArchivedJobs";
+  if (head === "agent" && rest.length === 1 && rest[0] === "metrics") return "agentMetrics";
+  if (head === "templates" && rest.length === 1) {
+    if (rest[0] === "list") return "listTemplates";
+    if (rest[0] === "save") return "saveTemplate";
+  }
   if (head === "policy" && rest[0] === "create" && rest.length === 1) return "createPolicyVersion";
   if (head === "agent" && rest.length === 1) {
     if (rest[0] === "create") return "provisionAgent";
@@ -28,12 +51,19 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "create") return "provisionDepartment";
     if (rest[0] === "get") return "getDepartment";
     if (rest[0] === "save") return "saveDepartmentProfile";
+    if (rest[0] === "availability") return "setDepartmentAvailability";
   }
   if (head === "project") {
     if (rest[0] === "create") return { unsupported: "creating a BB project is unsupported; bind an existing catalog" };
     if (rest[0] === "bind" && rest.length === 1) return "createProjectBinding";
     if (rest[0] === "get" && rest.length === 1) return "listWorkspace";
     if (rest[0] === "link-department" && rest.length === 1) return "linkDepartment";
+    if (rest[0] === "unlink-department" && rest.length === 1) return "unlinkDepartment";
+    if (rest[0] === "archive" && rest.length === 1) return "archiveProjectBinding";
+    if (rest[0] === "restore" && rest.length === 1) return "restoreProjectBinding";
+    if (rest[0] === "delete" && rest.length === 1) return "deleteProjectBinding";
+    if (rest[0] === "rules" && rest.length === 1) return "readProjectRules";
+    if (rest[0] === "rules-save" && rest.length === 1) return "saveProjectRules";
   }
   if (head === "job" && rest.length === 1) {
     if (rest[0] === "create") return "createJob";
@@ -45,6 +75,8 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "answer-needs-input") return "answerNeedsInput";
     if (rest[0] === "attempts") return "listJobAttempts";
     if (rest[0] === "comment") return "createJobComment";
+    if (rest[0] === "usage") return "listDashboardUsage";
+    if (rest[0] === "return") return "returnJobForRework";
   }
   if (head === "launch" && rest.length === 1) {
     if (rest[0] === "prepare") return "prepareLaunch";
@@ -54,6 +86,8 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "readiness") return "getIsolationReadiness";
     if (rest[0] === "cancel") return "cancelLaunch";
     if (rest[0] === "attempts") return "listJobAttempts";
+    if (rest[0] === "queue") return "enqueueLaunch";
+    if (rest[0] === "unqueue") return "dequeueLaunch";
   }
   if (head === "event" && rest.length === 1) {
     if (rest[0] === "definition-save") return "saveEventDefinition";

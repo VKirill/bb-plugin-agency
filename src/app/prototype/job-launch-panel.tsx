@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRealtime } from "@get-bb/plugin-sdk/app";
-import { Button } from "./shared";
+import { Button, InfoHint, TextField } from "./shared";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import type { AgencyApi } from "../data/agency-api";
 import type { Job } from "./data";
 import {
@@ -46,6 +47,7 @@ import {
 } from "../data/job-lifecycle";
 import { attemptStatusEqual, type AttemptStatus } from "../data/job-team";
 import { jobEnvironmentEqual, type JobEnvironmentStatus } from "../data/job-environment";
+import { tr } from "../i18n";
 
 export function JobLaunchPanel({
   job,
@@ -71,11 +73,16 @@ export function JobLaunchPanel({
   const [items, setItems] = useState<JobLaunchItem[]>([]);
   const [listMessage, setListMessage] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<IsolationReadiness | null>(null);
+  // null until the first probe answers; a failed probe keeps its own message.
+  const [readinessProbe, setReadinessProbe] = useState<{ failed: string | null } | null>(null);
   const [prepare, setPrepare] = useState<PrepareLaunchView | null>(null);
   const [completion, setCompletion] = useState<CompletionView | null>(null);
   const [pending, setPending] = useState(false);
   const [lastLaunchOutcome, setLastLaunchOutcome] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopReason, setStopReason] = useState("");
+  const [stopPending, setStopPending] = useState(false);
   const fetchGate = useRef(createLiveRunsFetchGate());
   const jobRef = useRef(job);
   jobRef.current = job;
@@ -133,15 +140,17 @@ export function JobLaunchPanel({
     let isolationReady: boolean | null = null;
     if (!probed.ok) {
       setReadiness(null);
+      setReadinessProbe({ failed: failureNotice(probed.failure) });
       reportLaunchReady(false);
     } else {
       setReadiness(probed.value);
+      setReadinessProbe({ failed: null });
       reportLaunchReady(jobLaunchAllowedFromReadiness(probed.value));
       isolationReady = probed.value.isolationReady;
     }
     if (!current.recordId) {
       setItems([]);
-      setListMessage("Нет серверного id — список запусков не запрашиваем.");
+      setListMessage(tr("Нет серверного id — список запусков не запрашиваем."));
       reportAttemptStatus({ kind: "unknown" });
       reportEnvironment({ isolationReady, attempts: null });
       return;
@@ -163,7 +172,7 @@ export function JobLaunchPanel({
       if (receipt.ok) next[0] = { ...head, receipt: receipt.value };
     }
     setItems(next);
-    setListMessage(next.length ? null : "По этой задаче серверных попыток нет.");
+    setListMessage(next.length ? null : tr("Запусков по этой задаче ещё не было."));
     reportAttemptStatus(next[0] ? { kind: "state", state: next[0].attempt.state } : { kind: "none" });
     reportEnvironment({ isolationReady, attempts: next.length });
   }, [api]);
@@ -192,12 +201,12 @@ export function JobLaunchPanel({
     if (pending) return;
     if (action !== "prepare") {
       reportOutcome(ready.ok
-        ? "Кнопка запуска закрыта: среда или текущая попытка не разрешают prepare. RPC не вызывался."
+        ? tr("Запуск сейчас недоступен: задача не в бэклоге или очереди, либо у неё уже есть активный запуск.")
         : ready.message);
       return;
     }
     if (latest && mustNotRespawn({ attempt: latest.attempt, launchedKind: prepare?.launched?.kind })) {
-      reportOutcome("Повторный запуск заблокирован: нужна сверка или проверка, не новый запуск.");
+      reportOutcome(tr("Повторный запуск заблокирован: нужна сверка или проверка, не новый запуск."));
       return;
     }
     setPending(true);
@@ -213,7 +222,7 @@ export function JobLaunchPanel({
       await refresh();
       onChanged?.();
     } catch (error) {
-      const thrown = error instanceof Error ? error.message : "prepareLaunch оборвался без ответа сервера.";
+      const thrown = error instanceof Error ? error.message : tr("prepareLaunch оборвался без ответа сервера.");
       setLastLaunchOutcome(`prepareLaunch fail · thrown · ${thrown}`);
       reportOutcome(productServerReason(thrown));
     } finally {
@@ -249,7 +258,11 @@ export function JobLaunchPanel({
     onChanged?.();
   };
 
-  const readinessMessage = launchReadinessNotice(readiness, providerId);
+  const readinessMessage = !readinessProbe
+    ? tr("Проверяем готовность запуска…")
+    : readinessProbe.failed
+      ? tr("Готовность запуска не проверена: {reason}", { reason: readinessProbe.failed })
+      : launchReadinessNotice(readiness, providerId);
   const activeAttempt = Boolean(latest && isKnownActiveAttemptState(latest.attempt.state));
   const jobRunning = job.state === "running" || job.sourceState === "running";
   const envReadinessVisible = jobLaunchableState(job.state) || jobLaunchableState(job.sourceState);
@@ -266,7 +279,7 @@ export function JobLaunchPanel({
             receipt: latest.receipt ?? (launchId ? { needsReconciliation: latest.attempt.state === "unknown", launchId } : null),
             launchedKind: prepare?.launched?.kind,
           })
-          ? "Состояние неизвестно. Нужна сверка, повторный запуск не вызывается."
+          ? tr("Состояние неизвестно. Нужна сверка, повторный запуск не вызывается.")
           : listMessage);
   const technical = readiness
     ? technicalLaunchReason({ reasonCode: readiness.reasonCode, reason: readiness.reason })
@@ -276,7 +289,7 @@ export function JobLaunchPanel({
   const workThreadId = scopedAttemptThreadId(latest);
   const canceled = jobIsCanceled(job);
   const lastLaunchNote = latest && canceled
-    ? `${LAST_LAUNCH_UNACCEPTED}: ${launchStateLabel(latest.attempt.state)}`
+    ? `${tr(LAST_LAUNCH_UNACCEPTED)}: ${tr(launchStateLabel(latest.attempt.state))}`
     : null;
   const technicalBundle = [
     lastLaunchOutcome,
@@ -292,26 +305,76 @@ export function JobLaunchPanel({
     technical,
   ].filter((row): row is string => Boolean(row));
 
-  const isDone = job.state === "done";
+  const stopThreadId = latest?.receipt?.threadId || latest?.attempt.threadId || null;
+  const stoppable = Boolean(
+    latest && launchId && stopThreadId && job.revision && ["launching", "running", "waiting_input", "unknown"].includes(latest.attempt.state),
+  );
+  const runStop = async () => {
+    if (!latest || !launchId || !stopThreadId || !job.recordId || !job.revision || stopPending) return;
+    setStopPending(true);
+    const result = await api.cancelLaunch({
+      requestId: crypto.randomUUID(),
+      jobId: job.recordId,
+      attemptId: latest.attempt.attemptId,
+      expectedJobRevision: job.revision,
+      expectedAttemptRevision: latest.attempt.revision,
+      launchId,
+      threadId: stopThreadId,
+      reason: stopReason.trim(),
+    });
+    setStopPending(false);
+    if (!result.ok) {
+      notice(failureNotice(result.failure));
+      return;
+    }
+    setStopping(false);
+    setStopReason("");
+    notice(tr("Запуск остановлен. Задача в «Ожидает решения»: верните её в очередь, когда будете готовы запустить снова."));
+    onChanged?.();
+    void refresh();
+  };
+
+  const [queuePending, setQueuePending] = useState(false);
+  const runQueue = async (enqueue: boolean) => {
+    if (!job.recordId || !job.revision || queuePending) return;
+    setQueuePending(true);
+    const result = enqueue
+      ? await api.enqueueLaunch({ requestId: crypto.randomUUID(), jobId: job.recordId, expectedRevision: job.revision })
+      : await api.dequeueLaunch({ jobId: job.recordId });
+    setQueuePending(false);
+    if (!result.ok) {
+      notice(failureNotice(result.failure));
+      return;
+    }
+    notice(enqueue ? tr("Задача в очереди запуска: стартует сама, когда освободится слот.") : tr("Задача убрана из очереди запуска."));
+    onChanged?.();
+    void refresh();
+  };
+
+  // Once the result is handed in, launch controls are history: the decision block leads.
+  const isDone = job.state === "done" || job.state === "review" || job.state === "canceled";
   const content = (
     <>
-      {!hideReadyHint && (
-        <p className="text-xs text-muted-foreground">{handshakeReady ? PRODUCT_LAUNCH_READY : LAUNCH_HANDSHAKE_HINT}</p>
+      {!hideReadyHint && readinessProbe && (
+        <p className="text-xs text-muted-foreground">{tr(handshakeReady ? PRODUCT_LAUNCH_READY : LAUNCH_HANDSHAKE_HINT)}</p>
       )}
       {(canceled || latest) && (
         <dl className="grid gap-1 text-xs text-muted-foreground">
-          {canceled && <div data-testid="job-launch-current">{JOB_CANCELED_LABEL}</div>}
-          {!canceled && latest?.receipt?.persistError && <div>Ошибка: {productServerReason(latest.receipt.persistError.message)}</div>}
-          {!canceled && latest && <div>Состояние: {launchStateLabel(latest.attempt.state)}</div>}
-          {!canceled && completion?.runFailed && <div>Сбой: {productServerReason(completion.reason)}</div>}
+          {canceled && <div data-testid="job-launch-current">{tr(JOB_CANCELED_LABEL)}</div>}
+          {!canceled && latest?.receipt?.persistError && <div>{tr("Ошибка: {reason}", { reason: productServerReason(latest.receipt.persistError.message) })}</div>}
+          {!canceled && latest && <div>{tr("Состояние: {state}", { state: tr(launchStateLabel(latest.attempt.state)) })}</div>}
+          {!canceled && completion?.runFailed && <div>{tr("Сбой: {reason}", { reason: productServerReason(completion.reason) })}</div>}
         </dl>
       )}
       {reason && (
         <p className="text-xs text-muted-foreground">{productServerReason(reason)}</p>
       )}
+      {envReadinessVisible && !activeAttempt && readiness?.warnings?.map((warning) => (
+        <p key={warning} className="text-xs text-amber-700 dark:text-amber-400">{warning}</p>
+      ))}
       {technicalBundle.length > 0 && (
         <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer">Технические подробности</summary>
+          <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
           <div className="mt-1 space-y-1 break-words font-mono">
             {technicalBundle.map((row) => <p key={row}>{row}</p>)}
           </div>
@@ -323,9 +386,15 @@ export function JobLaunchPanel({
         </p>
       )}
       <JobWorkTimeline threadId={workThreadId} />
+      {job.launchQueue && !activeAttempt && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs" data-testid="launch-queue-state">
+          <p className="font-medium">{tr("В очереди запуска · позиция {position}", { position: job.launchQueue.position })}</p>
+          <p className="mt-0.5 text-muted-foreground">{job.launchQueue.waitingReason ? tr("Ждёт: {reason}", { reason: productServerReason(job.launchQueue.waitingReason) }) : tr("Стартует, как только позволят лимиты. Проверка каждые 15 секунд.")}</p>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={pending || action !== "prepare"} onClick={() => void runPrepare()}>
-          {pending && action === "prepare" ? "Запускаем…" : "Запустить"}
+          {pending && action === "prepare" ? tr("Запускаем…") : tr("Запустить")}
         </Button>
         <Button
           size="sm"
@@ -333,7 +402,7 @@ export function JobLaunchPanel({
           disabled={pending || action !== "reconcile"}
           onClick={() => void runReconcile()}
         >
-          Сверить
+          {tr("Сверить")}
         </Button>
         <Button
           size="sm"
@@ -348,18 +417,45 @@ export function JobLaunchPanel({
           })}
           onClick={() => void runInterpret()}
         >
-          {INTERPRET_PUBLICATION_LABEL}
+          {tr(INTERPRET_PUBLICATION_LABEL)}
         </Button>
-        {latest && <Button size="sm" variant="ghost" onClick={() => openRun(launchRouteId(latest))}>К запуску</Button>}
+        {latest && <Button size="sm" variant="ghost" onClick={() => openRun(launchRouteId(latest))}>{tr("Открыть запуск")}</Button>}
+        {stoppable && <Button size="sm" variant="outline" onClick={() => setStopping(true)}>{tr("Остановить запуск")}</Button>}
+        {!job.launchQueue && envReadinessVisible && !activeAttempt && readiness?.waitable && (
+          <Button size="sm" variant="outline" disabled={queuePending} onClick={() => void runQueue(true)}>{queuePending ? tr("Ставим…") : tr("В очередь запуска")}</Button>
+        )}
+        {job.launchQueue && !activeAttempt && (
+          <Button size="sm" variant="ghost" disabled={queuePending} onClick={() => void runQueue(false)}>{tr("Убрать из очереди")}</Button>
+        )}
+        <InfoHint title="Кнопки запуска">
+          <p><b>{tr("Запустить")}</b> — {tr("создаёт попытку: сотрудник получает поручение в отдельном треде на машине проекта.")}</p>
+          <p><b>{tr("Сверить")}</b> — {tr("перечитывает состояние треда, если попытка зависла в «неизвестно». Новый запуск не создаёт.")}</p>
+          <p><b>{tr("Сверить публикацию")}</b> — {tr("проверяет, опубликована ли версия результата, и переводит задачу на проверку, если тред закончил работу. Обычно это происходит само.")}</p>
+          <p><b>{tr("В очередь запуска")}</b> — {tr("когда упёрлись в лимит одновременных запусков или бюджет: задача стартует сама, как только лимит позволит. Срочные идут первыми.")}</p>
+          <p><b>{tr("Остановить запуск")}</b> — {tr("останавливает тред сотрудника. Задача перейдёт в «Ожидает решения», её можно вернуть в очередь и запустить снова.")}</p>
+        </InfoHint>
       </div>
+      <Dialog open={stopping} onOpenChange={(open) => { if (!stopPending) setStopping(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tr("Остановить запуск")}</DialogTitle>
+            <DialogDescription>{tr("Тред сотрудника будет остановлен, задача перейдёт в «Ожидает решения». Уже опубликованные версии останутся.")}</DialogDescription>
+          </DialogHeader>
+          <TextField label="Причина" value={stopReason} onChange={setStopReason} multiline rows={3} placeholder="Например: неверный бриф, перезапущу с уточнением." required maxLength={500} />
+          <DialogFooter>
+            <Button variant="outline" disabled={stopPending} onClick={() => setStopping(false)}>{tr("Отмена")}</Button>
+            <Button disabled={!stopReason.trim() || stopPending} onClick={() => void runStop()}>{stopPending ? tr("Останавливаем…") : tr("Остановить")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {items.length > 0 && (
         <div className="space-y-2 border-t border-border pt-3">
           {items.map((item) => {
             const id = launchRouteId(item);
             return (
               <div key={item.attempt.attemptId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span>{canceled ? `${LAST_LAUNCH_UNACCEPTED} · ` : ""}{launchStateLabel(item.attempt.state)} · попытка {item.attempt.attemptNo}</span>
-                <Button size="sm" variant="outline" onClick={() => openRun(id)}>Открыть</Button>
+                <span>{canceled ? `${tr(LAST_LAUNCH_UNACCEPTED)} · ` : ""}{tr("{state} · попытка {number}", { state: tr(launchStateLabel(item.attempt.state)), number: item.attempt.attemptNo })}</span>
+                <Button size="sm" variant="outline" onClick={() => openRun(id)}>{tr("Открыть")}</Button>
               </div>
             );
           })}
@@ -372,7 +468,7 @@ export function JobLaunchPanel({
     return (
       <details className="mt-3 border-t border-border/60 pt-2 text-xs text-muted-foreground" data-testid="job-launch-done-details">
         <summary className="cursor-pointer font-medium hover:text-foreground">
-          {`История запусков и сверка ${latest ? `(попытка ${latest.attempt.attemptNo}, ${launchStateLabel(latest.attempt.state).toLowerCase()})` : ""}`}
+          {latest ? tr("Запуски и сверка · попытка {number}, {state}", { number: latest.attempt.attemptNo, state: tr(launchStateLabel(latest.attempt.state)).toLowerCase() }) : tr("Запуски и сверка")}
         </summary>
         <div className="mt-3 space-y-3">
           {content}

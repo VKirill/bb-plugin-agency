@@ -83,7 +83,7 @@ const snapshot: WorkspaceSnapshot = {
   counts: { review: 1 },
   memberships: [
     { departmentId: "dep_editorial", agentId: "agt_writer01", role: "lead" },
-    { departmentId: "dep_editorial", agentId: "agt_review01", role: "member" },
+    { departmentId: "dep_editorial", agentId: "agt_review01", role: "executor" },
   ],
   agentVersions: [],
   processVersions: [],
@@ -209,9 +209,12 @@ describe("JobTeamBlock role pickers", () => {
     expect(container.textContent).toContain("Не назначены");
 
     failNext = true;
+    // The assignee is not offered as a reviewer, so the picker empties and comes back as a new element.
+    const addAgain = container.querySelector('select[aria-label="Добавить: проверяющего"]') as HTMLSelectElement | null;
+    expect(addAgain?.textContent).not.toContain("Анна");
     await act(async () => {
-      addReviewer!.value = "agt_review01";
-      addReviewer!.dispatchEvent(new Event("change", { bubbles: true }));
+      addAgain!.value = "agt_review01";
+      addAgain!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(persist.mock.calls.at(-1)?.[0]).toEqual({ reviewerAgentIds: ["agt_review01"], observerAgentIds: [] });
     expect(container.textContent).toContain("Марк");

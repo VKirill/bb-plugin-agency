@@ -1,0 +1,26 @@
+/*
+ * One grid for every job row: lead · department · assignee · age.
+ * The lead cell holds key and title; a subtask steps right inside it, with the
+ * arrow under the start of the parent key, so nesting reads like a tree while
+ * the trailing columns stay aligned. Columns hide by the width of the list
+ * itself, so rows stay aligned on the task workspace and inside project or
+ * department pages alike.
+ */
+.agency-job-list { container: agency-job-list / inline-size; }
+.agency-job-row {
+ display: grid;
+ grid-template-columns: minmax(0, 1fr) 3.5rem;
+ column-gap: 0.75rem;
+ align-items: center;
+}
+.agency-job-row > .agency-job-department,
+.agency-job-row > .agency-job-agent { display: none; }
+.agency-job-age { justify-self: end; }
+@container agency-job-list (min-width: 560px) {
+ .agency-job-row { grid-template-columns: minmax(0, 1fr) 8rem 3.5rem; }
+ .agency-job-row > .agency-job-agent { display: block; }
+}
+@container agency-job-list (min-width: 1000px) {
+ .agency-job-row { grid-template-columns: minmax(0, 1fr) 11rem 8rem 3.5rem; }
+ .agency-job-row > .agency-job-department { display: block; }
+}

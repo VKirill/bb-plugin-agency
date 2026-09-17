@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import { JOB_CANCELED_LABEL, LAST_LAUNCH_UNACCEPTED, jobIsCanceled } from "./job-lifecycle";
 import { launchStateLabel } from "./launch-rpc";
 
@@ -84,8 +85,8 @@ export function attemptStatusEqual(left: AttemptStatus, right: AttemptStatus): b
 }
 
 export function attemptStatusLabel(status: AttemptStatus): string {
-  if (status.kind === "unknown") return TEAM_ATTEMPT_UNKNOWN;
-  if (status.kind === "none") return TEAM_ATTEMPT_NONE;
+  if (status.kind === "unknown") return tr(TEAM_ATTEMPT_UNKNOWN);
+  if (status.kind === "none") return tr(TEAM_ATTEMPT_NONE);
   return launchStateLabel(status.state);
 }
 
@@ -94,8 +95,8 @@ export function currentWorkLabel(input: {
   assigned: JobTeamPerson;
   attemptLabel: string;
 }): string {
-  if (jobIsCanceled(input.job)) return JOB_CANCELED_LABEL;
-  if (input.attemptLabel === TEAM_ATTEMPT_NONE || !input.assigned) return input.attemptLabel;
+  if (jobIsCanceled(input.job)) return tr(JOB_CANCELED_LABEL);
+  if (input.attemptLabel === tr(TEAM_ATTEMPT_NONE) || !input.assigned) return input.attemptLabel;
   return `${input.assigned.name} · ${input.attemptLabel}`;
 }
 
@@ -106,9 +107,8 @@ export function historicalAttemptNote(input: {
 }): string | null {
   if (!jobIsCanceled(input.job) || input.attempt?.kind !== "state") return null;
   const state = attemptStatusLabel(input.attempt);
-  return input.assigned
-    ? `${LAST_LAUNCH_UNACCEPTED}: ${input.assigned.name} · ${state}`
-    : `${LAST_LAUNCH_UNACCEPTED}: ${state}`;
+  const label = tr(LAST_LAUNCH_UNACCEPTED);
+  return input.assigned ? `${label}: ${input.assigned.name} · ${state}` : `${label}: ${state}`;
 }
 
 export function provenDue(due: string | undefined): string | null {

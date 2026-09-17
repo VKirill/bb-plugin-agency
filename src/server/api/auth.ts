@@ -1,3 +1,4 @@
+import { callerAttemptForThread, callerThreadId } from "./caller";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { fail, ok, type DomainResult } from "../../domain";
 import type { ArtifactAuthor } from "../../shared/contracts";
@@ -52,10 +53,13 @@ export function activityActorFromContext(ctx: ServiceContext) {
 
 export function resolveRpcAccess(db: SqlDatabase): DomainResult<RpcAccess> {
   const bindings = listStoredBindings(db);
+  const threadId = callerThreadId();
+  const caller = threadId ? callerAttemptForThread(db, threadId) : null;
   return ok({
     ctx: {
       actor: { kind: "system" },
       allowedBindingIds: bindings.map((binding) => binding.id),
+      ...(caller ? { caller } : {}),
     },
   });
 }

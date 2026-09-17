@@ -1,4 +1,4 @@
-import { assertDepartmentOnBinding, assertJobTransition, fail, ok, type DomainResult } from "../../../domain";
+import { assertBindingActive, assertDepartmentOnBinding, assertJobTransition, fail, ok, type DomainResult } from "../../../domain";
 import type { HostFilePort } from "../../../host/file-port.js";
 import { requestIdSchema } from "../../../shared/contracts";
 import type { Job } from "../../../shared/contracts/job.js";
@@ -99,8 +99,10 @@ export function createPrepareRun(deps: PrepareRunDeps) {
 
       const department = deps.store.getDepartment(job.departmentId);
       if (!department) return fail("not_found", `department ${job.departmentId} not found`);
+      const active = assertBindingActive(binding);
+      if (!active.ok) return active;
       const links = deps.store.listProjectDepartments(binding.id);
-      const onBinding = assertDepartmentOnBinding(binding.id, department.id, links);
+      const onBinding = assertDepartmentOnBinding(binding.id, department.id, links, department.availability ?? "all");
       if (!onBinding.ok) return onBinding;
 
       if (!job.assignedAgentId) return fail("assignee_required", "job.assignedAgentId is required");
@@ -185,6 +187,8 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         helperSkillIds: roles.value.helperSkillIds,
         providerLimits: {},
         handoff: persistedInputs.value.handoff,
+        agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
+        knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id) ?? null,
       });
       if (!compiled.ok) return fail(compiled.error.code, compiled.error.message);
 
@@ -211,4 +215,8 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       });
     },
   };
+}
+
+function agencyRulesInput(rules: { id: string; version: number; hash: string; text: string } | null) {
+  return rules ? { versionId: rules.id, version: rules.version, hash: rules.hash, text: rules.text } : null;
 }

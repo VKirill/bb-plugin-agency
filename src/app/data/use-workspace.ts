@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRealtime, useRealtimeConnectionState } from "@get-bb/plugin-sdk/app";
+import { tr } from "../i18n";
 import type { Agent, Group, Job } from "../prototype/data";
 import type { AgencyApi } from "./agency-api";
 import type { RevisionConflict } from "../../shared/contracts";
+import type { MutationOutcome } from "./envelope";
 import { createRpcAgencyApi, type RpcCaller } from "./rpc-agency-api";
 import { EMPTY_SNAPSHOT, type WorkspaceSnapshot } from "./snapshot";
-import { mapAgents, mapDepartments, mapJobs, mapProjects, nextJobKey, parseDescription, queueCounts } from "./view-models";
-import { canCreateJob, failureNotice, newRequestId, persistAgentPatch, persistDepartmentPatch, persistJobPatch, persistProjectPatch } from "./persist";
+import { dueAtFromDate, mapAgents, mapDepartments, mapJobs, mapProjects, parseDescription, PRIORITY_CODE, queueCounts, splitDescription } from "./view-models";
+import { BRIEF_REQUIRED_NOTICE, canCreateJob, failureNotice, newRequestId, persistAgentPatch, persistDepartmentPatch, persistJobPatch, persistProjectPatch } from "./persist";
 import { persistCreateAgent, persistCreateBinding, persistCreateDepartment, type CreateAgentInput, type CreateBindingInput, type CreateDepartmentInput } from "./persist-create";
 import { EMPTY_BB_CATALOG } from "./capability-catalog";
 import type { BbCatalog } from "./store-commands";
@@ -63,6 +65,8 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     if (result.status === "ready") {
       applySnapshot(result.snapshot);
       hadReadySnapshot.current = true;
+      // The page is usable as soon as the snapshot lands; the BB catalog refreshes behind it.
+      setStatus("ready");
       if (opts?.refreshCatalog) {
         const listed = await resolvedApi.listBbCatalog();
         if (!request.current.isMounted || token !== reloadGeneration.current) return;
@@ -79,7 +83,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     }
     if (hadReadySnapshot.current) {
       setStatus("ready");
-      setMessage(result.message || "Не удалось обновить снимок. Предыдущие данные оставлены.");
+      setMessage(result.message || tr("Не удалось обновить снимок. Предыдущие данные оставлены."));
       return;
     }
     applySnapshot(EMPTY_SNAPSHOT);
@@ -108,7 +112,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
             if (hadReadySnapshot.current) setStatus("ready");
             else {
               setStatus("error");
-              setMessage((current) => current || "Не удалось обновить снимок.");
+              setMessage((current) => current || tr("Не удалось обновить снимок."));
             }
           }
         }
@@ -197,7 +201,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     const current = jobs.find((job) => job.id === next.id);
     if (!current) return false;
     if (!persistable) {
-      setMessage("Запись недоступна: сервер не отдал рабочий снимок.");
+      setMessage(tr("Запись недоступна: сервер не отдал рабочий снимок."));
       return false;
     }
     const result = await persistJobPatch(resolvedApi, snapshot, current, next);
@@ -217,23 +221,30 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     }
     const target = canCreateJob(snapshot, { bindingId: job.bindingId, departmentId: job.departmentId });
     if (!target) {
-      setMessage("Укажите проект и отдел этой задачи. Первый проект или папка чата не подставляются.");
+      setMessage(tr("Укажите проект и отдел этой задачи. Первый проект или папка чата не подставляются."));
+      return false;
+    }
+    const written = splitDescription(job.description);
+    if (!written.brief.trim() || !written.acceptance?.trim()) {
+      setMessage(tr(BRIEF_REQUIRED_NOTICE));
       return false;
     }
     const parsed = parseDescription(job.description);
-    const assignee = snapshot.agents.find((agent) => agent.name === job.agent || agent.id === job.assignedAgentId);
+    const assignee = snapshot.agents.find((agent) => agent.id === job.assignedAgentId) ?? snapshot.agents.find((agent) => agent.name === job.agent);
+    // The server assigns the key: a key counted in the browser can collide with a job created elsewhere.
     const result = await resolvedApi.createJob({
       requestId: newRequestId(),
-      key: nextJobKey(snapshot.jobs.map((item) => item.key)),
       bindingId: target.bindingId,
       departmentId: target.departmentId,
       title: job.title,
       brief: parsed.brief,
       acceptance: parsed.acceptance,
       parentJobId: job.parentId ? snapshot.jobs.find((item) => item.key === job.parentId)?.id ?? null : null,
-      assignedAgentId: assignee?.id ?? null,
-      priority: "normal",
-      dueAt: null,
+      assignedAgentId: job.assignment ? null : assignee?.id ?? null,
+      ...(job.assignment ? { assignment: job.assignment } : {}),
+      priority: PRIORITY_CODE[job.priority as keyof typeof PRIORITY_CODE] ?? "normal",
+      dueAt: dueAtFromDate(job.due),
+      ...(job.contract ? { contract: job.contract } : {}),
     });
     if (!result.ok) {
       setMessage(failureNotice(result.failure));
@@ -292,25 +303,25 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
 
   const addProject = useCallback(async (input: CreateBindingInput): Promise<boolean> => {
     if (!persistable) return false;
-    const result = await persistCreateBinding(resolvedApi, input);
+    const result = await persistCreateBinding(resolvedApi, input, snapshot.policies);
     if (!result.ok) {
       setMessage(failureNotice(result.failure));
       return false;
     }
     await reload();
     return true;
-  }, [persistable, reload, resolvedApi]);
+  }, [persistable, reload, resolvedApi, snapshot.policies]);
 
   const addAgent = useCallback(async (input: CreateAgentInput): Promise<boolean> => {
     if (!persistable) return false;
-    const result = await persistCreateAgent(resolvedApi, input);
+    const result = await persistCreateAgent(resolvedApi, input, snapshot.policies);
     if (!result.ok) {
       setMessage(failureNotice(result.failure));
       return false;
     }
     await reload();
     return true;
-  }, [persistable, reload, resolvedApi]);
+  }, [persistable, reload, resolvedApi, snapshot.policies]);
 
   const addDepartment = useCallback(async (input: CreateDepartmentInput): Promise<boolean> => {
     if (!persistable) return false;
@@ -322,6 +333,46 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     await reload();
     return true;
   }, [persistable, reload, resolvedApi]);
+
+  /** One server change from a project or department page: notice on failure, reload on success. */
+  const runChange = useCallback(async (change: () => Promise<MutationOutcome<unknown>>): Promise<boolean> => {
+    if (!persistable) return false;
+    const result = await change();
+    if (!result.ok) {
+      if (result.failure.kind === "revision_conflict") setConflict(result.failure.conflict);
+      setMessage(failureNotice(result.failure));
+      return false;
+    }
+    await reload();
+    return true;
+  }, [persistable, reload]);
+
+  const projectActions = useMemo(() => {
+    const revisionOf = (bindingId: string) => snapshot.bindings.find((binding) => binding.id === bindingId)?.revision ?? 1;
+    const lifecycle = { requestId: "", expectedRevision: 1, bindingId: "" };
+    const input = (bindingId: string) => ({ ...lifecycle, requestId: newRequestId(), expectedRevision: revisionOf(bindingId), bindingId });
+    return {
+      archive: (bindingId: string) => runChange(() => resolvedApi.archiveProjectBinding(input(bindingId))),
+      restore: (bindingId: string) => runChange(() => resolvedApi.restoreProjectBinding(input(bindingId))),
+      remove: (bindingId: string) => runChange(() => resolvedApi.deleteProjectBinding(input(bindingId))),
+      linkDepartment: (bindingId: string, departmentId: string) =>
+        runChange(() => resolvedApi.linkDepartment({ requestId: newRequestId(), bindingId, departmentId })),
+      unlinkDepartment: (bindingId: string, departmentId: string) =>
+        runChange(() => resolvedApi.unlinkDepartment({ requestId: newRequestId(), bindingId, departmentId })),
+      readRules: (bindingId: string) => resolvedApi.readProjectRules({ bindingId }),
+      saveRules: (bindingId: string, text: string, expectedHash: string | null) =>
+        resolvedApi.saveProjectRules({ requestId: newRequestId(), bindingId, text, expectedHash }),
+      setDepartmentAvailability: (departmentId: string, availability: "all" | "selected") =>
+        runChange(() =>
+          resolvedApi.setDepartmentAvailability({
+            requestId: newRequestId(),
+            expectedRevision: snapshot.departments.find((item) => item.id === departmentId)?.revision ?? 1,
+            departmentId,
+            availability,
+          }),
+        ),
+    };
+  }, [resolvedApi, runChange, snapshot.bindings, snapshot.departments]);
 
   const counts = useMemo(() => queueCounts(jobs, snapshot.counts), [jobs, snapshot.counts]);
 
@@ -351,6 +402,7 @@ export function useAgencyWorkspace(rpc: RpcCaller, api?: AgencyApi) {
     commitAgent,
     commitDepartment,
     commitProject,
+    projectActions,
     catalog,
     catalogError,
     refreshCatalog,

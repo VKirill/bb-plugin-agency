@@ -5,11 +5,12 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../shared/rpc-contract";
+import { tr } from "./i18n";
 
 export const EXECUTING_ACTIVITY_POLL_MS = 5_000;
 
 function inProgressLabel(count: number): string {
-  return `В работе: ${count}`;
+  return tr("В работе: {count}", { count });
 }
 
 export function AgencySidebarAccessory() {

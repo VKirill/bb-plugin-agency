@@ -12,6 +12,8 @@ export type ServiceContext = {
   /** Bindings this call may read or write. claimedBbProjectId is never access. */
   allowedBindingIds: readonly string[];
   clock?: () => string;
+  /** The Agency attempt whose thread made this call through the CLI; absent for the owner. */
+  caller?: { threadId: string; attemptId: string; jobId: string; agentId: string | null };
 };
 
 export type BindingScope = {

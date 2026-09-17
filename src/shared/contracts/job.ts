@@ -16,6 +16,40 @@ export const jobStateSchema = z.enum([
 
 export const jobPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 
+const contractLineSchema = z.string().trim().min(1).max(500);
+
+/**
+ * Execution contract: the boundaries of the work, set by whoever delegates it.
+ * It is pinned in the launch snapshot; a change after preparing invalidates the launch.
+ */
+export const jobContractSchema = z
+  .object({
+    /** Files, modules or areas the employee may change. */
+    mayChange: z.array(contractLineSchema).max(30).default([]),
+    /** What must stay untouched. */
+    mustNotTouch: z.array(contractLineSchema).max(30).default([]),
+    /** Checks that must pass before hand-in: commands, measurements, reviews. */
+    checks: z.array(contractLineSchema).max(30).default([]),
+  })
+  .strict();
+
+export type JobContract = z.infer<typeof jobContractSchema>;
+
+export function contractIsEmpty(contract: JobContract | null | undefined): boolean {
+  return !contract || (contract.mayChange.length === 0 && contract.mustNotTouch.length === 0 && contract.checks.length === 0);
+}
+
+/** Canonical text of a contract: pinned in the prompt and hashed in the snapshot. Empty contract → "". */
+export function contractText(contract: JobContract | null | undefined): string {
+  if (!contract || contractIsEmpty(contract)) return "";
+  const block = (title: string, lines: readonly string[]) => (lines.length ? [title, ...lines.map((line) => `- ${line}`)] : []);
+  return [
+    ...block("Можно менять:", contract.mayChange),
+    ...block("Нельзя трогать:", contract.mustNotTouch),
+    ...block("Проверки перед сдачей:", contract.checks),
+  ].join("\n");
+}
+
 export const jobSchema = revisionedRecordSchema
   .extend({
     id: opaqueIdSchema,
@@ -32,8 +66,28 @@ export const jobSchema = revisionedRecordSchema
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
     priority: jobPrioritySchema,
     dueAt: utcInstantSchema.nullable(),
+    /** Execution contract; absent when nothing is set. */
+    contract: jobContractSchema.optional(),
+    /** When the job last entered done/canceled. Listed in the workspace snapshot only. */
+    closedAt: utcInstantSchema.nullable().optional(),
   })
   .strict();
+
+/**
+ * How long a closed job stays on the working board. Hiding is a view rule: the
+ * job, its history and its accepted versions stay in the database. 0 = never hide.
+ */
+export const boardPolicySchema = z
+  .object({
+    hideClosedSubtasksAfterHours: z.number().min(0).max(8_760),
+    hideClosedMainTasksAfterHours: z.number().min(0).max(8_760),
+  })
+  .strict();
+
+export const DEFAULT_BOARD_POLICY: BoardPolicy = {
+  hideClosedSubtasksAfterHours: 1,
+  hideClosedMainTasksAfterHours: 24,
+};
 
 export const jobDependencySchema = z
   .object({
@@ -42,20 +96,31 @@ export const jobDependencySchema = z
   })
   .strict();
 
+/**
+ * Delegation from any chat should need only placement, title, brief and
+ * acceptance. Omitted key gets the next free AG-N inside the create transaction.
+ */
 export const createJobCommandSchema = createCommandSchema
   .extend({
-    key: jobKeySchema,
+    key: jobKeySchema.optional(),
     bindingId: opaqueIdSchema,
     departmentId: opaqueIdSchema,
     title: displayNameSchema,
     brief: z.string().trim().min(1).max(20_000),
     acceptance: z.string().trim().min(1).max(20_000),
-    parentJobId: opaqueIdSchema.nullable(),
-    assignedAgentId: opaqueIdSchema.nullable(),
+    parentJobId: opaqueIdSchema.nullable().default(null),
+    assignedAgentId: opaqueIdSchema.nullable().default(null),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
-    priority: jobPrioritySchema,
-    dueAt: utcInstantSchema.nullable(),
+    priority: jobPrioritySchema.default("normal"),
+    dueAt: utcInstantSchema.nullable().default(null),
+    contract: jobContractSchema.nullable().optional(),
+    /**
+     * Without assignedAgentId: let the server pick. `lead` — the department lead;
+     * `executor` / `reviewer` — the active launchable member of that role type
+     * with the fewest open jobs.
+     */
+    assignment: z.enum(["lead", "executor", "reviewer"]).optional(),
   })
   .strict();
 
@@ -72,6 +137,8 @@ export const updateJobCommandSchema = changeCommandSchema
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
     priority: jobPrioritySchema.optional(),
     dueAt: utcInstantSchema.nullable().optional(),
+    /** null clears the contract. */
+    contract: jobContractSchema.nullable().optional(),
   })
   .strict();
 
@@ -86,6 +153,7 @@ export const jobTransitionCommandSchema = changeCommandSchema
 export type JobState = z.infer<typeof jobStateSchema>;
 export type JobPriority = z.infer<typeof jobPrioritySchema>;
 export type Job = z.infer<typeof jobSchema>;
+export type BoardPolicy = z.infer<typeof boardPolicySchema>;
 export type JobDependency = z.infer<typeof jobDependencySchema>;
 export type CreateJobCommand = z.infer<typeof createJobCommandSchema>;
 export type UpdateJobCommand = z.infer<typeof updateJobCommandSchema>;

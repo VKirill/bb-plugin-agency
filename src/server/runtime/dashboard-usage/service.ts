@@ -20,6 +20,13 @@ import { collectJobSubtree, resolveRowRootJobId } from "./subtree.js";
 import { listJobsForBindings, listStoredBindings } from "../../api/catalog.js";
 import type { SqlDatabase } from "../../db/sql.js";
 import { addTotals, hasProvenUsageSemantics } from "./units.js";
+import {
+  DEFAULT_MODEL_PRICES,
+  MODEL_PRICES_CHECKED_AT,
+  estimateCostUsdCents,
+  priceForModel,
+  type ModelPriceTable,
+} from "./pricing.js";
 
 export function dashboardUsageCatalogFromSql(db: SqlDatabase): DashboardUsageCatalog {
   return {
@@ -41,6 +48,7 @@ export type DashboardUsageCatalog = {
 type AttemptDimensions = {
   bbProjectId: string | null;
   departmentId: string | null;
+  agentId: string | null;
   providerId: string | null;
   model: string | null;
   modelSource: "snapshot" | null;
@@ -64,6 +72,7 @@ function assignmentOf(prepared: readonly { threadId: string | null; dimensions: 
     row?.dimensions ?? {
       bbProjectId: null,
       departmentId: null,
+      agentId: null,
       providerId: null,
       model: null,
       modelSource: null,
@@ -75,6 +84,7 @@ export function createDashboardUsageReader(deps: {
   reads: Pick<InternalRunStoreReads, "listAttempts" | "getSnapshot">;
   catalog: DashboardUsageCatalog;
   events: TokenUsageEventPort;
+  prices?: () => ModelPriceTable;
 }) {
   return {
     async listDashboardUsage(ctx: ServiceContext, raw: unknown): Promise<DomainResult<ListDashboardUsageOutput>> {
@@ -113,11 +123,13 @@ export function createDashboardUsageReader(deps: {
         const listed = deps.reads.listAttempts(ctx, job.id);
         if (!listed.ok) return listed;
         for (const attempt of listed.value) {
+          if (input.attemptsFrom && attempt.createdAt < input.attemptsFrom) continue;
           const snapshot = deps.reads.getSnapshot(ctx, attempt.snapshotId);
           const dimensions: AttemptDimensions = snapshot.ok
             ? {
                 bbProjectId: snapshot.value.snapshot.binding.bbProjectId,
                 departmentId: snapshot.value.snapshot.job.departmentId,
+                agentId: snapshot.value.snapshot.agentVersion.agentId,
                 providerId: snapshot.value.snapshot.agentVersion.providerId,
                 model: snapshot.value.snapshot.agentVersion.model,
                 modelSource: "snapshot",
@@ -125,11 +137,13 @@ export function createDashboardUsageReader(deps: {
             : {
                 bbProjectId: bindingById.get(job.bindingId)?.bbProjectId ?? null,
                 departmentId: job.departmentId,
+                agentId: job.assignedAgentId,
                 providerId: null,
                 model: null,
                 modelSource: null,
               };
           if (input.departmentId && dimensions.departmentId !== input.departmentId) continue;
+          if (input.agentId && dimensions.agentId !== input.agentId) continue;
           if (input.providerId && dimensions.providerId !== input.providerId) continue;
           if (input.model && dimensions.model !== input.model) continue;
           prepared.push({
@@ -194,6 +208,23 @@ export function createDashboardUsageReader(deps: {
         });
       }
 
+      const prices = deps.prices?.() ?? DEFAULT_MODEL_PRICES;
+      const costByThread = new Map<string, number | null>();
+      const unpricedModels = new Set<string>();
+      for (const threadId of uniqueThreadIds) {
+        const units = foldByThread.get(threadId)!.units;
+        if (units.unknown) {
+          costByThread.set(threadId, null);
+          continue;
+        }
+        const model = assignmentOf(prepared, threadId).model;
+        const modelPrice = priceForModel(model, prices);
+        if (!modelPrice && model) unpricedModels.add(model);
+        costByThread.set(threadId, modelPrice ? estimateCostUsdCents(units, modelPrice) : null);
+      }
+      const pricedCosts = [...costByThread.values()].filter((value): value is number => value !== null);
+      const knownThreads = [...costByThread.keys()].filter((id) => !foldByThread.get(id)!.units.unknown);
+
       const rows: DashboardUsageRow[] = prepared.map((row) => {
         const fold = row.threadId ? foldByThread.get(row.threadId) : undefined;
         return {
@@ -210,7 +241,7 @@ export function createDashboardUsageReader(deps: {
           units: fold?.units ?? { unknown: true, reason: "no_thread" },
           sessionLatestTotal: fold?.sessionLatestTotal ?? null,
           resetObserved: fold?.reasons.includes("epoch_reset") ?? false,
-          costUsdCents: null,
+          costUsdCents: row.threadId ? (costByThread.get(row.threadId) ?? null) : null,
         };
       });
 
@@ -260,7 +291,14 @@ export function createDashboardUsageReader(deps: {
           ...(input.toDate ? { toDate: input.toDate } : {}),
           days,
         },
-        costUsdCents: null,
+        costUsdCents: pricedCosts.length > 0 ? Math.round(pricedCosts.reduce((sum, value) => sum + value, 0) * 100) / 100 : null,
+        cost: {
+          basis: "api_list_price_without_cache_writes",
+          pricesCheckedAt: MODEL_PRICES_CHECKED_AT,
+          pricedThreads: pricedCosts.length,
+          unpricedThreads: knownThreads.length - pricedCosts.length,
+          unpricedModels: [...unpricedModels].sort(),
+        },
         coverage: {
           jobCount: treeJobs.length,
           attemptCount: prepared.length,

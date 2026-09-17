@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tr } from "../i18n";
 
 const secretReference = z.string().regex(/^(?:Bearer )?\$\{[A-Z_][A-Z0-9_]*\}$/, "Используйте ссылку ${SECRET_NAME}, а не значение секрета");
 const references = z.record(z.string().min(1), secretReference);
@@ -16,19 +17,19 @@ export type McpConfig = z.infer<typeof serverSchema>;
 export interface CustomMcp { name: string; config: McpConfig; enabled: boolean; }
 const documentSchema = z.strictObject({ mcpServers: z.record(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/), serverSchema) });
 export function parseMcpImport(text: string, existingNames: string[] = []): CustomMcp[] {
-  if (text.length > 65536) throw new Error("Конфигурация слишком большая: максимум 64 К символов.");
+  if (text.length > 65536) throw new Error(tr("Конфигурация слишком большая: максимум 64 К символов."));
   let value: unknown;
-  try { value = JSON.parse(text); } catch { throw new Error("Некорректный JSON. Проверьте кавычки, запятые и скобки."); }
+  try { value = JSON.parse(text); } catch { throw new Error(tr("Некорректный JSON. Проверьте кавычки, запятые и скобки.")); }
   const result = documentSchema.safeParse(value);
   if (!result.success) {
     const issue = result.error.issues[0];
-    throw new Error(`${issue.path.join('.') || 'JSON'}: ожидается mcpServers с command/args/env либо url/headers; type — stdio, http или sse. В env и headers используйте ссылки \u0024{SECRET_NAME}. Неизвестные поля не поддерживаются.`);
+    throw new Error(tr("{path}: ожидается mcpServers с command/args/env либо url/headers; type — stdio, http или sse. В env и headers используйте ссылки {secret}. Неизвестные поля не поддерживаются.", { path: issue.path.join('.') || 'JSON', secret: '${SECRET_NAME}' }));
   }
   const entries = Object.entries(result.data.mcpServers);
-  if (!entries.length || entries.length > 20) throw new Error("Добавьте от 1 до 20 серверов за один импорт.");
+  if (!entries.length || entries.length > 20) throw new Error(tr("Добавьте от 1 до 20 серверов за один импорт."));
   const collision = entries.find(([name]) => existingNames.some(n => n.toLowerCase() === name.toLowerCase()));
   const names = entries.map(([name]) => name.toLowerCase());
-  if (collision || new Set(names).size !== names.length) throw new Error("Имя MCP уже используется. Укажите другое имя или отредактируйте существующее подключение.");
+  if (collision || new Set(names).size !== names.length) throw new Error(tr("Имя MCP уже используется. Укажите другое имя или отредактируйте существующее подключение."));
   return entries.map(([name, config]) => ({ name, config, enabled: true }));
 }
 export const mcpTransport = (config: McpConfig) => 'command' in config ? 'stdio' : config.type || 'http';

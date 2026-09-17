@@ -1,3 +1,4 @@
+import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { createRepositories } from "../../db/repositories.js";
 import type { SqlDatabase } from "../../db/sql";
 import { parseJson } from "../../db/sql";
@@ -5,16 +6,36 @@ import type { Activity, ActivityActor, Job } from "../../../shared/contracts";
 import { TERMINAL_RUN_ATTEMPT_STATES } from "../run-store/types.js";
 import type { IsolatedSendOutcome, IsolatedSendPort } from "../isolated-sdk/send-port.js";
 
-export const PARENT_WAKE_STATES = new Set(["review", "blocked", "waiting_input"]);
+/** Closing states wake the lead too: an owner may accept or cancel a subtask from the card. */
+export const PARENT_WAKE_STATES = new Set(["review", "blocked", "waiting_input", "done", "canceled"]);
+
+const CLOSING_HINT: Record<string, string> = {
+  done: "Подзадача закрыта. Если открытых подзадач не осталось, соберите итог главной задачи.",
+  canceled: "Подзадача отменена. Решите, нужна ли замена.",
+};
 
 export function parentWakeToken(activityId: string): string {
   return `agency.parentWake:${activityId}`;
 }
 
-export function formatParentWakeText(child: { key: string; state: string }, activityId: string): string {
+const CLOSING_HINT_EN: Record<string, string> = {
+  done: "Subtask closed. If no subtasks are left open, assemble the main job result.",
+  canceled: "Subtask canceled. Decide whether it needs a replacement.",
+};
+
+export function formatParentWakeText(child: { key: string; state: string }, activityId: string, lang: AgencyLanguage = agencyLanguage()): string {
+  if (lang === "en") {
+    return [
+      `${child.key} → ${child.state}.`,
+      "Read the child with getJob. This is not an acceptance and not access to its artifacts.",
+      ...(CLOSING_HINT_EN[child.state] ? [CLOSING_HINT_EN[child.state]] : []),
+      parentWakeToken(activityId),
+    ].join("\n");
+  }
   return [
     `${child.key} → ${child.state}.`,
     "Прочитайте ребёнка getJob. Это не приёмка и не доступ к артефактам.",
+    ...(CLOSING_HINT[child.state] ? [CLOSING_HINT[child.state]] : []),
     parentWakeToken(activityId),
   ].join("\n");
 }
@@ -54,8 +75,9 @@ function wakeStateFromActivity(row: Activity): string | null {
   return ref.id;
 }
 
-function sameBindingDepartment(parent: Job, child: Job): boolean {
-  return parent.bindingId === child.bindingId && parent.departmentId === child.departmentId;
+/** A lead hears about every subtask of its job, including ones handed to another department. */
+function sameBinding(parent: Job, child: Job): boolean {
+  return parent.bindingId === child.bindingId;
 }
 
 function latestJobTransitioned(db: SqlDatabase, jobId: string): Activity | null {
@@ -104,7 +126,7 @@ function resolveParentTarget(db: SqlDatabase, child: Job): ParentTarget | null {
   const repos = createRepositories(db);
   const parent = repos.job.get(child.parentJobId);
   if (!parent) return null;
-  if (!sameBindingDepartment(parent, child)) return null;
+  if (!sameBinding(parent, child)) return null;
   const head = db
     .prepare(
       `SELECT id, launch_id, thread_id, state, attempt_no FROM agency_run_attempt
@@ -140,7 +162,7 @@ function wakeStillCurrentHead(db: SqlDatabase, row: WakeRow): boolean {
   if (child.state !== row.child_state) return false;
   if (!isCurrentTransitionCausation(db, child.id, row.activity_id, row.causation_id)) return false;
   const parent = repos.job.get(row.parent_job_id);
-  if (!parent || !sameBindingDepartment(parent, child)) return false;
+  if (!parent || !sameBinding(parent, child)) return false;
   const target = resolveParentTarget(db, child);
   if (!target) return false;
   return (

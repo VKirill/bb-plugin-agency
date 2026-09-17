@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { RevisionConflict } from "../../shared/contracts";
 
 export type DomainError = { code: string; message: string };
@@ -27,7 +28,7 @@ export function isUnknownRpcMethod(error: unknown): boolean {
 
 export function parseDomainResult<T>(raw: unknown): MutationOutcome<T> {
   if (!raw || typeof raw !== "object") {
-    return { ok: false, failure: { kind: "transport", message: "Пустой ответ сервера." } };
+    return { ok: false, failure: { kind: "transport", message: tr("Пустой ответ сервера.") } };
   }
   const record = raw as Record<string, unknown>;
   if (record.code === "revision_conflict" && typeof record.actualRevision === "number") {
@@ -61,7 +62,7 @@ export function parseDomainResult<T>(raw: unknown): MutationOutcome<T> {
     ok: false,
     failure: {
       kind: "transport",
-      message: "Сервер вернул ответ без ok/value и без error — исход вызова неизвестен, не успех.",
+      message: tr("Сервер вернул ответ без ok/value и без error — исход вызова неизвестен, не успех."),
     },
   };
 }
@@ -74,5 +75,8 @@ export function isUnknownCaller(error: DomainError | MutationFailure): boolean {
 }
 
 export function conflictMessage(conflict: RevisionConflict): string {
-  return `Запись уже изменена (ревизия ${conflict.actualRevision}, ожидали ${conflict.expectedRevision}). Загрузите серверную версию или повторите правку.`;
+  return tr("Запись уже изменена (ревизия {actual}, ожидали {expected}). Загрузите серверную версию или повторите правку.", {
+    actual: conflict.actualRevision,
+    expected: conflict.expectedRevision,
+  });
 }

@@ -3,6 +3,7 @@ import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../../shared/rpc-contract";
 import type { PluginThreadEventName } from "@get-bb/plugin-sdk";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from "../../../components/ui/select";
+import { tr } from "../i18n";
 
 // Exhaustive against the installed SDK: a new/removed event requires catalog review.
 export const bbEvents = {
@@ -35,7 +36,7 @@ export const agencyEvents = {
 const telegramEvents:Record<string,string[]>={"telegram.notification.delivered":["Уведомление доставлено в Telegram","Квитанция доставки из API Telegram Projects. Обработка диспетчером планируется."]};
 const events: Record<string, string[]> = {...bbEvents,...agencyEvents,...telegramEvents};
 export function EventLabel({topic}:{topic:string}) {
- return <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1.5 text-sm"><span>{events[topic]?.[0]||"Пользовательское событие"}</span><span className="break-all text-xs font-normal text-muted-foreground">({topic})</span></span>;
+ return <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1.5 text-sm"><span>{tr(events[topic]?.[0]||"Пользовательское событие")}</span><span className="break-all text-xs font-normal text-muted-foreground">({topic})</span></span>;
 }
 export function EventPicker({value,onChange,label="Слушать событие"}:{value:string;onChange:(topic:string)=>void;label?:string}) {
  const rpc=useRpc<typeof rpcContract>();const[extra,setExtra]=useState<string[]>([]);
@@ -46,5 +47,5 @@ export function EventPicker({value,onChange,label="Слушать событие
   {title:"Задачи и workflow · события Агентства, планируются",items:Object.keys(agencyEvents)},
   ...(extra.length?[{title:"Telegram Projects · подключённый плагин",items:extra}]:[]),
  ];
- return <div className="space-y-3"><Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label} className="h-auto min-h-9 text-left [&>span]:line-clamp-none [&>span]:whitespace-normal"><SelectValue><EventLabel topic={value}/></SelectValue></SelectTrigger><SelectContent className="max-w-[calc(100vw-2rem)]">{!events[value]&&<SelectItem value={value}><EventLabel topic={value}/></SelectItem>}{groups.map(group=><SelectGroup key={group.title}><SelectLabel className="max-w-full whitespace-normal text-xs text-muted-foreground">{group.title}</SelectLabel>{group.items.map(topic=><SelectItem key={topic} value={topic} textValue={`${events[topic][0]} ${topic}`} className="py-2"><EventLabel topic={topic}/></SelectItem>)}</SelectGroup>)}</SelectContent></Select><p className="text-sm text-muted-foreground">{events[value]?.[1]||"Контракт этого уведомления определяется его отправителем."}</p><p className="text-xs text-muted-foreground">API BB: {Object.keys(bbEvents).length} событий · Агентство: {Object.keys(agencyEvents).length} примеров. В прототипе выбор не включает подписку и не запускает агентов.</p></div>;
+ return <div className="space-y-3"><Select value={value} onValueChange={onChange}><SelectTrigger aria-label={tr(label)} className="h-auto min-h-9 text-left [&>span]:line-clamp-none [&>span]:whitespace-normal"><SelectValue><EventLabel topic={value}/></SelectValue></SelectTrigger><SelectContent className="max-w-[calc(100vw-2rem)]">{!events[value]&&<SelectItem value={value}><EventLabel topic={value}/></SelectItem>}{groups.map(group=><SelectGroup key={group.title}><SelectLabel className="max-w-full whitespace-normal text-xs text-muted-foreground">{tr(group.title)}</SelectLabel>{group.items.map(topic=><SelectItem key={topic} value={topic} textValue={`${tr(events[topic][0])} ${topic}`} className="py-2"><EventLabel topic={topic}/></SelectItem>)}</SelectGroup>)}</SelectContent></Select><p className="text-sm text-muted-foreground">{tr(events[value]?.[1]||"Контракт этого уведомления определяется его отправителем.")}</p><p className="text-xs text-muted-foreground">{tr("API BB: {bbCount} событий · Агентство: {agencyCount} примеров. В прототипе выбор не включает подписку и не запускает агентов.",{bbCount:Object.keys(bbEvents).length,agencyCount:Object.keys(agencyEvents).length})}</p></div>;
 }

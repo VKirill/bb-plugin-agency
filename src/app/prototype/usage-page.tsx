@@ -14,7 +14,9 @@ import {
   type UsageGroupBy,
 } from "../data/usage-dashboard";
 import type { ListDashboardUsageOutput } from "../../shared/contracts/dashboard-usage";
+import type { BudgetStatusView } from "../../shared/rpc-contract";
 import { Empty } from "./shared";
+import { tr } from "../i18n";
 import { UsageDashboard } from "./usage-dashboard";
 import { useUsageRealtime } from "./usage-realtime";
 
@@ -44,6 +46,7 @@ export function UsagePage({
   const [payload, setPayload] = useState<ListDashboardUsageOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!demoMode);
+  const [budgets, setBudgets] = useState<BudgetStatusView[]>([]);
   const gate = useRef(createUsageFetchGate());
 
   useEffect(() => {
@@ -69,20 +72,24 @@ export function UsagePage({
     const token = gate.current.begin();
     setLoading(true);
     try {
-      const result = await api.listDashboardUsage(dashboardQueryFromFilter(filter));
+      const [result, budgetList] = await Promise.all([
+        api.listDashboardUsage(dashboardQueryFromFilter(filter)),
+        api.listBudgets ? api.listBudgets().catch(() => null) : Promise.resolve(null),
+      ]);
       if (!gate.current.accept(token)) return;
+      setBudgets(budgetList?.ok ? budgetList.value : []);
       if (!result.ok) {
         setPayload(null);
-        setError(result.failure.kind === "unavailable" ? STAGE1_UNAVAILABLE.usage : USAGE_LOAD_FAILED);
+        setError(result.failure.kind === "unavailable" ? tr(STAGE1_UNAVAILABLE.usage) : tr(USAGE_LOAD_FAILED));
         return;
       }
       const parsed = parseDashboardUsage(result.value);
       setPayload(parsed);
-      setError(parsed ? null : USAGE_LOAD_FAILED);
+      setError(parsed ? null : tr(USAGE_LOAD_FAILED));
     } catch {
       if (!gate.current.accept(token)) return;
       setPayload(null);
-      setError(USAGE_LOAD_FAILED);
+      setError(tr(USAGE_LOAD_FAILED));
     } finally {
       if (gate.current.accept(token)) setLoading(false);
     }
@@ -111,6 +118,7 @@ export function UsagePage({
       onGroupBy={setGroupBy}
       onFilter={setFilter}
       onOpenJob={openJob}
+      budgets={budgets}
     />
   );
 }

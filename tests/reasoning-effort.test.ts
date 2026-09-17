@@ -213,7 +213,7 @@ describe("typed spawn reasoningLevel", () => {
     if (!built.ok) return;
     expect(built.value.reasoningLevel).toBe("medium");
     expect(built.value.executionInputSources).toEqual({ reasoningLevel: "explicit" });
-    expect(built.value.prompt).toBe("Job brief for worker.");
+    expect(built.value.prompt).toContain("## Поручение (job)\nJob brief for worker.");
     expect("reasoningEffort" in built.value).toBe(false);
   });
 

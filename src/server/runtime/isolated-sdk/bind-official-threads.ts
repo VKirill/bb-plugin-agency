@@ -20,6 +20,11 @@ function readOptionalString(record: object, key: string): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function readOptionalNumber(record: object, key: string): number | undefined {
+  const value = Reflect.get(record, key);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function readNested(record: object, key: string): object | null | undefined {
   const value = Reflect.get(record, key);
   if (value === null) return null;
@@ -41,6 +46,10 @@ export function isolatedViewFromRecord(value: object): IsolatedThreadView {
     experimental_callerLaunchId: readOptionalString(value, "experimental_callerLaunchId"),
     experimental_callerAttemptId: readOptionalString(value, "experimental_callerAttemptId"),
     experimental_callerJobId: readOptionalString(value, "experimental_callerJobId"),
+    ...(readOptionalNumber(value, "updatedAt") !== undefined ? { updatedAt: readOptionalNumber(value, "updatedAt") } : {}),
+    ...(readOptionalNumber(value, "activeBackgroundAgentCount") !== undefined
+      ? { activeBackgroundAgentCount: readOptionalNumber(value, "activeBackgroundAgentCount") }
+      : {}),
     host: host ? { id: readOptionalString(host, "id") ?? "" } : null,
     environment: environment
       ? {

@@ -1,23 +1,24 @@
+import { tr } from "../i18n";
 import type { Job, State, TaskFile } from "../prototype/data";
 import { isOpaqueRecordId } from "./content-hash";
 
 export const WAITING_INPUT_STATUS_NOTICE =
-  "Пока открыт запрос ввода, статус не меняют с доски и из списка. Ответ из карточки пока недоступен.";
+  "Исполнитель ждёт ответа на вопрос: ответьте в карточке задачи, статус изменится сам.";
 
 export const KANBAN_ACTIVE_NOTICE =
   "Этот переход не делается перетаскиванием. Нужны проверка результата, приёмка версии или ответ на вопрос.";
 
 export const ACCEPT_THEN_DONE_NOTICE =
-  "Готово ставит сервер после acceptArtifactVersion и своей проверки. Канбан и смена статуса это не заменяют.";
+  "«Готово» ставится приёмкой результата: откройте задачу на проверке и нажмите «Принять результат».";
 
 export const ACCEPT_NO_TARGET_NOTICE =
-  "Нет выбранной версии с id, номером и хешем. Первый файл сам не подставляется. Откройте или укажите файл, который принимаете.";
+  "Выберите версию результата, которую принимаете.";
 
 export const ACCEPT_AMBIGUOUS_NOTICE =
-  "Несколько файлов с версиями. Выберите конкретную версию и хеш — первый в списке не принимается.";
+  "У задачи несколько версий результата. Выберите, какую принимаете.";
 
 export const ACCEPT_STALE_SELECTION_NOTICE =
-  "Выбранная версия изменилась. Приёмка сброшена — укажите id, номер и хеш заново.";
+  "Пока вы выбирали, появилась новая версия результата. Выберите версию заново.";
 
 export const INTERPRET_WAITING_NOTICE =
   "Пока задача ждёт ввода, проверка результата закрыта.";
@@ -71,9 +72,40 @@ export function interpretButtonDisabled(input: {
   return input.pending || !input.launchId || interpretCompletionLocked(input);
 }
 
-function activeLifecycle(job: Pick<Job, "state" | "sourceState">): boolean {
-  const from = job.sourceState || job.state;
-  return from === "queued" || from === "running" || from === "waiting_input";
+/**
+ * Statuses the owner may set by hand. Work states come from the work itself:
+ * «В работе» from a launch, «На проверке» from a published version, «Готово»
+ * from acceptance, «Ждёт ответа» from the worker's question. A running job is
+ * stopped from its card, not by picking «Отменено».
+ */
+export const MANUAL_STATUS_TARGETS: Readonly<Record<State, readonly State[]>> = {
+  backlog: ["queued", "canceled"],
+  queued: ["canceled"],
+  blocked: ["queued", "canceled"],
+  running: [],
+  waiting_input: [],
+  review: ["canceled"],
+  done: [],
+  canceled: [],
+};
+
+export const WORK_STATE_NOTICE =
+  "«В работе», «На проверке», «Готово» и «Ждёт ответа» ставит сама работа: запуск, сдача версии, приёмка и вопрос исполнителя.";
+
+export const STOP_RUN_FIRST_NOTICE =
+  "Задача в работе: сначала остановите запуск в карточке задачи, затем решайте, что с ней делать.";
+
+export function manualStatusOptions(state: State): State[] {
+  return [state, ...MANUAL_STATUS_TARGETS[state]];
+}
+
+function manualStatusRefusal(job: Pick<Job, "state" | "sourceState">, to: State, needsInput: boolean): string | null {
+  if (job.state === to) return null;
+  if (jobLifecycleLocked(job, needsInput)) return tr(WAITING_INPUT_STATUS_NOTICE);
+  if (to === "done") return tr(ACCEPT_THEN_DONE_NOTICE);
+  if (MANUAL_STATUS_TARGETS[job.state].includes(to)) return null;
+  if (job.state === "running") return tr(STOP_RUN_FIRST_NOTICE);
+  return tr(WORK_STATE_NOTICE);
 }
 
 export function jobKanbanMoveRefusal(
@@ -81,11 +113,7 @@ export function jobKanbanMoveRefusal(
   to: State,
   needsInput = false,
 ): string | null {
-  if (job.state === to) return null;
-  if (jobLifecycleLocked(job, needsInput)) return WAITING_INPUT_STATUS_NOTICE;
-  if (to === "done") return ACCEPT_THEN_DONE_NOTICE;
-  if (activeLifecycle(job) && (to === "review" || to === "waiting_input")) return KANBAN_ACTIVE_NOTICE;
-  return null;
+  return manualStatusRefusal(job, to, needsInput);
 }
 
 export function jobPersistStatusRefusal(
@@ -93,10 +121,7 @@ export function jobPersistStatusRefusal(
   to: State,
   needsInput = false,
 ): string | null {
-  if (job.state === to) return null;
-  if (jobLifecycleLocked(job, needsInput)) return WAITING_INPUT_STATUS_NOTICE;
-  if (to === "done") return ACCEPT_THEN_DONE_NOTICE;
-  return null;
+  return manualStatusRefusal(job, to, needsInput);
 }
 
 export function provenAcceptFiles(files: readonly TaskFile[]): TaskFile[] {
@@ -140,13 +165,13 @@ export function resolveAcceptTarget(
   const proven = provenAcceptFiles(files);
   const parsed = parseAcceptSelectionKey(selectedKey);
   if (!parsed) {
-    return { ok: false, reason: proven.length > 1 ? ACCEPT_AMBIGUOUS_NOTICE : ACCEPT_NO_TARGET_NOTICE };
+    return { ok: false, reason: tr(proven.length > 1 ? ACCEPT_AMBIGUOUS_NOTICE : ACCEPT_NO_TARGET_NOTICE) };
   }
   const live = proven.find((file) => {
     const target = fileToAcceptTarget(file);
     return Boolean(target && acceptSelectionKey(target) === acceptSelectionKey(parsed));
   });
-  if (!live) return { ok: false, reason: ACCEPT_STALE_SELECTION_NOTICE };
+  if (!live) return { ok: false, reason: tr(ACCEPT_STALE_SELECTION_NOTICE) };
   return { ok: true, target: parsed };
 }
 

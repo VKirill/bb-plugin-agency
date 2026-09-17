@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { AgencyApi } from "./agency-api";
 import type { MutationOutcome } from "./envelope";
 import { failureNotice, newRequestId } from "./persist";
@@ -65,7 +66,7 @@ export function liveJobLaunchReady(job: {
     };
   }
   if (typeof job.revision !== "number" || job.revision < 1) {
-    return { ok: false, message: "Нет положительной ревизии задачи — prepareLaunch не вызываем." };
+    return { ok: false, message: tr("Нет положительной ревизии задачи — prepareLaunch не вызываем.") };
   }
   return { ok: true, jobId: job.recordId!, expectedRevision: job.revision };
 }

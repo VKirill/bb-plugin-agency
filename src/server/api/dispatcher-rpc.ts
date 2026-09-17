@@ -1,3 +1,4 @@
+import type { DispatcherLaunchPort } from "../dispatcher/ports.js";
 import type { PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract } from "../../shared/rpc-contract";
 import type { SqlDatabase } from "../db/sql";
@@ -33,9 +34,9 @@ type DispatcherMethod =
 
 type DispatcherHandlers = Pick<PluginRpcHandlers<typeof rpcContract>, DispatcherMethod>;
 
-export function createDispatcherRpc(deps: { db: SqlDatabase }): DispatcherHandlers {
+export function createDispatcherRpc(deps: { db: SqlDatabase; launch?: DispatcherLaunchPort }): DispatcherHandlers {
   const { db } = deps;
-  const engine = { db };
+  const engine = { db, launch: deps.launch };
   const withAccess = <T>(run: (access: RpcAccess) => T) => {
     const access = resolveRpcAccess(db);
     if (!access.ok) return access;

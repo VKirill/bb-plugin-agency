@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { Job } from "../prototype/data";
 
 export type JobTreeNode = {
@@ -56,10 +57,10 @@ export function childProgressLabel(children: readonly { state: string }[]): stri
   const canceled = children.filter((job) => job.state === "canceled").length;
   const open = children.length - done - canceled;
   const parts: string[] = [];
-  if (done > 0) parts.push(`${done} готово`);
-  if (canceled === 1) parts.push("1 отменена");
-  else if (canceled > 1) parts.push(`${canceled} отменены`);
-  if (open > 0) parts.push(`${open} открыто`);
+  if (done > 0) parts.push(tr("{n} готово", { n: done }));
+  if (canceled === 1) parts.push(tr("1 отменена"));
+  else if (canceled > 1) parts.push(tr("{n} отменены", { n: canceled }));
+  if (open > 0) parts.push(tr("{n} открыто", { n: open }));
   return parts.join(" · ");
 }
 

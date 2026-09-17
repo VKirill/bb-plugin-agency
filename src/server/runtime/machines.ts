@@ -1,4 +1,5 @@
 import type { BbPluginApi } from '@get-bb/plugin-sdk';
+import { fail, ok, type DomainResult } from '../../domain';
 import { cliPolicySchema, type CliPolicy, type MachineInventory } from '../../shared/machine-contract';
 export function machineDirectory(bb:BbPluginApi) {
  const key=(hostId:string,providerId:string)=>`cli-policy:${encodeURIComponent(hostId)}:${encodeURIComponent(providerId)}`;
@@ -24,5 +25,30 @@ export function machineDirectory(bb:BbPluginApi) {
   await bb.storage.kv.set(key(input.hostId,input.providerId),input.policy);
   return {saved:true as const};
  };
- return {list,inspect,setPolicy};
+ /** Before a launch: the machine is online and the provider CLI is installed and not switched off. Unknown CLI status does not block. */
+ // Readiness is asked often by open task cards: a CLI status probe per card would be slow, so results live a minute.
+ const launchChecks=new Map<string,{at:number;result:DomainResult<void>}>();
+ const checkLaunch=async(input:{hostId:string;providerId:string}):Promise<DomainResult<void>>=>{
+  const cacheKey=`${input.hostId}:${input.providerId}`;
+  const cached=launchChecks.get(cacheKey);
+  if(cached&&Date.now()-cached.at<60_000)return cached.result;
+  const result=await probeLaunch(input);
+  launchChecks.set(cacheKey,{at:Date.now(),result});
+  return result;
+ };
+ const probeLaunch=async(input:{hostId:string;providerId:string}):Promise<DomainResult<void>>=>{
+  let host;
+  try{host=await bb.sdk.hosts.get({hostId:input.hostId});}catch{return fail('host_unavailable',`Машина ${input.hostId} не найдена в BB.`);}
+  const name=host.name||host.id;
+  if(host.status!=='connected')return fail('host_offline',`Машина «${name}» не в сети: сотрудник не запустится. Включите её или поставьте задачу в проект на другой машине.`);
+  const saved=cliPolicySchema.safeParse(await bb.storage.kv.get(key(input.hostId,input.providerId)));
+  if(saved.success&&saved.data==='disabled')return fail('provider_disabled',`CLI ${input.providerId} выключен для машины «${name}» в разделе «Машины».`);
+  try{
+   const cli=(await bb.sdk.hosts.providerCliStatus({hostId:input.hostId,signal:AbortSignal.timeout(12000)}))[input.providerId];
+   if(cli&&cli.installed===false)return fail('provider_cli_missing',`На машине «${name}» не установлен CLI ${cli.displayName||input.providerId}.`);
+   if(cli?.versionUnsupported)return fail('provider_cli_unsupported',`На машине «${name}» версия CLI ${cli.displayName||input.providerId} не поддерживается BB: обновите её.`);
+  }catch{/* status unknown: the run watch reports a thread that never starts */}
+  return ok(undefined);
+ };
+ return {list,inspect,setPolicy,checkLaunch};
 }

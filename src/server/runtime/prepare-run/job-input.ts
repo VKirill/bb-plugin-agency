@@ -196,6 +196,8 @@ export async function attachJobInput(
   if (source.bindingId !== target.bindingId) {
     return fail("foreign_scope", "source job is outside the target job binding; parentJobId is not a grant");
   }
+  const ownWork = deps.store.assertNotSelfReview(target, [source.id]);
+  if (!ownWork.ok) return ownWork;
   const opened = await openPinnedVersion({
     store: deps.store,
     db: deps.db,

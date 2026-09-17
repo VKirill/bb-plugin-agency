@@ -75,12 +75,12 @@ describe("JobDetail subtasks rendering", () => {
       root.render(createElement(JobDetail, { ...props, job: parent }) as ReactNode);
     });
 
-    const subtaskSection = Array.from(container.querySelectorAll("section")).find(s =>
-      s.textContent?.includes("Подзадачи")
-    );
+    const subtaskSection = container.querySelector('section[aria-label="Подзадачи"]');
     expect(subtaskSection).toBeDefined();
+    // Progress like Tasks: closed of total before the rows.
+    expect(subtaskSection!.textContent).toContain("1/3");
 
-    const buttons = subtaskSection!.querySelectorAll("button.flex.min-h-10");
+    const buttons = subtaskSection!.querySelectorAll("button.agency-subtask-row");
     expect(buttons.length).toBe(3);
 
     // Row 1: sub1 (done)
@@ -106,6 +106,18 @@ describe("JobDetail subtasks rendering", () => {
     expect(btn3.textContent).toContain("AG-2204");
     expect(btn3.textContent).toContain("Подготовка спецификации");
     expect(btn3.textContent).toContain("Sonnet · На проверке");
+
+    // A subtask card lists its siblings with progress and marks itself.
+    await act(async () => {
+      root.render(createElement(JobDetail, { ...props, job: sub2 }) as ReactNode);
+    });
+    const siblings = container.querySelector('section[aria-label="Подзадачи главной задачи"]');
+    expect(siblings?.textContent).toContain("AG-2201 · Разработка калькулятора");
+    expect(siblings?.textContent).toContain("1/3");
+    const current = siblings?.querySelector('button[aria-current="page"]');
+    expect(current?.textContent).toContain("AG-2203");
+    expect(current?.textContent).toContain("эта задача");
+    expect(siblings?.querySelectorAll("button.agency-subtask-row")).toHaveLength(3);
 
     await act(async () => {
       root.unmount();

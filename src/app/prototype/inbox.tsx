@@ -4,6 +4,7 @@ import type { DispatcherApi, ListedActionIntent } from "../data/dispatcher";
 import { inboxDecisionJobs } from "../data/inbox";
 import { intentsAwaitingApproval, LEGACY_NOTIFY_HINT } from "../data/dispatcher";
 import { AgentMark, Button, PageHead, TabBar, Status, Empty } from "./shared";
+import { tr } from "../i18n";
 import { DispatcherIntentList } from "./dispatcher-intents";
 import "./inbox.css";
 
@@ -41,17 +42,17 @@ export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, n
       <div className="flex flex-wrap items-center justify-between gap-2">
         <TabBar value={tab} onChange={setTab} tabs={dispatcher ? ["Нужно ваше решение", "Согласование", "Уведомления"] : ["Нужно ваше решение", "Уведомления"]} />
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{isRules ? `К согласованию: ${intents.length}` : isDecision ? `К рассмотрению: ${decisions.length}` : `Непрочитанных: ${unread}`}</span>
+          <span className="text-xs text-muted-foreground">{isRules ? tr("К согласованию: {count}", { count: intents.length }) : isDecision ? tr("К рассмотрению: {count}", { count: decisions.length }) : tr("Непрочитанных: {count}", { count: unread })}</span>
           {!isDecision && !isRules && (
             <Button size="sm" variant="ghost" disabled={!unread} onClick={() => setReadIds([...new Set([...readIds, ...updates.map((job) => job.id)])])}>
-              Прочитать все
+              {tr("Прочитать все")}
             </Button>
           )}
         </div>
       </div>
       {isRules && dispatcher ? (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">{LEGACY_NOTIFY_HINT}</p>
+          <p className="text-xs text-muted-foreground">{tr(LEGACY_NOTIFY_HINT)}</p>
           <DispatcherIntentList
             intents={intents}
             api={dispatcher}
@@ -67,10 +68,10 @@ export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, n
       ) : !list.length ? (
         <Empty title={isDecision ? "Ваших решений сейчас не требуется" : "Новых уведомлений нет"} description="Можно продолжить работу со списком задач." />
       ) : (
-        <ul className="divide-y divide-border border-y border-border" aria-label={isDecision ? "Запросы на решение" : "Уведомления о задачах"} data-testid="inbox-list">
+        <ul className="divide-y divide-border border-y border-border" aria-label={tr(isDecision ? "Запросы на решение" : "Уведомления о задачах")} data-testid="inbox-list">
           {list.map((job) => {
             const review = job.state === "review";
-            const action = review ? "Проверить" : "Открыть";
+            const action = review ? tr("Проверить") : tr("Открыть");
             return (
               <li key={job.id} className="agency-inbox-row hover:bg-muted/40" data-testid={`inbox-row-${job.id}`}>
                 <button
@@ -85,14 +86,14 @@ export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, n
                   </span>
                 </button>
                 <span className="agency-inbox-state">
-                  {isDecision ? <Status state={job.state} /> : <span className="text-xs text-muted-foreground">{readIds.includes(job.id) ? "Прочитано" : "Новое"}</span>}
+                  {isDecision ? <Status state={job.state} /> : <span className="text-xs text-muted-foreground">{tr(readIds.includes(job.id) ? "Прочитано" : "Новое")}</span>}
                 </span>
                 <Button
                   size="sm"
                   variant="ghost"
                   className="agency-inbox-action"
                   data-testid={`inbox-action-${job.id}`}
-                  aria-label={`${action} задачу: ${job.title}`}
+                  aria-label={tr("{action} задачу: {title}", { action, title: job.title })}
                   onClick={() => open(job)}
                 >
                   {action} <span aria-hidden="true">→</span>

@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { State } from "../prototype/data";
 
 /**
@@ -55,20 +56,20 @@ export function relativeAge(instant: string | null | undefined, now: number): st
   if (Number.isNaN(at)) return null;
   const elapsed = now - at;
   if (elapsed < 0) return null;
-  if (elapsed < MINUTE) return "только что";
-  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)} мин`;
-  if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)} ч`;
-  if (elapsed < WEEK) return `${Math.floor(elapsed / DAY)} дн`;
-  return `${Math.floor(elapsed / WEEK)} нед`;
+  if (elapsed < MINUTE) return tr("только что");
+  if (elapsed < HOUR) return tr("{n} мин", { n: Math.floor(elapsed / MINUTE) });
+  if (elapsed < DAY) return tr("{n} ч", { n: Math.floor(elapsed / HOUR) });
+  if (elapsed < WEEK) return tr("{n} дн", { n: Math.floor(elapsed / DAY) });
+  return tr("{n} нед", { n: Math.floor(elapsed / WEEK) });
 }
 
 export function jobAttention(job: { state: State; updatedAt?: string }, now: number): JobAttention {
   const age = relativeAge(job.updatedAt, now);
-  const reason = REASON[job.state];
+  const reason = tr(REASON[job.state]);
   if (job.state === "done" || job.state === "canceled") {
     return { tone: "none", age: null, hint: reason };
   }
-  const hint = age ? `${reason}. Без изменений ${age}` : reason;
+  const hint = age ? tr("{reason}. Без изменений {age}", { reason, age }) : reason;
   if (!HUMAN_BLOCKING_STATES.includes(job.state)) {
     return { tone: "quiet", age, hint };
   }

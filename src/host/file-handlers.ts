@@ -1,4 +1,4 @@
-import { hashBytes, readGuarded, removeGuarded, statGuarded, writeAtomicGuarded } from "./guarded-fs";
+import { hashBytes, readGuarded, removeGuarded, replaceGuarded, statGuarded, writeAtomicGuarded } from "./guarded-fs";
 import type { HostFileOpInput, HostFileOpOutput } from "./file-contract";
 
 /**
@@ -17,6 +17,19 @@ export async function handleHostFileOp(input: HostFileOpInput): Promise<HostFile
     );
     if (!written.ok) return { ok: false, code: written.error.code, message: written.error.message };
     return { ok: true, size: written.value.size, hash: written.value.hash };
+  }
+  if (input.op === "replace") {
+    if (input.bytesBase64 === undefined || input.expectedHash === undefined) {
+      return { ok: false, code: "invalid_file_op", message: "replace requires bytesBase64 and expectedHash" };
+    }
+    const replaced = await replaceGuarded(
+      input.canonicalRoot,
+      input.relativePath,
+      Buffer.from(input.bytesBase64, "base64"),
+      input.expectedHash,
+    );
+    if (!replaced.ok) return { ok: false, code: replaced.error.code, message: replaced.error.message };
+    return { ok: true, size: replaced.value.size, hash: replaced.value.hash };
   }
   if (input.op === "read") {
     const bytes = await readGuarded(input.canonicalRoot, input.relativePath);

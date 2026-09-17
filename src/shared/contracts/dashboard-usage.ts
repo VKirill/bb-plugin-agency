@@ -90,9 +90,22 @@ export const dashboardUsageRowSchema = z
     units: dashboardUsageUnitsSchema,
     sessionLatestTotal: tokenUsageTotalsSchema.nullable(),
     resetObserved: z.boolean(),
-    costUsdCents: z.null(),
+    /** Estimate at API list prices; null when the model has no price or usage is unknown. */
+    costUsdCents: z.number().nonnegative().nullable(),
   })
   .strict();
+
+export const dashboardCostCoverageSchema = z
+  .object({
+    basis: z.literal("api_list_price_without_cache_writes"),
+    pricesCheckedAt: z.string().min(1),
+    pricedThreads: z.number().int().nonnegative(),
+    unpricedThreads: z.number().int().nonnegative(),
+    unpricedModels: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export type DashboardCostCoverage = z.infer<typeof dashboardCostCoverageSchema>;
 
 export const listDashboardUsageInputSchema = z
   .object({
@@ -100,10 +113,14 @@ export const listDashboardUsageInputSchema = z
     rootJobId: opaqueIdSchema.optional(),
     claimedBbProjectId: bbProjectIdSchema.optional(),
     departmentId: opaqueIdSchema.optional(),
+    /** Employee of the attempt, from its snapshot. */
+    agentId: opaqueIdSchema.optional(),
     providerId: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     fromDate: calendarDateSchema.optional(),
     toDate: calendarDateSchema.optional(),
+    /** Only attempts started at or after this instant: a whole thread's cost goes to the month its attempt began. */
+    attemptsFrom: z.string().datetime({ offset: false }).optional(),
   })
   .strict();
 
@@ -131,7 +148,8 @@ export const listDashboardUsageOutputSchema = z
     totals: tokenUsageTotalsSchema.nullable(),
     allTime: dashboardAllTimeSchema,
     period: dashboardPeriodSchema,
-    costUsdCents: z.null(),
+    costUsdCents: z.number().nonnegative().nullable(),
+    cost: dashboardCostCoverageSchema.optional(),
     coverage: dashboardUsageCoverageSchema,
     days: z.array(dashboardUsageDaySchema),
     rows: z.array(dashboardUsageRowSchema),

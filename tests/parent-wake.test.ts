@@ -187,7 +187,8 @@ describe("parent wake", () => {
       requestId: requestId(),
       jobId: family.child.id,
       expectedRevision: current.revision,
-      reviewerAgentIds: [family.parent.assignedAgentId!],
+      // The assignee cannot review the same job, so the CRM edit bumps the revision through the title.
+      title: "Дочерняя после правки CRM",
     });
     expect(updated.ok).toBe(true);
     expect(family.live.seeded.store.getJob(family.child.id)!.revision).toBe(current.revision + 1);
@@ -313,7 +314,7 @@ describe("parent wake", () => {
     expect(wakes(db2)[0]?.send_state).toBe("unknown");
   });
 
-  it("skips a child without parent or with a department mismatch", async () => {
+  it("skips a child without parent and wakes the lead for a subtask in another department", async () => {
     const db = openDb();
     const family = await seedFamily(db);
     const orphan = family.live.seeded.store.createJob(family.live.seeded.ctx, {
@@ -377,7 +378,7 @@ describe("parent wake", () => {
       to: "blocked",
     });
     expect(blockedForeign.ok).toBe(true);
-    expect(wakes(db).filter((row) => row.child_job_id === foreign.value.id)).toHaveLength(0);
+    expect(wakes(db).filter((row) => row.child_job_id === foreign.value.id)).toHaveLength(1);
   });
 
   it("does not recover an older review after reentry onto a new parent attempt", async () => {

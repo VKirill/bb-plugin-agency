@@ -16,6 +16,7 @@ import {
 import { NEEDS_INPUT_COMMENT_HINT, needsInputSourceLabel, shouldClearNeedsInputAfterAnswer } from "../data/needs-input";
 import { failureNotice } from "../data/persist";
 import { Button } from "./shared";
+import { tr } from "../i18n";
 
 export function JobNeedsInputPanel({
   record,
@@ -63,11 +64,11 @@ export function JobNeedsInputPanel({
 
   const submit = async (mode: "send" | "reconcile") => {
     if (action === "wait") {
-      notice(ANSWER_QUEUED_NOTICE);
+      notice(tr(ANSWER_QUEUED_NOTICE));
       return;
     }
     if (action === "refuse") {
-      notice(sendState === "rejected" ? ANSWER_REJECTED_NOTICE : ANSWER_STALE_WAIT_NOTICE);
+      notice(tr(sendState === "rejected" ? ANSWER_REJECTED_NOTICE : ANSWER_STALE_WAIT_NOTICE));
       return;
     }
     if (mode === "send" && !canSend) return;
@@ -93,7 +94,7 @@ export function JobNeedsInputPanel({
     });
     setPending(false);
     if (!result.ok) {
-      notice(result.reason ?? (result.failure ? failureNotice(result.failure) : ANSWER_STALE_WAIT_NOTICE));
+      notice(result.reason ?? (result.failure ? failureNotice(result.failure) : tr(ANSWER_STALE_WAIT_NOTICE)));
       return;
     }
     setSendState(result.value.sendState);
@@ -104,30 +105,30 @@ export function JobNeedsInputPanel({
       sendState: result.value.sendState,
     });
     if (result.value.sendState === "queued") {
-      notice(ANSWER_QUEUED_NOTICE);
+      notice(tr(ANSWER_QUEUED_NOTICE));
       return;
     }
     if (result.value.sendState === "unknown" || result.value.sendState === "needs_reconciliation") {
-      notice(ANSWER_RECONCILE_NOTICE);
+      notice(tr(ANSWER_RECONCILE_NOTICE));
       return;
     }
     if (result.value.sendState === "rejected") {
-      notice(ANSWER_REJECTED_NOTICE);
+      notice(tr(ANSWER_REJECTED_NOTICE));
       return;
     }
     if (shouldClearNeedsInputAfterAnswer(result.value.sendState)) {
       notice(mode === "reconcile"
-        ? "Сверка нашла доставку. Исполнитель продолжает ту же работу."
-        : "Ответ принят. Исполнитель продолжает ту же работу.");
+        ? tr("Сверка нашла доставку. Исполнитель продолжает ту же работу.")
+        : tr("Ответ принят. Исполнитель продолжает ту же работу."));
       onChanged();
     }
   };
 
   return (
-    <section aria-label="Вопрос исполнителя" className="mb-6 rounded-xl border border-foreground/20 bg-muted/60 p-5" data-testid="needs-input-panel">
-      <h2 className="text-base font-semibold">Нужен ответ, чтобы продолжить</h2>
+    <section aria-label={tr("Вопрос исполнителя")} className="mb-6 rounded-xl border border-foreground/20 bg-muted/60 p-5" data-testid="needs-input-panel">
+      <h2 className="text-base font-semibold">{tr("Нужен ответ, чтобы продолжить")}</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        wait {record.waitId} · попытка {record.attemptId} · thread {record.threadId}
+        {tr("Исполнитель остановился и ждёт ответа. Ответ уйдёт ему в тред, работа продолжится сама.")}
       </p>
       <ol className="mt-3 list-decimal space-y-3 pl-5 text-sm">
         {record.questions.map((item) => (
@@ -136,12 +137,12 @@ export function JobNeedsInputPanel({
             <ul className="mt-1 list-none space-y-0.5 text-xs text-muted-foreground">
               {item.sourceRefs.map((ref) => (
                 <li key={`${ref.kind}:${ref.id}`}>
-                  {needsInputSourceLabel(ref.kind)}: <span className="font-mono">{ref.id}</span>
+                  {tr(needsInputSourceLabel(ref.kind))}: <span className="font-mono">{ref.id}</span>
                 </li>
               ))}
             </ul>
             <label className="mt-2 block text-xs text-muted-foreground" htmlFor={`needs-input-answer-${item.id}`}>
-              Ответ на {item.id}
+              {tr("Ваш ответ")}
             </label>
             <textarea
               id={`needs-input-answer-${item.id}`}
@@ -162,7 +163,7 @@ export function JobNeedsInputPanel({
           disabled={!canSend}
           onClick={() => void submit("send")}
         >
-          {pending ? "Отправляем…" : "Ответить исполнителю"}
+          {pending ? tr("Отправляем…") : tr("Ответить исполнителю")}
         </Button>
         {canReconcile && (
           <Button
@@ -172,12 +173,12 @@ export function JobNeedsInputPanel({
             disabled={pending}
             onClick={() => void submit("reconcile")}
           >
-            Сверить доставку
+            {tr("Сверить доставку")}
           </Button>
         )}
       </div>
       <p className="mt-3 text-xs text-muted-foreground" data-testid="needs-input-comment-hint">
-        {NEEDS_INPUT_COMMENT_HINT}
+        {tr(NEEDS_INPUT_COMMENT_HINT)}
       </p>
     </section>
   );

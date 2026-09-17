@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, realpath, rename, stat as statFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fail, ok, type DomainResult } from "../domain";
 import { isPathInside, joinUnderRoot } from "./safe-path";
@@ -80,6 +80,44 @@ export async function resolveGuardedPath(
 
 async function unlinkOwn(path: string): Promise<void> {
   await unlink(path).catch(() => undefined);
+}
+
+/**
+ * Replace a mutable project file (for example `.bb/AGENTS.md`) atomically.
+ * The caller states the hash it read; a different current file is a conflict,
+ * not an overwrite. A symlink inside the root is followed to its real file.
+ */
+export async function replaceGuarded(
+  canonicalRoot: string,
+  relativePath: string,
+  bytes: Uint8Array,
+  expectedHash: string | null,
+): Promise<DomainResult<HostFileStat>> {
+  const dest = await resolveGuardedPath(canonicalRoot, relativePath);
+  if (!dest.ok) return dest;
+  await mkdir(dirname(dest.value), { recursive: true, mode: 0o755 });
+  const destAfter = await resolveGuardedPath(canonicalRoot, relativePath);
+  if (!destAfter.ok) return destAfter;
+  let current: Buffer | undefined;
+  try {
+    current = await readFile(destAfter.value);
+  } catch (error) {
+    if (!isNotFound(error)) return fail("host_file_error", error instanceof Error ? error.message : String(error));
+  }
+  const currentHash = current ? hashBytes(current) : null;
+  if (currentHash !== expectedHash) {
+    return fail("file_changed", `${relativePath} changed on the host since it was read`);
+  }
+  const mode = current ? (await statFile(destAfter.value)).mode & 0o777 : 0o644;
+  const ownTemp = `${destAfter.value}.tmp-${randomUUID()}`;
+  try {
+    await writeFile(ownTemp, bytes, { flag: "wx", mode });
+    await rename(ownTemp, destAfter.value);
+  } catch (error) {
+    await unlinkOwn(ownTemp);
+    return fail("host_file_error", error instanceof Error ? error.message : String(error));
+  }
+  return ok({ size: bytes.byteLength, hash: hashBytes(bytes) });
 }
 
 export async function writeAtomicGuarded(

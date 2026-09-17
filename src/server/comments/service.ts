@@ -2,6 +2,7 @@ import { fail, type DomainResult } from "../../domain";
 import {
   JOB_COMMENT_KIND,
   createJobCommentRpcSchema,
+  intakeReferencesComplete,
   type Activity,
 } from "../../shared/contracts";
 import type { ContextSnapshot } from "../runtime/context-snapshot/types";
@@ -35,6 +36,12 @@ export function createJobComment(
 ): DomainResult<Activity> {
   const parsed = createJobCommentRpcSchema.safeParse(input);
   if (!parsed.success) return fail("invalid_command", parsed.error.message);
+  if (!intakeReferencesComplete(parsed.data.references)) {
+    return fail(
+      "invalid_command",
+      "intake assessment needs intake_size, intake_risk and intake_decision exactly once each",
+    );
+  }
   const scoped = deps.store.scopedJob(ctx, parsed.data.jobId, parsed.data.claimedBbProjectId);
   if (!scoped.ok) return scoped;
 

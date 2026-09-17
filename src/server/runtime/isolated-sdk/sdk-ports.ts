@@ -24,6 +24,9 @@ export type IsolatedThreadView = {
   experimental_callerJobId?: string;
   host?: { id: string } | null;
   environment?: { id?: string; hostId?: string; path?: string | null } | null;
+  /** Epoch ms of the last thread update; a sign of life for the run watch. */
+  updatedAt?: number;
+  activeBackgroundAgentCount?: number;
 };
 
 export type IsolatedThreadsApi = {

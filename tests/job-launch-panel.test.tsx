@@ -71,7 +71,7 @@ const snapshot: WorkspaceSnapshot = {
     updatedAt: "2026-09-14T00:00:00Z",
   }],
   counts: { backlog: 1 },
-  memberships: [{ departmentId: "dep_editorial", agentId: "agt_b1fe6a357a7e8736a896c649", role: "member" }],
+  memberships: [{ departmentId: "dep_editorial", agentId: "agt_b1fe6a357a7e8736a896c649", role: "executor" }],
   agentVersions: [{
     id: "ver_writer01",
     agentId: "agt_b1fe6a357a7e8736a896c649",
@@ -183,6 +183,26 @@ describe("JobLaunchPanel mapped click", () => {
       await Promise.resolve();
     });
     expect(container.querySelector('[data-testid="launch-outcome"]')?.textContent).toBe(LAUNCH_RPC_UNREGISTERED);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("says readiness is being checked instead of a missing provider while the probe is pending", async () => {
+    let answer: ((value: { ok: true; value: IsolationReadiness }) => void) | undefined;
+    const api = {
+      ...launchApi(async () => ({ ok: false, failure: { kind: "unavailable", message: LAUNCH_RPC_UNREGISTERED } })),
+      getIsolationReadiness: () => new Promise((resolve) => { answer = resolve; }),
+    } as unknown as AgencyApi;
+    const { container, root } = await mountPanel(api, []);
+    expect(container.textContent).toContain("Проверяем готовность запуска…");
+    expect(container.textContent).not.toContain("нет providerId");
+    expect(container.textContent).not.toContain("Запуск откроется, когда среда подтвердит");
+    await act(async () => {
+      answer?.({ ok: true, value: readyReadiness });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(container.textContent).not.toContain("Проверяем готовность запуска…");
     await act(async () => { root.unmount(); });
   });
 

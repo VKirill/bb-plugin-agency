@@ -1,9 +1,12 @@
-export type NamedPlacement = { id: string; name: string };
+import { tr } from "../i18n";
+
+/** availability is set for departments only; omitted means the department is open to all projects. */
+export type NamedPlacement = { id: string; name: string; availability?: "all" | "selected" };
 export type ProjectDepartmentLink = { bindingId: string; departmentId: string };
 
-export const JOB_CREATE_HINT = "Укажите название, проект и отдел.";
+export const JOB_CREATE_HINT = "Поручение отделу: что сделать, как проверить результат и кто отвечает. Задача создаётся в бэклоге, запуск — из её карточки.";
 export const JOB_CREATE_NO_DEPARTMENTS =
-  "У выбранного проекта нет связанных отделов. Подключите отдел в карточке проекта, затем создайте задачу.";
+  "Для выбранного проекта нет доступных отделов. Создайте отдел или откройте доступ отдела к этому проекту.";
 
 export function resolveDepartmentId(
   departments: readonly NamedPlacement[],
@@ -39,7 +42,7 @@ export function departmentsForBinding(
   const allowed = new Set(
     links.filter((row) => row.bindingId === bindingId).map((row) => row.departmentId),
   );
-  return departments.filter((item) => allowed.has(item.id));
+  return departments.filter((item) => item.availability !== "selected" || allowed.has(item.id));
 }
 
 export function sanitizeDepartmentId(
@@ -79,12 +82,12 @@ export function canConfirmPlacement(
   bindingId: string,
   departmentId: string,
   links: readonly ProjectDepartmentLink[],
+  departments: readonly NamedPlacement[] = [],
 ): boolean {
-  return Boolean(
-    bindingId &&
-      departmentId &&
-      links.some((row) => row.bindingId === bindingId && row.departmentId === departmentId),
-  );
+  if (!bindingId || !departmentId) return false;
+  const department = departments.find((item) => item.id === departmentId);
+  if (department && department.availability !== "selected") return true;
+  return links.some((row) => row.bindingId === bindingId && row.departmentId === departmentId);
 }
 
 export function placementFields(
@@ -120,12 +123,13 @@ export type DepartmentMembership = {
   id: string;
   members?: readonly string[];
   lead?: string;
+  memberRoles?: Readonly<Record<string, string>>;
 };
 
-function membershipRoleLabel(role: string): string {
-  if (role === "lead") return "руководитель";
-  if (role === "reviewer") return "рецензент";
-  if (role === "member") return "сотрудник";
+export function membershipRoleLabel(role: string): string {
+  if (role === "lead") return tr("руководитель");
+  if (role === "reviewer") return tr("проверяющий");
+  if (role === "executor" || role === "member") return tr("исполнитель");
   return role;
 }
 
@@ -152,9 +156,9 @@ export function assigneeMembershipRole(
   agentId: string,
   department: DepartmentMembership | undefined,
 ): string {
-  if (!department) return "member";
+  if (!department) return "executor";
   if (department.lead === agentId) return "lead";
-  return "member";
+  return department.memberRoles?.[agentId] === "reviewer" ? "reviewer" : "executor";
 }
 
 export function assigneeOptionLabel(
@@ -195,7 +199,7 @@ export function assigneeChoiceOptions(
     const stray = agents.find((item) => item.id === currentAssignedId);
     choices.splice(1, 0, {
       value: currentAssignedId,
-      label: `${stray?.name || "Сотрудник"} · не в этом отделе`,
+      label: `${stray?.name || tr("Сотрудник")} · ${tr("не в этом отделе")}`,
     });
   }
   return choices;

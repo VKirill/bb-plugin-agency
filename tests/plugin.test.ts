@@ -12,7 +12,7 @@ describe("agency notification scaffold", () => {
     }});
     try {
       await plugin(bb);
-      expect(await harness.behavior.callRpc("uiContext", null)).toEqual({ hosts: [{id:"host-mini",name:"Mac mini"}] });
+      expect(await harness.behavior.callRpc("uiContext", null)).toEqual({ hosts: [{id:"host-mini",name:"Mac mini"}], primaryHostId: null });
       expect(harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
     } finally { await harness.lifecycle.dispose(); }
   });

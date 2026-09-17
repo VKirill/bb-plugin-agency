@@ -21,8 +21,11 @@ export function bindingPlacementLabel(item: {
   bbProjectId: string;
   canonicalRoot: string;
   hostName?: string | null;
+  sectionPath?: string | null;
 }): string {
   const project = item.bbProjectName?.trim() || item.bbProjectId;
   const folder = item.canonicalRoot.split("/").filter(Boolean).at(-1) || item.canonicalRoot;
-  return item.hostName?.trim() ? `${project} · ${folder} · ${item.hostName.trim()}` : `${project} · ${folder}`;
+  // Sections read like the BB sidebar; a root folder named like the project is not repeated.
+  const place = item.sectionPath?.trim() ? `${project} / ${item.sectionPath.trim()}` : folder === project ? project : `${project} · ${folder}`;
+  return item.hostName?.trim() ? `${place} · ${item.hostName.trim()}` : place;
 }

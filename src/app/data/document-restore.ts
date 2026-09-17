@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { TaskFile } from "../prototype/data";
 import type { AgencyApi } from "./agency-api";
 import { decodeArtifactBytes } from "./content-hash";
@@ -58,7 +59,7 @@ export async function restoreDocumentFromPreview(
       ok: false,
       failure: {
         kind: "domain",
-        error: { code: "preview_mismatch", message: "Цель превью не совпала с открытой версией." },
+        error: { code: "preview_mismatch", message: tr("Цель превью не совпала с открытой версией.") },
       },
     };
   }
@@ -172,9 +173,9 @@ export function restoreFailureMessage(outcome: MutationOutcome<unknown>): string
   if (outcome.ok) return "";
   if (outcome.failure.kind === "domain") {
     const code = outcome.failure.error.code;
-    if (code === "preview_unresolved") return "Этот файл не является документом агентства. Откройте его из задачи.";
+    if (code === "preview_unresolved") return tr("Этот файл не является документом агентства. Откройте его из задачи.");
     if (code === "preview_mismatch" || code === "preview_ambiguous" || code === "not_found") {
-      return "Не удалось восстановить документ. Откройте его снова из задачи.";
+      return tr("Не удалось восстановить документ. Откройте его снова из задачи.");
     }
   }
   return failureNotice(outcome.failure);

@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { TaskFile } from "../prototype/data";
 
 const OPAQUE_ID = /^[a-z][a-z0-9]*_[a-z0-9]{8,48}$/;
@@ -73,8 +74,8 @@ export function decodeArtifactBytes(bytesBase64: string, kind: TaskFile["kind"],
 }
 
 export function artifactAuthorLabel(author: { kind: string } | undefined): string {
-  if (!author || author.kind === "system") return "Система";
-  if (author.kind === "user") return "Вы";
-  if (author.kind === "run") return "Запуск";
-  return "Система";
+  if (!author || author.kind === "system") return tr("Система");
+  if (author.kind === "user") return tr("Вы");
+  if (author.kind === "run") return tr("Запуск");
+  return tr("Система");
 }

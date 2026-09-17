@@ -1,4 +1,19 @@
+import { SAVED_VIEWS_MIGRATION } from "../insights/archive";
+import { GOALS_MIGRATION } from "../organization/goals";
+import { HIERARCHY_MIGRATION } from "../organization/hierarchy";
+import { KNOWLEDGE_MIGRATION } from "../knowledge/store";
+import { TELEGRAM_OUTBOX_MIGRATION } from "../triggers/telegram-outbox";
+import { SOURCE_TOPICS_MIGRATION } from "../triggers/webhook-secrets";
+import { RULE_SCHEDULE_MIGRATION } from "../triggers/schedules";
+import { AUTO_REVIEW_MIGRATION } from "../runtime/auto-review/service";
+import { LAUNCH_QUEUE_MIGRATION } from "../runtime/launch-queue/service";
+import { AGENCY_RULES_MIGRATION, TEMPLATES_MIGRATION } from "../templates/store";
 import { createHash } from "node:crypto";
+import { COMPLETION_REMINDER_MIGRATION } from "../runtime/completion-reminder/service";
+import { RUN_WATCH_MIGRATION } from "../runtime/run-watch/service";
+import { REWORK_MIGRATION } from "../runtime/rework/service";
+import { WORK_RULES_MIGRATION } from "../rules/work-rules";
+import { DUE_REMINDER_MIGRATION } from "../runtime/due-reminder/service";
 import { USAGE_COLLECTOR_MIGRATION } from "../runtime/usage-collector/migration.js";
 import { CRON_OCCURRENCE_MIGRATION } from "../triggers/cron/migration.js";
 import type { SqlDatabase } from "./sql";
@@ -553,6 +568,51 @@ ALTER TABLE agency_job ADD COLUMN observer_agent_ids TEXT NOT NULL DEFAULT '[]';
   );
 CREATE INDEX agency_parent_wake_pending_idx ON agency_parent_wake(send_state, dispatch_claimed);`,
   USAGE_COLLECTOR_MIGRATION,
+  // Board hygiene: when a job last closed. Backfilled from the transition journal.
+  `ALTER TABLE agency_job ADD COLUMN closed_at TEXT;
+UPDATE agency_job SET closed_at = COALESCE(
+  (SELECT MAX(a.timestamp) FROM agency_activity a
+    WHERE a.job_id = agency_job.id
+      AND a.kind = 'job_transitioned'
+      AND a.references_json LIKE '%"id":"' || agency_job.state || '"%'),
+  updated_at)
+WHERE state IN ('done', 'canceled');`,
+  // Projects can be disconnected; departments are open to all projects unless restricted.
+  `ALTER TABLE agency_project_binding ADD COLUMN archived_at TEXT;
+ALTER TABLE agency_department ADD COLUMN availability TEXT NOT NULL DEFAULT 'all'
+  CHECK (availability IN ('all', 'selected'));`,
+  COMPLETION_REMINDER_MIGRATION,
+  RUN_WATCH_MIGRATION,
+  // Role types in a department: member becomes executor, reviewer is new.
+  // SQLite cannot change a CHECK constraint, so the table is rebuilt; nothing references it.
+  `CREATE TABLE agency_membership_next (
+    department_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('lead', 'executor', 'reviewer')),
+    PRIMARY KEY (department_id, agent_id),
+    FOREIGN KEY (department_id) REFERENCES agency_department(id),
+    FOREIGN KEY (agent_id) REFERENCES agency_agent(id)
+  );
+INSERT INTO agency_membership_next (department_id, agent_id, role)
+  SELECT department_id, agent_id, CASE role WHEN 'member' THEN 'executor' ELSE role END FROM agency_membership;
+DROP TABLE agency_membership;
+ALTER TABLE agency_membership_next RENAME TO agency_membership;
+CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
+  REWORK_MIGRATION,
+  WORK_RULES_MIGRATION,
+  DUE_REMINDER_MIGRATION,
+  `ALTER TABLE agency_job ADD COLUMN contract_json TEXT`,
+  TEMPLATES_MIGRATION,
+  AGENCY_RULES_MIGRATION,
+  LAUNCH_QUEUE_MIGRATION,
+  AUTO_REVIEW_MIGRATION,
+  RULE_SCHEDULE_MIGRATION,
+  SOURCE_TOPICS_MIGRATION,
+  TELEGRAM_OUTBOX_MIGRATION,
+  KNOWLEDGE_MIGRATION,
+  GOALS_MIGRATION,
+  HIERARCHY_MIGRATION,
+  SAVED_VIEWS_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

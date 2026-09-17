@@ -29,6 +29,7 @@ import {
   resolveLiveLaunchRoute,
 } from "../data/persist-launch";
 import { STAGE1_UNAVAILABLE } from "../data";
+import { tr } from "../i18n";
 import "./job-detail.css";
 
 export function RunsPage({
@@ -100,7 +101,7 @@ export function RunsPage({
       </div>;
     }
     if (route.kind === "missing") {
-      return <div className="space-y-4"><Empty title="Запуск не найден" description="Этот запуск недоступен. Откройте запуск из своей задачи или вернитесь к списку."/><Button variant="outline" size="sm" onClick={back}>Назад к запускам</Button></div>;
+      return <div className="space-y-4"><Empty title="Запуск не найден" description="Этот запуск недоступен. Откройте запуск из своей задачи или вернитесь к списку."/><Button variant="outline" size="sm" onClick={back}>{tr("Назад к запускам")}</Button></div>;
     }
     return <RunDetail run={route.run} back={back} openJob={openJob}/>;
   }
@@ -115,7 +116,7 @@ export function RunsPage({
           id: launchRouteId(row),
           open: () => open(launchRouteId(row)),
           name: <span className="block font-medium">{row.attempt.attemptId}</span>,
-          cells: [launchStateLabel(row.attempt.state), row.jobKey, row.receipt?.threadId || row.attempt.threadId || "—"],
+          cells: [tr(launchStateLabel(row.attempt.state)), row.jobKey, row.receipt?.threadId || row.attempt.threadId || "—"],
         }))}/>
         : <Empty title={copy.title} description={copy.description}/>}
     </div>;
@@ -166,7 +167,7 @@ function LiveRunLookup({
       : opened.status === "unavailable"
         ? LIVE_RUNS_COPY.openUnavailable
         : LIVE_RUNS_COPY.openError;
-    return <div className="space-y-4"><Empty title={copy.title} description={copy.description}/><Button variant="outline" size="sm" onClick={back}>Назад к запускам</Button></div>;
+    return <div className="space-y-4"><Empty title={copy.title} description={copy.description}/><Button variant="outline" size="sm" onClick={back}>{tr("Назад к запускам")}</Button></div>;
   }
   return <LiveRunDetail view={opened.view} back={back} openJob={openJob} onMutated={onMutated}/>;
 }
@@ -195,11 +196,11 @@ function LiveRunDetail({
     const result = await requestCompletion(api, { jobId: jobRecordId, launchId: receipt.launchId });
     setPending(false);
     if (!result.ok) {
-      setMessage(LIVE_RUNS_COPY.openError.description);
+      setMessage(tr(LIVE_RUNS_COPY.openError.description));
       return;
     }
     setCompletion(result.value);
-    setMessage(productServerReason(result.value.reason));
+    setMessage(tr(productServerReason(result.value.reason)));
     onMutated();
   };
 
@@ -208,7 +209,7 @@ function LiveRunDetail({
     setPending(true);
     const result = await requestReconcileLaunch(api, { attemptId: receipt.attemptId, launchId: receipt.launchId });
     setPending(false);
-    setMessage(result.ok ? (result.value.message || "Сверка выполнена.") : LIVE_RUNS_COPY.openError.description);
+    setMessage(result.ok ? (result.value.message || tr("Сверка выполнена.")) : tr(LIVE_RUNS_COPY.openError.description));
     onMutated();
   };
 
@@ -218,45 +219,45 @@ function LiveRunDetail({
     : LIVE_RUNS_COPY.receiptDescription;
 
   return <article className="agency-task-layout mx-auto w-full max-w-7xl px-1 pb-8 sm:px-4">
-    <nav className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" aria-label="Путь запуска">
-      <Button variant="ghost" size="sm" onClick={back}>← Запуски</Button><span>/ {attemptId}</span>
+    <nav className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" aria-label={tr("Путь запуска")}>
+      <Button variant="ghost" size="sm" onClick={back}>{tr("← Запуски")}</Button><span>/ {attemptId}</span>
     </nav>
     <div className="agency-task-grid">
       <header className="agency-task-title">
         <PageHead title={title} description={description}>
-          <Button variant="outline" onClick={() => openJob(jobKey)}>К задаче {jobKey}</Button>
+          <Button variant="outline" onClick={() => openJob(jobKey)}>{tr("К задаче {jobKey}", { jobKey })}</Button>
         </PageHead>
       </header>
       <div className="agency-task-content space-y-5">
         <section className="rounded-lg border border-border bg-muted/25 p-4 text-sm space-y-2">
           {view.kind === "attempt" && (
             <>
-              <p>Попытка {view.row.attempt.attemptNo}</p>
-              <p>Состояние: {launchStateLabel(view.row.attempt.state)}</p>
-              <p>Ревизия попытки: {view.row.attempt.revision}</p>
+              <p>{tr("Попытка {number}", { number: view.row.attempt.attemptNo })}</p>
+              <p>{tr("Состояние: {state}", { state: tr(launchStateLabel(view.row.attempt.state)) })}</p>
+              <p>{tr("Ревизия попытки: {revision}", { revision: view.row.attempt.revision })}</p>
               <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer">Технические подробности</summary>
+                <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
                 <p className="mt-1 font-mono">attempt.state {view.row.attempt.state}</p>
               </details>
             </>
           )}
-          {view.kind === "receipt" && <p>Попытка в списке не найдена. Ниже только квитанция.</p>}
+          {view.kind === "receipt" && <p>{tr("Попытка в списке не найдена. Ниже только квитанция.")}</p>}
           {receipt?.threadId && <p>Thread: {receipt.threadId}</p>}
-          {receipt?.persistError && <p>Ошибка: {productServerReason(receipt.persistError.message)}</p>}
-          {receipt?.needsReconciliation && <p>Нужна сверка, повторный запуск не вызывается.</p>}
+          {receipt?.persistError && <p>{tr("Ошибка: {reason}", { reason: tr(productServerReason(receipt.persistError.message)) })}</p>}
+          {receipt?.needsReconciliation && <p>{tr("Нужна сверка, повторный запуск не вызывается.")}</p>}
           {completion && (
             <>
-              <p>{productServerReason(completion.reason)}</p>
-              <p>Проверка: {completion.mayEnterReview ? "можно передать на проверку" : "проверка не подтверждена"}</p>
-              {completion.runFailed && <p>Сбой зафиксирован</p>}
-              {completion.threadStatus && <p>Статус thread: {completion.threadStatus}</p>}
-              <p>Успех по thread не ставится.</p>
+              <p>{tr(productServerReason(completion.reason))}</p>
+              <p>{tr("Проверка: {value}", { value: tr(completion.mayEnterReview ? "можно передать на проверку" : "проверка не подтверждена") })}</p>
+              {completion.runFailed && <p>{tr("Сбой зафиксирован")}</p>}
+              {completion.threadStatus && <p>{tr("Статус thread: {status}", { status: completion.threadStatus })}</p>}
+              <p>{tr("Успех по thread не ставится.")}</p>
             </>
           )}
           {message && <p className="text-muted-foreground">{message}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={pending || !receipt} onClick={() => void reconcile()}>Сверить</Button>
-            <Button size="sm" variant="outline" disabled={interpretButtonDisabled({ pending, launchId: receipt?.launchId, attemptState: view.kind === "attempt" ? view.row.attempt.state : null })} onClick={() => void interpret()}>Проверить результат</Button>
+            <Button size="sm" variant="outline" disabled={pending || !receipt} onClick={() => void reconcile()}>{tr("Сверить")}</Button>
+            <Button size="sm" variant="outline" disabled={interpretButtonDisabled({ pending, launchId: receipt?.launchId, attemptState: view.kind === "attempt" ? view.row.attempt.state : null })} onClick={() => void interpret()}>{tr("Проверить результат")}</Button>
           </div>
         </section>
       </div>
@@ -274,25 +275,25 @@ function LiveRunDetail({
 function RunDetail({ run, back, openJob }: { run: DemoRun; back: () => void; openJob: (jobId: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   return <article className="agency-task-layout mx-auto w-full max-w-7xl px-1 pb-8 sm:px-4">
-    <nav className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" aria-label="Путь запуска">
-      <Button variant="ghost" size="sm" onClick={back}>← Запуски</Button><span>/ {run.id}</span>
+    <nav className="mb-4 flex items-center gap-2 text-xs text-muted-foreground" aria-label={tr("Путь запуска")}>
+      <Button variant="ghost" size="sm" onClick={back}>{tr("← Запуски")}</Button><span>/ {run.id}</span>
     </nav>
     <div className="agency-task-grid">
       <header className="agency-task-title">
         <PageHead title={run.title} description={run.summary}>
-          <Button variant="outline" onClick={() => openJob(run.jobId)}>К задаче {run.jobId}</Button>
+          <Button variant="outline" onClick={() => openJob(run.jobId)}>{tr("К задаче {jobKey}", { jobKey: run.jobId })}</Button>
         </PageHead>
         <p className="text-xs text-muted-foreground">{run.id} · {run.duration}</p>
       </header>
       <div className="agency-task-content space-y-5">
         <section className="rounded-lg border border-border bg-muted/25 p-4">
-          <h2 className="mb-2 text-sm font-semibold">Результат работы</h2>
+          <h2 className="mb-2 text-sm font-semibold">{tr("Результат работы")}</h2>
           <Markdown content={run.summary}/>
         </section>
       </div>
       <aside className="agency-task-sidebar rounded-lg border border-border bg-muted/20 p-4" data-expanded={expanded}>
-        <h2 className="agency-task-sidebar-heading text-sm font-semibold">Сведения о запуске</h2>
-        <Button variant="ghost" className="agency-task-sidebar-toggle w-full justify-between" onClick={() => setExpanded(!expanded)}>Сведения о запуске <span>{expanded ? "−" : "+"}</span></Button>
+        <h2 className="agency-task-sidebar-heading text-sm font-semibold">{tr("Сведения о запуске")}</h2>
+        <Button variant="ghost" className="agency-task-sidebar-toggle w-full justify-between" onClick={() => setExpanded(!expanded)}>{tr("Сведения о запуске")} <span>{expanded ? "−" : "+"}</span></Button>
         <div className="agency-task-sidebar-content">
           <Rows rows={[["Задача", run.jobId], ["Проект", run.project], ["Отдел", run.department], ["Сотрудник", run.agent]]}/>
         </div>

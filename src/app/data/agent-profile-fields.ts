@@ -1,8 +1,9 @@
+import { tr } from "../i18n";
 import type { Agent } from "../prototype/data";
 
 /** Fields `saveAgentProfile` / AgentVersion draft persist (AGY-17). */
 export const AGENT_PROFILE_SAVED_HINT =
-  "В версии профиля сохраняются имя, статус, роль, инструкции, CLI, модель и отмеченные навыки и MCP из каталога.";
+  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, модель, уровень рассуждения и навыки. Идущие запуски работают по прежней версии.";
 
 export const AGENT_PROFILE_UNSUPPORTED = {
   department: "Отдел задаётся в составе отдела, в версии профиля не хранится.",
@@ -43,6 +44,8 @@ export function persistedAgentDirty(current: Agent, next: Agent): boolean {
     current.enabled !== next.enabled ||
     current.selection.providerId !== next.selection.providerId ||
     current.selection.model !== next.selection.model ||
+    (current.reasoningEffort ?? "") !== (next.reasoningEffort ?? "") ||
+    (current.policyVersionId ?? "") !== (next.policyVersionId ?? "") ||
     !sameIds(current.skills, next.skills) ||
     !sameIds(current.mcps, next.mcps)
   );
@@ -52,7 +55,6 @@ export function unsupportedAgentFieldChanges(current: Agent, next: Agent): strin
   const labels: string[] = [];
   if ((current.department || "") !== (next.department || "")) labels.push("отдел");
   if ((current.hostId || "") !== (next.hostId || "")) labels.push("машина");
-  if (current.selection.reasoningLevel !== next.selection.reasoningLevel) labels.push("уровень рассуждения");
   if ((current.selection.serviceTier || "") !== (next.selection.serviceTier || "")) labels.push("тариф модели");
   if (current.permission !== next.permission) labels.push("режим разрешений");
   if (current.concurrency !== next.concurrency) labels.push("одновременные задачи");
@@ -63,5 +65,7 @@ export function unsupportedAgentFieldChanges(current: Agent, next: Agent): strin
 }
 
 export function unsupportedAgentSaveMessage(fields: readonly string[]): string {
-  return `Нельзя сохранить: ${fields.join(", ")}. Эти поля ещё не входят в версию профиля.`;
+  return tr("Нельзя сохранить: {fields}. Эти поля ещё не входят в версию профиля.", {
+    fields: fields.map((field) => tr(field)).join(", "),
+  });
 }

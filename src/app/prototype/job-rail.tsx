@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { Button } from "./shared";
+import { Button, InfoHint } from "./shared";
 import { shortAgentName } from "../data/agent-name";
+import { tr } from "../i18n";
 
 /**
  * Right rail primitives of the task card.
@@ -21,9 +22,9 @@ export function RailCard({
   children: ReactNode;
 }) {
   return (
-    <section aria-label={label ?? title} className="agency-rail-card">
+    <section aria-label={tr(label ?? title)} className="agency-rail-card">
       <div className="agency-rail-card-head">
-        <h3 className="agency-rail-card-title">{title}</h3>
+        <h3 className="agency-rail-card-title">{tr(title)}</h3>
         {action}
       </div>
       {children}
@@ -36,16 +37,18 @@ export function RailRow({
   value,
   tone = "default",
   mono = false,
+  info,
 }: {
   label: string;
   value: ReactNode;
   tone?: "default" | "muted" | "success";
   mono?: boolean;
+  info?: ReactNode;
 }) {
   const toneClass = tone === "muted" ? " agency-rail-value-muted" : tone === "success" ? " agency-rail-value-success" : "";
   return (
     <div className="agency-rail-row">
-      <span className="agency-rail-label">{label}</span>
+      <span className="agency-rail-label inline-flex items-center gap-0.5">{tr(label)}{info && <InfoHint title={label} className="size-4">{info}</InfoHint>}</span>
       <span className={`agency-rail-value${toneClass}${mono ? " agency-rail-value-mono" : ""}`}>{value}</span>
     </div>
   );

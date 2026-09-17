@@ -14,11 +14,12 @@ import {
 } from "../data/dispatcher";
 import { failureNotice } from "../data/persist";
 import { Button } from "./shared";
+import { tr } from "../i18n";
 
 export function TechnicalDetails({ children }: { children: ReactNode }) {
   return (
     <details className="text-xs text-muted-foreground">
-      <summary className="cursor-pointer">Технические подробности</summary>
+      <summary className="cursor-pointer">{tr("Технические подробности")}</summary>
       <div className="mt-2 space-y-1 font-mono">{children}</div>
     </details>
   );
@@ -42,15 +43,15 @@ export function DispatcherIntentList({
     return <p className="text-sm text-muted-foreground" data-testid="dispatcher-intents-empty">{DISPATCHER_EMPTY}</p>;
   }
   return (
-    <ul className="divide-y divide-border border-y border-border" data-testid="dispatcher-intent-list" aria-label="Согласование правил">
+    <ul className="divide-y divide-border border-y border-border" data-testid="dispatcher-intent-list" aria-label={tr("Согласование правил")}>
       {intents.map((intent) => {
         const action = nextIntentUiAction(intent);
         const blocked = intentLaunchBlocked(intent);
         return (
           <li key={intent.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid={`dispatcher-intent-${intent.id}`}>
             <div className="min-w-0">
-              <p className="text-sm font-medium">{intentCatalogHeading(intent)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{intentCatalogSubline(intent)}</p>
+              <p className="text-sm font-medium">{tr(intentCatalogHeading(intent))}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{tr(intentCatalogSubline(intent))}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {action === "approve" && (
@@ -60,7 +61,7 @@ export function DispatcherIntentList({
                   disabled={pendingId === intent.id}
                   onClick={() => void runApprove(api, intent, notice, onChanged, setPendingId)}
                 >
-                  Согласовать
+                  {tr("Согласовать")}
                 </Button>
               )}
               {allowClaim && action === "claim" && (
@@ -71,13 +72,13 @@ export function DispatcherIntentList({
                   disabled={pendingId === intent.id}
                   onClick={() => void runClaim(api, intent.id, notice, onChanged, setPendingId)}
                 >
-                  Взять в работу
+                  {tr("Взять в работу")}
                 </Button>
               )}
             </div>
             {blocked && (
               <p className="w-full text-xs text-muted-foreground" data-testid={`dispatcher-unavailable-${intent.id}`}>
-                {INTENT_LAUNCH_UNAVAILABLE}
+                {tr(INTENT_LAUNCH_UNAVAILABLE)}
               </p>
             )}
             <div className="w-full">
@@ -107,10 +108,11 @@ async function runApprove(
   });
   setPendingId(null);
   if (!result.ok) {
-    notice(failureNotice(result.failure));
+    notice(tr(failureNotice(result.failure)));
     return;
   }
-  notice(`${INTENT_APPROVE_HINT} Сейчас: ${INTENT_STATE_LABEL[result.value.state]}.`);
+  const stateLabel = tr(INTENT_STATE_LABEL[result.value.state]);
+  notice(`${tr(INTENT_APPROVE_HINT)} ${tr("Сейчас: {state}.", { state: stateLabel })}`);
   onChanged();
 }
 
@@ -131,9 +133,9 @@ async function runClaim(
   });
   setPendingId(null);
   if (!result.ok) {
-    notice(failureNotice(result.failure));
+    notice(tr(failureNotice(result.failure)));
     return;
   }
-  notice(INTENT_CLAIM_HINT);
+  notice(tr(INTENT_CLAIM_HINT));
   onChanged();
 }

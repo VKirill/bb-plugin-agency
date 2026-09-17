@@ -172,6 +172,14 @@ describe("isolated wiring", () => {
     expect(built.ok).toBe(true);
     if (!built.ok) return;
     expect(built.value.visibility).toBe("hidden");
+    // The worker reads every compiled layer in order, not the job brief alone.
+    const prompt = built.value.prompt;
+    const order = ["## Правила Агентства (agency)\na", "## Проект (project)\npr", "## Отдел: процесс и зона ответственности (department)\nd", "## Ваша должность и инструкция (agent)\nag", "## Поручение (job)\nJob brief for worker."];
+    expect(order.map((part) => prompt.indexOf(part)).every((at, index, all) => at >= 0 && (index === 0 || at > all[index - 1]))).toBe(true);
+    // BB titles the hidden thread from the first line, so it names the job.
+    expect(prompt.split("\n")[0]).toBe("AG-1: T");
+    expect(prompt).not.toContain("(platform)");
+    expect(prompt).not.toContain("(handoff)");
     expect(built.value.isolatedSkillDelivery).toBe(true);
     expect("originPluginId" in built.value).toBe(false);
   });

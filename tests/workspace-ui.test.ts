@@ -98,6 +98,8 @@ const snapshot: WorkspaceSnapshot = {
     processVersionId: "prc_editorial",
     revision: 1,
     updatedAt: "2026-09-14T00:00:00Z",
+    // Restricted to linked projects, so the link checks below stay meaningful.
+    availability: "selected",
   }],
   agents: [{
     id: "agt_writer01",
@@ -412,7 +414,9 @@ describe("workspace view models", () => {
       hostName: "MAC Mini",
     });
     expect(plugins).toBe("BB-сервис · plugins · MAC Mini");
-    expect(root).toBe("BB-сервис · BB-сервис · MAC Mini");
+    // A root folder named like the project is not repeated.
+    expect(root).toBe("BB-сервис · MAC Mini");
+    expect(bindingPlacementLabel({ bbProjectName: "SelfyStudio", bbProjectId: "proj_1", canonicalRoot: "/x/SelfyStudio/ads/telegram", hostName: "MAC Mini", sectionPath: "Реклама / Telegram" })).toBe("SelfyStudio / Реклама / Telegram · MAC Mini");
     expect(plugins).not.toBe(root);
     const mapped = mapProjects({
       ...snapshot,
@@ -423,7 +427,7 @@ describe("workspace view models", () => {
     });
     expect(mapped.map((item) => item.name)).toEqual([
       "BB-сервис · plugins · MAC Mini",
-      "BB-сервис · BB-сервис · MAC Mini",
+      "BB-сервис · MAC Mini",
     ]);
     expect(mapped.every((item) => item.lead === "")).toBe(true);
   });
@@ -458,13 +462,17 @@ describe("workspace view models", () => {
     expect(canCreateJob(snapshot, { bindingId: "bnd_1c5b4de02364a04fe159ab50", departmentId: "dep_editorial" })).toBeNull();
   });
 
-  it("lists only departments linked to the selected binding", () => {
-    const departments = [{ id: "dep_editorial", name: "Редакция" }, { id: "dep_qa", name: "QA" }];
+  it("lists departments open to all projects and restricted ones only where linked", () => {
+    const departments = [
+      { id: "dep_editorial", name: "Редакция", availability: "selected" as const },
+      { id: "dep_qa", name: "QA", availability: "selected" as const },
+      { id: "dep_common", name: "Общий" },
+    ];
     const links = [{ bindingId: "bnd_project01", departmentId: "dep_editorial" }];
-    expect(departmentsForBinding(departments, links, "bnd_project01")).toEqual([{ id: "dep_editorial", name: "Редакция" }]);
-    expect(departmentsForBinding(departments, links, "bnd_1c5b4de02364a04fe159ab50")).toEqual([]);
+    expect(departmentsForBinding(departments, links, "bnd_project01").map((item) => item.id)).toEqual(["dep_editorial", "dep_common"]);
+    expect(departmentsForBinding(departments, links, "bnd_1c5b4de02364a04fe159ab50").map((item) => item.id)).toEqual(["dep_common"]);
     expect(sanitizeDepartmentId("dep_qa", departmentsForBinding(departments, links, "bnd_project01"))).toBe("");
-    expect(JOB_CREATE_HINT).toBe("Укажите название, проект и отдел.");
+    expect(JOB_CREATE_HINT).toContain("Поручение отделу");
   });
 
   it("lists assignees from department membership ids and disambiguates same names", () => {

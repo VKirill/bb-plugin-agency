@@ -1,6 +1,8 @@
+import { WAIT_CODES } from "../runtime/launch-queue/service";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { fail, ok, type DomainResult } from "../../domain";
 import { createSdkHostFilePortFromBinding, type HostFileRpcClient } from "../../host";
+import type { Job } from "../../shared/contracts/job";
 import { publicLaunchReasonCode, rpcContract } from "../../shared/rpc-contract";
 import { listStoredBindings } from "./catalog";
 import { resolveRpcAccess } from "./auth";
@@ -47,6 +49,8 @@ import {
 } from "../runtime/prepare-run";
 import { createInternalRunStoreReads, createRunStore } from "../runtime/run-store";
 import { createCancelLaunchService } from "../runtime/cancel-launch";
+import { returnJobForRework } from "../runtime/rework/service";
+import { readProjectRulesFile } from "./project-rules";
 import type { IsolatedSendPort } from "../runtime/isolated-sdk/send-port.js";
 import { flushParentWakes } from "../runtime/parent-wake";
 import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../runtime/stop-handoff/ports.js";
@@ -59,7 +63,8 @@ type LaunchMethod =
   | "interpretWorkerCompletion"
   | "listJobAttempts"
   | "getIsolationReadiness"
-  | "cancelLaunch";
+  | "cancelLaunch"
+  | "returnJobForRework";
 type LaunchHandlers = Pick<PluginRpcHandlers<typeof rpcContract>, LaunchMethod>;
 
 const DEFAULT_APPLICABLE = [{ sourceId: "binding", relativePath: ".bb/AGENTS.md" }] as const;
@@ -117,6 +122,10 @@ export function createIsolatedLaunchRpc(deps: {
   documents: HostFileRpcClient;
   handshake?: IsolatedCapabilityHandshakePort;
   loadCatalogRoles?: () => Promise<DomainResult<IsolatedCatalogRolesConfig | undefined>>;
+  /** Machine readiness before a snapshot is reserved: online, provider CLI installed and allowed. */
+  checkHost?: (input: { hostId: string; providerId: string }) => Promise<DomainResult<void>>;
+  /** Concurrency and budget limits from the work rules; warnings do not stop the launch. */
+  checkLimits?: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
   onChanged?: () => void;
   send?: IsolatedSendPort;
 }): LaunchHandlers {
@@ -129,6 +138,22 @@ export function createIsolatedLaunchRpc(deps: {
   const reads = createInternalRunStoreReads(deps.db);
   const catalog = createSdkSkillCatalogPort(deps.bb.sdk.skills);
   const officialThreads = bindOfficialThreads(deps.bb.sdk.threads);
+
+  // Limit check and slot reservation run one at a time: two launches must not both pass a limit of one.
+  let launchGate: Promise<void> = Promise.resolve();
+  async function exclusive<T>(run: () => Promise<T>): Promise<T> {
+    const previous = launchGate;
+    let release!: () => void;
+    launchGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  }
 
   function systemCtx(): ServiceContext {
     return {
@@ -176,6 +201,7 @@ export function createIsolatedLaunchRpc(deps: {
         attemptId: string;
         launched: LaunchCoordinatorResult | null;
         reason: string;
+        warnings?: string[];
       }>(async (ctx) => {
         const job = deps.store.getJob(input.jobId);
         if (!job) return fail("not_found", `job ${input.jobId} not found`);
@@ -185,6 +211,10 @@ export function createIsolatedLaunchRpc(deps: {
         if (!proven.ok) return proven;
         const binding = deps.store.getBinding(job.bindingId);
         if (!binding) return fail("not_found", `binding ${job.bindingId} not found`);
+        if (deps.checkHost) {
+          const host = await deps.checkHost({ hostId: binding.hostId, providerId: assigned.value.providerId });
+          if (!host.ok) return host;
+        }
         const files = createSdkHostFilePortFromBinding(deps.documents, binding);
         if (!files.ok) return files;
         const listed = await catalog.list({
@@ -221,7 +251,15 @@ export function createIsolatedLaunchRpc(deps: {
           jobId: input.jobId,
           expectedRevision: input.expectedRevision,
         };
-        const prepared = await prepare.prepare(ctx, publicInput);
+        let warnings: string[] = [];
+        const prepared = await exclusive(async () => {
+          if (deps.checkLimits) {
+            const limits = await deps.checkLimits(job);
+            if (!limits.ok) return limits;
+            warnings = limits.value.warnings;
+          }
+          return prepare.prepare(ctx, publicInput);
+        });
         if (!prepared.ok) return prepared;
         const coreReady = prepared.value.handshakeReady && (await handshakeAllowsSpawn(handshake));
         const sdkReady = officialSdkAllowsIsolatedSpawn();
@@ -264,6 +302,7 @@ export function createIsolatedLaunchRpc(deps: {
           launched: launched.value,
           reasonCode: "ok" as const,
           reason: launched.value.kind === "running" ? "verified bind applied" : launched.value.kind,
+          ...(warnings.length ? { warnings } : {}),
         });
       });
     },
@@ -431,6 +470,7 @@ export function createIsolatedLaunchRpc(deps: {
         let assignedProvider: LiveAssignedProvider | null = null;
         let assignedReason: string | null = null;
         let assignedErrorCode: string | null = null;
+        let warnings: string[] = [];
         if (input.jobId) {
           const job = deps.store.getJob(input.jobId);
           if (!job) return fail("not_found", `job ${input.jobId} not found`);
@@ -446,6 +486,36 @@ export function createIsolatedLaunchRpc(deps: {
             if (!proven.ok) {
               assignedErrorCode = proven.error.code;
               assignedReason = proven.error.message;
+            }
+          }
+          if (assignedErrorCode === "agent_inactive") {
+            assignedReason = "Исполнитель приостановлен: включите его профиль или назначьте другого сотрудника.";
+          }
+          // What the launch itself would check, said before the button is pressed.
+          const binding = deps.store.getBinding(job.bindingId);
+          if (!assignedErrorCode && binding && assignedProvider) {
+            if (deps.checkHost) {
+              const host = await deps.checkHost({ hostId: binding.hostId, providerId: assignedProvider.providerId });
+              if (!host.ok) {
+                assignedErrorCode = host.error.code;
+                assignedReason = host.error.message;
+              }
+            }
+            if (!assignedErrorCode) {
+              const rules = await readProjectRulesFile(deps.documents, binding);
+              if (rules.ok && !rules.value.exists) {
+                assignedErrorCode = "project_rules_missing";
+                assignedReason = "В папке проекта нет файла правил .bb/AGENTS.md: создайте его во вкладке «Правила» проекта.";
+              }
+            }
+            if (!assignedErrorCode && deps.checkLimits) {
+              const limits = await deps.checkLimits(job);
+              if (!limits.ok) {
+                assignedErrorCode = limits.error.code;
+                assignedReason = limits.error.message;
+              } else {
+                warnings = limits.value.warnings;
+              }
             }
           }
         } else {
@@ -478,6 +548,8 @@ export function createIsolatedLaunchRpc(deps: {
             hasJobId: Boolean(input.jobId),
           }),
           reason,
+          ...(warnings.length ? { warnings } : {}),
+          ...(assignedErrorCode && WAIT_CODES.has(assignedErrorCode) ? { waitable: true } : {}),
         });
       });
     },
@@ -497,6 +569,36 @@ export function createIsolatedLaunchRpc(deps: {
         if (result.ok && deps.send) {
           await flushParentWakes({ db: deps.db, send: deps.send, now: new Date().toISOString() });
         }
+        return result;
+      });
+    },
+    returnJobForRework: async (input) => {
+      return withAccess(async (ctx) => {
+        if (!deps.send) return fail("sdk_send_unsupported", "thread messages are not available on this server");
+        const job = deps.store.getJob(input.jobId);
+        if (!job) return fail("not_found", `job ${input.jobId} not found`);
+        const access = deps.store.assertBindingAccess(ctx, job.bindingId);
+        if (!access.ok) return access;
+        const result = await returnJobForRework(
+          {
+            db: deps.db,
+            store: deps.store,
+            runs,
+            reads,
+            send: deps.send,
+            reworkLimit: (reworkJob) => deps.store.rulesForDepartment(reworkJob.departmentId).reworkLimit,
+            currentPublishedHash: async (jobId) => {
+              const published = await readJobPublishedArtifact(
+                { ctx, store: deps.store, db: deps.db, documents: deps.documents },
+                jobId,
+              );
+              return published.ok && published.value.publishedVerified ? published.value.publishedHash : null;
+            },
+          },
+          ctx,
+          input,
+        );
+        if (result.ok) deps.onChanged?.();
         return result;
       });
     },

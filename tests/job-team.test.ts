@@ -103,7 +103,7 @@ async function seed() {
     requestId: requestId(),
     departmentId: department.value.department.id,
     agentId: reviewer.value.agent.id,
-    role: "member",
+    role: "executor",
   });
   if (!member.ok) throw new Error(member.error.message);
   const binding = store.createProjectBinding(bootstrap, {

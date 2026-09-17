@@ -4,7 +4,7 @@
 
 Не RPC, не UI, не `launch/`, не миграции, не `resource-lease`.
 
-Контракт: [stop-handoff-contract.md](/Users/vechkasov/Documents/BB-сервис/plugins/.bb/chats/thr_2sgqe4rmmd/artifacts/implementation/AGY-9/stop-handoff-contract.md).
+Контракт: [stop-handoff-contract.md](внутренний контракт AGY-9, хранится вне репозитория).
 
 ## API
 

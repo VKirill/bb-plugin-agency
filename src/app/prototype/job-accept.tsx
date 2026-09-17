@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "./shared";
 import type { Job, TaskFile } from "./data";
 import type { AgencyApi } from "../data/agency-api";
@@ -12,6 +12,7 @@ import {
   resolveAcceptTarget,
 } from "../data/job-lifecycle";
 import { failureNotice, persistAcceptThenDone } from "../data/persist";
+import { tr } from "../i18n";
 
 const NONE = "none";
 
@@ -22,6 +23,7 @@ export function JobAcceptControls({
   demoMode,
   notice,
   onAccepted,
+  secondary,
 }: {
   job: Job;
   files: TaskFile[];
@@ -29,6 +31,8 @@ export function JobAcceptControls({
   demoMode: boolean;
   notice: (text: string) => void;
   onAccepted: (text: string) => void;
+  /** Other decisions next to acceptance, for example returning with a remark. */
+  secondary?: ReactNode;
 }) {
   const proven = provenAcceptFiles(files);
   const [selectedKey, setSelectedKey] = useState(NONE);
@@ -38,13 +42,13 @@ export function JobAcceptControls({
     if (selectedKey === NONE) return;
     if (acceptSelectionStillLive(files, selectedKey)) return;
     setSelectedKey(NONE);
-    notice(ACCEPT_STALE_SELECTION_NOTICE);
+    notice(tr(ACCEPT_STALE_SELECTION_NOTICE));
   }, [files, selectedKey, notice]);
 
   const accept = async () => {
     if (pending) return;
     if (demoMode) {
-      onAccepted("Вы приняли результат в примере.");
+      onAccepted(tr("Вы приняли результат в примере."));
       return;
     }
     const resolved = resolveAcceptTarget(files, selectedKey === NONE ? "" : selectedKey);
@@ -56,7 +60,7 @@ export function JobAcceptControls({
       return;
     }
     if (!job.recordId || job.revision == null) {
-      notice(ACCEPT_NO_TARGET_NOTICE);
+      notice(tr(ACCEPT_NO_TARGET_NOTICE));
       return;
     }
     setPending(true);
@@ -72,13 +76,14 @@ export function JobAcceptControls({
       notice(failureNotice(result.failure));
       return;
     }
-    onAccepted(`Вы приняли версию ${resolved.target.version}.`);
+    onAccepted(tr("Вы приняли версию {version}.", { version: resolved.target.version }));
   };
 
   return (
-    <div className="mt-4 space-y-2" data-testid="job-accept-controls">
+    <div className="mt-4 space-y-3" data-testid="job-accept-controls">
       {proven.length > 0 && !demoMode && (
-        <div className="flex flex-wrap gap-2" data-testid="accept-version-list" role="group" aria-label="Версия для приёмки">
+        <div className="flex flex-wrap items-center gap-2" data-testid="accept-version-list" role="group" aria-label={tr("Версия для приёмки")}>
+          <span className="text-xs text-muted-foreground">{tr("Версия для приёмки:")}</span>
           {proven.map((file) => {
             const target = fileToAcceptTarget(file);
             if (!target) return null;
@@ -105,8 +110,9 @@ export function JobAcceptControls({
           disabled={pending}
           onClick={() => void accept()}
         >
-          {pending ? "Принимаем…" : "Принять результат"}
+          {pending ? tr("Принимаем…") : tr("Принять результат")}
         </Button>
+        {secondary}
       </div>
     </div>
   );

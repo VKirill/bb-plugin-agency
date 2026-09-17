@@ -20,14 +20,28 @@ const rolePinSchema = z
   })
   .strict();
 
+/**
+ * `hostId` pins one machine; `hostIds` lists every machine whose projects may
+ * launch with these roles. Hashes are still checked against the live catalog of
+ * the binding, so a machine with a different skill package fails with a reason.
+ */
 export const isolatedCatalogRolesConfigSchema = z
   .object({
     schema: z.literal(ISOLATED_CATALOG_ROLES_SCHEMA),
-    hostId: hostIdSchema,
+    hostId: hostIdSchema.optional(),
+    hostIds: z.array(hostIdSchema).min(1).max(16).optional(),
     core: rolePinSchema,
     helpers: z.array(rolePinSchema).min(1).max(8),
   })
-  .strict();
+  .strict()
+  .refine((config) => Boolean(config.hostId) || Boolean(config.hostIds?.length), {
+    message: "hostId or hostIds is required",
+    path: ["hostIds"],
+  });
+
+export function configuredCatalogHosts(config: IsolatedCatalogRolesConfig): string[] {
+  return [...new Set([...(config.hostId ? [config.hostId] : []), ...(config.hostIds ?? [])])];
+}
 
 export type IsolatedCatalogRolesConfig = z.infer<typeof isolatedCatalogRolesConfigSchema>;
 
@@ -69,10 +83,11 @@ export async function pinCatalogRolesForPrepare(input: {
   config: IsolatedCatalogRolesConfig;
   hostId: string;
 }): Promise<DomainResult<ExplicitCatalogRoles>> {
-  if (input.config.hostId !== input.hostId) {
+  const hosts = configuredCatalogHosts(input.config);
+  if (!hosts.includes(input.hostId)) {
     return fail(
       "catalog_host_mismatch",
-      `configured catalog host ${input.config.hostId} !== binding host ${input.hostId}`,
+      `binding host ${input.hostId} is not in configured catalog hosts ${hosts.join(", ")}; add it to hostIds`,
     );
   }
   const roles = resolveCatalogRoles(input.listed, rolesFromIsolatedConfig(input.config));

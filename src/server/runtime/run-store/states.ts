@@ -9,7 +9,8 @@ const TRANSITIONS: Readonly<Record<RunAttemptState, readonly RunAttemptState[]>>
   launching: ["running", "failed", "canceled", "unknown"],
   running: ["waiting_input", "awaiting_review", "succeeded", "failed", "canceled", "unknown"],
   waiting_input: ["running", "failed", "canceled", "unknown"],
-  awaiting_review: ["succeeded", "failed", "canceled", "unknown"],
+  // running: the owner returned the version for rework in the same thread.
+  awaiting_review: ["running", "succeeded", "failed", "canceled", "unknown"],
   unknown: ["running", "failed", "canceled", "succeeded"],
   succeeded: [],
   failed: [],
@@ -27,8 +28,8 @@ export function assertAttemptTransition(from: RunAttemptState, to: RunAttemptSta
   if (from === "unknown" && to === "launching") {
     return fail("no_automatic_spawn_retry", "unknown must not retry spawn; resolve to failed, canceled, running, or succeeded");
   }
-  if (from === "awaiting_review" && (to === "launching" || to === "prepared" || to === "running")) {
-    return fail("no_automatic_spawn_retry", "awaiting_review must not spawn or reopen; reject/rework needs a new attempt");
+  if (from === "awaiting_review" && (to === "launching" || to === "prepared")) {
+    return fail("no_automatic_spawn_retry", "awaiting_review must not spawn; rework continues the same thread (running)");
   }
   if (from === "failed" && to === "launching") {
     return fail("no_automatic_spawn_retry", "failed is terminal; a new attempt is required after inspection");

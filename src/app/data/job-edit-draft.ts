@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { Job, State } from "../prototype/data";
 import { stateNames } from "../prototype/data";
 import { UNASSIGNED_AGENT, assigneeFields, selectedAgentId, type NamedPlacement } from "./job-placement";
@@ -17,6 +18,7 @@ export type JobEditDraft = {
   assignee: string;
   priority: string;
   due: string;
+  contract?: Job["contract"];
 };
 
 export type JobEditCommit = { patch: Partial<Job>; summary: string };
@@ -33,6 +35,7 @@ export function jobEditDraftFrom(
     assignee: demoMode ? job.agent : selectedAgentId(job, agents),
     priority: job.priority,
     due: job.due,
+    ...(job.contract ? { contract: job.contract } : {}),
   };
 }
 
@@ -51,35 +54,39 @@ export function jobEditCommit(
   const title = draft.title.trim();
   if (title && title !== job.title) {
     patch.title = title;
-    notes.push("название");
+    notes.push(tr("название"));
   }
   if (draft.description !== job.description) {
     patch.description = draft.description;
-    notes.push("описание");
+    notes.push(tr("описание"));
   }
   if (!options.statusLocked && draft.state !== job.state) {
     patch.state = draft.state;
-    notes.push(`статус: ${stateNames[job.state]} → ${stateNames[draft.state]}`);
+    notes.push(tr("статус: {from} → {to}", { from: tr(stateNames[job.state]), to: tr(stateNames[draft.state]) }));
   }
   if (draft.priority !== job.priority) {
     patch.priority = draft.priority;
-    notes.push(`приоритет: ${draft.priority}`);
+    notes.push(tr("приоритет: {value}", { value: draft.priority }));
+  }
+  if (JSON.stringify(draft.contract ?? null) !== JSON.stringify(job.contract ?? null)) {
+    patch.contract = draft.contract;
+    notes.push(tr("контракт исполнения"));
   }
   if (draft.due !== job.due) {
     patch.due = draft.due;
-    notes.push(`срок: ${draft.due || "не задан"}`);
+    notes.push(tr("срок: {value}", { value: draft.due || tr("не задан") }));
   }
   if (options.demoMode) {
     if (draft.assignee !== job.agent) {
       patch.agent = draft.assignee;
-      notes.push(`исполнитель: ${draft.assignee}`);
+      notes.push(tr("исполнитель: {value}", { value: draft.assignee }));
     }
   } else if (draft.assignee !== selectedAgentId(job, agents)) {
     const next = assigneeFields(draft.assignee === UNASSIGNED_AGENT ? null : draft.assignee, agents);
     patch.assignedAgentId = next.assignedAgentId;
     patch.agent = next.agent;
-    notes.push(`исполнитель: ${next.agent}`);
+    notes.push(tr("исполнитель: {value}", { value: next.agent }));
   }
   if (!notes.length) return null;
-  return { patch, summary: `Вы обновили задачу — ${notes.join(", ")}` };
+  return { patch, summary: tr("Вы обновили задачу — {notes}", { notes: notes.join(", ") }) };
 }

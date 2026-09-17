@@ -1,6 +1,14 @@
+import { knowledgeBlock } from "../knowledge/store";
+import { ISOLATION_PROVEN_PROVIDERS } from "../runtime/isolated-sdk/sdk-isolation-contract";
+import { currentAgencyRules } from "../templates/store";
+import { handInCommentMissing } from "../runtime/hand-in/service";
+import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
+import { foreignRuleKeys, readStoredRules, rulesForDepartment, workRulesView, writeStoredRules } from "../rules/work-rules";
+import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCommand, type WorkRulesView } from "../../shared/contracts/work-rules";
 import {
   assertAcceptCurrentVersion,
   assertAssigneeInDepartment,
+  assertBindingActive,
   assertBindingMoveAllowed,
   assertDepartmentOnBinding,
   assertJobDependencies,
@@ -44,8 +52,11 @@ import type {
   UpdateDepartmentCommand,
   UpdateJobCommand,
   UpdateProjectBindingCommand,
+  BindingLifecycleCommand,
+  SetDepartmentAvailabilityCommand,
+  UnlinkDepartmentCommand,
 } from "../../shared/contracts";
-import { emptyJobTeamFields } from "../../shared/contracts";
+import { contractIsEmpty, emptyJobTeamFields } from "../../shared/contracts";
 import { assertJobTeamMembership, effectiveJobTeamIds } from "../runtime/job-team";
 import { enqueueParentWake } from "../runtime/parent-wake";
 import {
@@ -67,6 +78,9 @@ import {
   updateDepartmentCommandSchema,
   updateJobCommandSchema,
   updateProjectBindingCommandSchema,
+  bindingLifecycleCommandSchema,
+  setDepartmentAvailabilityCommandSchema,
+  unlinkDepartmentCommandSchema,
 } from "../../shared/contracts";
 import { commitDomainTransaction } from "../db/domain-txn";
 import { newOpaqueId } from "../db/ids";
@@ -180,6 +194,23 @@ export function createDomainStore(db: SqlDatabase) {
     return row ? ok(row) : fail("not_found", `binding ${id} not found`);
   }
 
+  function departmentAvailability(departmentId: string): "all" | "selected" {
+    return repos.department.get(departmentId)?.availability ?? "all";
+  }
+
+  /** Jobs that are not closed, per binding, for one department. */
+  function openJobsOfDepartment(departmentId: string): Array<{ bindingId: string; n: number }> {
+    return (
+      db
+        .prepare(
+          `SELECT binding_id, COUNT(*) AS n FROM agency_job
+           WHERE department_id = ? AND state NOT IN ('done', 'canceled')
+           GROUP BY binding_id`,
+        )
+        .all(departmentId) as Array<{ binding_id: string; n: number }>
+    ).map((row) => ({ bindingId: row.binding_id, n: row.n }));
+  }
+
   function requireJob(id: string): DomainResult<Job> {
     const row = repos.job.get(id);
     return row ? ok(row) : fail("not_found", `job ${id} not found`);
@@ -196,6 +227,98 @@ export function createDomainStore(db: SqlDatabase) {
     return (row?.version ?? 0) + 1;
   }
 
+  /**
+   * A reviewer may not check work they produced. Inputs of a job are versions
+   * of source jobs; the conflict is the same agent on both sides. An earlier
+   * conclusion of that reviewer is allowed as context for a re-check: it is a
+   * source job that itself takes someone else's work as input.
+   */
+  function assertNotSelfReview(
+    target: { departmentId: string; assignedAgentId: string | null },
+    sourceJobIds: readonly string[],
+  ): DomainResult<true> {
+    const agentId = target.assignedAgentId;
+    if (!agentId || repos.membership.get(target.departmentId, agentId)?.role !== "reviewer") return ok(true);
+    for (const sourceJobId of sourceJobIds) {
+      const source = repos.job.get(sourceJobId);
+      if (!source || source.assignedAgentId !== agentId) continue;
+      const reviewedOthers = inputSourceJobIds(source.id).some((id) => {
+        const reviewed = repos.job.get(id);
+        return Boolean(reviewed?.assignedAgentId) && reviewed?.assignedAgentId !== agentId;
+      });
+      if (reviewedOthers) continue;
+      return fail(
+        "self_review",
+        `reviewer ${agentId} cannot check ${source.key}: the same agent did that work; assign another reviewer`,
+      );
+    }
+    return ok(true);
+  }
+
+  function memberRole(departmentId: string, agentId: string | null | undefined): string | null {
+    if (!agentId) return null;
+    return repos.membership.get(departmentId, agentId)?.role ?? null;
+  }
+
+  /**
+   * Rework rounds under one main job: executor subtasks created after the first
+   * review subtask. Past the department limit the lead asks the owner instead of
+   * opening another round.
+   */
+  function assertReworkRoundAllowed(parentJobId: string, departmentId: string, assignedAgentId: string | null): DomainResult<true> {
+    if (memberRole(departmentId, assignedAgentId) !== "executor") return ok(true);
+    const siblings = db
+      .prepare(`SELECT department_id, assigned_agent_id FROM agency_job WHERE parent_job_id = ? ORDER BY rowid`)
+      .all(parentJobId) as Array<{ department_id: string; assigned_agent_id: string | null }>;
+    const firstReview = siblings.findIndex((row) => memberRole(row.department_id, row.assigned_agent_id) === "reviewer");
+    if (firstReview < 0) return ok(true);
+    const rounds = siblings.slice(firstReview + 1).filter((row) => memberRole(row.department_id, row.assigned_agent_id) === "executor").length;
+    const parent = repos.job.get(parentJobId);
+    const limit = rulesForDepartment(db, parent?.departmentId ?? departmentId).reworkLimit;
+    if (rounds >= limit) {
+      return fail(
+        "rework_limit_reached",
+        `${rounds} rework round(s) already under this job, the department limit is ${limit}; ask the owner with report-needs-input before another round`,
+      );
+    }
+    return ok(true);
+  }
+
+  /** Attempt states with a thread that may still be working. */
+  const LIVE_ATTEMPT_STATES = ["prepared", "launching", "running", "waiting_input", "unknown"];
+
+  function liveAttempt(jobId: string): boolean {
+    const placeholders = LIVE_ATTEMPT_STATES.map(() => "?").join(", ");
+    return Boolean(
+      db.prepare(`SELECT 1 FROM agency_run_attempt WHERE job_id = ? AND state IN (${placeholders}) LIMIT 1`).get(jobId, ...LIVE_ATTEMPT_STATES),
+    );
+  }
+
+  /** Paused or archived employees take no new work. */
+  function assertAgentActive(agentId: string | null | undefined): DomainResult<true> {
+    if (!agentId) return ok(true);
+    const agent = repos.agent.get(agentId);
+    if (agent && agent.state !== "active") {
+      return fail("agent_inactive", `agent ${agent.name} is ${agent.state}; activate the profile or pick another assignee`);
+    }
+    return ok(true);
+  }
+
+  function assertAssigneeNotReviewer(assignedAgentId: string | null | undefined, reviewerAgentIds: readonly string[]): DomainResult<true> {
+    if (assignedAgentId && reviewerAgentIds.includes(assignedAgentId)) {
+      return fail("assignee_is_reviewer", "the assignee cannot be a reviewer of the same job");
+    }
+    return ok(true);
+  }
+
+  function inputSourceJobIds(jobId: string): string[] {
+    return (
+      db.prepare(`SELECT DISTINCT source_job_id FROM agency_job_input_ref WHERE target_job_id = ?`).all(jobId) as Array<{
+        source_job_id: string;
+      }>
+    ).map((row) => row.source_job_id);
+  }
+
   function assertMembershipPlan(department: Department, rows: Membership[]): DomainResult<Membership[]> {
     const leadCheck = assertLeadInMembership(department, rows);
     if (!leadCheck.ok) return leadCheck;
@@ -206,10 +329,27 @@ export function createDomainStore(db: SqlDatabase) {
     return ok(rows);
   }
 
+  function openJobsOf(departmentId: string, agentId: string): number {
+    return (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM agency_job WHERE department_id = ? AND assigned_agent_id = ? AND state NOT IN ('done', 'canceled')`,
+        )
+        .get(departmentId, agentId) as { n: number }
+    ).n;
+  }
+
   function writeMemberships(department: Department, rows: Membership[]): DomainResult<Membership[]> {
     const planned = assertMembershipPlan(department, rows);
     if (!planned.ok) return planned;
     const current = repos.membership.listByDepartment(department.id);
+    for (const row of current) {
+      if (rows.some((item) => item.agentId === row.agentId)) continue;
+      const open = openJobsOf(department.id, row.agentId);
+      if (open > 0) {
+        return fail("member_has_open_jobs", `agent ${row.agentId} has ${open} open job(s) in this department; reassign or close them first`);
+      }
+    }
     for (const row of current) {
       if (!rows.some((item) => item.agentId === row.agentId)) {
         repos.membership.remove(department.id, row.agentId);
@@ -438,6 +578,52 @@ export function createDomainStore(db: SqlDatabase) {
     )();
   };
 
+  function getWorkRules(scope: string): DomainResult<WorkRulesView> {
+    const parsed = workRulesScopeSchema.safeParse(scope);
+    if (!parsed.success) return fail("invalid_command", "scope is agency, department:<id> or agent:<id>");
+    const exists = ruleScopeExists(scope);
+    if (!exists.ok) return exists;
+    return ok(workRulesView(db, scope));
+  }
+
+  function ruleScopeExists(scope: string): DomainResult<true> {
+    if (scope.startsWith("department:") && !repos.department.get(scope.slice("department:".length))) {
+      return fail("not_found", `department ${scope.slice("department:".length)} not found`);
+    }
+    if (scope.startsWith("agent:") && !repos.agent.get(scope.slice("agent:".length))) {
+      return fail("not_found", `agent ${scope.slice("agent:".length)} not found`);
+    }
+    return ok(true);
+  }
+
+  const saveWorkRules = (ctx: ServiceContext, input: SaveWorkRulesCommand): DomainResult<WorkRulesView> => {
+    const parsed = saveWorkRulesCommandSchema.safeParse(input);
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() =>
+      remember(ctx, { requestId: parsed.data.requestId, kind: "saveWorkRules", payload: parsed.data, scopeBindingIds: [] }, () => {
+        const exists = ruleScopeExists(parsed.data.scope);
+        if (!exists.ok) return exists;
+        const foreign = foreignRuleKeys(parsed.data.scope, parsed.data.rules);
+        if (foreign.length) return fail("rule_not_in_scope", `${parsed.data.scope} cannot set: ${foreign.join(", ")}`);
+        const current = readStoredRules(db, parsed.data.scope);
+        if (current.revision !== parsed.data.expectedRevision) {
+          return fail("revision_conflict", `expected revision ${parsed.data.expectedRevision}, found ${current.revision}`);
+        }
+        writeStoredRules(db, parsed.data.scope, parsed.data.rules, current.revision + 1, nowUtc(ctx));
+        return ok(workRulesView(db, parsed.data.scope));
+      }),
+    )();
+  };
+
+  /** Chat routing names departments; two with one name make the route ambiguous. */
+  function assertDepartmentNameFree(name: string, exceptId?: string): DomainResult<true> {
+    const wanted = name.trim().toLocaleLowerCase("ru");
+    const taken = (db.prepare(`SELECT id, name FROM agency_department`).all() as Array<{ id: string; name: string }>).find(
+      (row) => row.id !== exceptId && row.name.trim().toLocaleLowerCase("ru") === wanted,
+    );
+    return taken ? fail("duplicate_department_name", `department name «${name}» is already used by ${taken.id}`) : ok(true);
+  }
+
   const provisionDepartment = (
     ctx: ServiceContext,
     input: ProvisionDepartmentInput,
@@ -450,6 +636,8 @@ export function createDomainStore(db: SqlDatabase) {
     if (!parsed.success) return fail("invalid_command", parsed.error.message);
     return db.transaction(() =>
       remember(ctx, { requestId: input.requestId, kind: "provisionDepartment", payload: input, scopeBindingIds: [] }, () => {
+        const free = assertDepartmentNameFree(input.name);
+        if (!free.ok) return free;
         const lead = requireAgent(input.leadAgentId);
         if (!lead.ok) return lead;
         const departmentId = newOpaqueId("department");
@@ -578,6 +766,8 @@ export function createDomainStore(db: SqlDatabase) {
         if (!current.ok) return current;
         const revision = matchRevision(current.value.revision, parsed.data);
         if (!revision.ok) return revision;
+        const free = assertDepartmentNameFree(parsed.data.name, current.value.id);
+        if (!free.ok) return free;
         const lead = requireAgent(parsed.data.leadAgentId);
         if (!lead.ok) return lead;
         const currentProcess = repos.processVersion.get(current.value.processVersionId);
@@ -597,7 +787,7 @@ export function createDomainStore(db: SqlDatabase) {
           : (() => {
               const rows = repos.membership.listByDepartment(current.value.id).map((row) => ({
                 ...row,
-                role: row.agentId === parsed.data.leadAgentId ? ("lead" as const) : row.role === "lead" ? ("member" as const) : row.role,
+                role: row.agentId === parsed.data.leadAgentId ? ("lead" as const) : row.role === "lead" ? ("executor" as const) : row.role,
               }));
               if (!rows.some((row) => row.agentId === parsed.data.leadAgentId)) {
                 rows.push({ departmentId: current.value.id, agentId: parsed.data.leadAgentId, role: "lead" });
@@ -712,6 +902,10 @@ export function createDomainStore(db: SqlDatabase) {
           .filter((row) => row.agentId !== parsed.data.agentId);
         const leadCheck = assertLeadInMembership(department.value, remaining);
         if (!leadCheck.ok) return leadCheck;
+        const open = openJobsOf(parsed.data.departmentId, parsed.data.agentId);
+        if (open > 0) {
+          return fail("member_has_open_jobs", `the agent has ${open} open job(s) in this department; reassign or close them first`);
+        }
         repos.membership.remove(parsed.data.departmentId, parsed.data.agentId);
         return ok(current);
       }),
@@ -725,6 +919,10 @@ export function createDomainStore(db: SqlDatabase) {
       remember(ctx, { requestId: parsed.data.requestId, kind: "createProjectBinding", payload: parsed.data, scopeBindingIds: [] }, () => {
         if (!repos.policy.get(parsed.data.policyVersionId)) {
           return fail("not_found", `policy ${parsed.data.policyVersionId} not found`);
+        }
+        const existing = repos.binding.findActiveByPlacement(parsed.data.environmentId, parsed.data.canonicalRoot);
+        if (existing) {
+          return fail("binding_duplicate", `folder ${parsed.data.canonicalRoot} is already connected as ${existing.id}`);
         }
         const row: ProjectBinding = {
           id: newOpaqueId("binding"),
@@ -775,6 +973,134 @@ export function createDomainStore(db: SqlDatabase) {
     })();
   };
 
+  const changeBindingConnection = (
+    kind: "archiveProjectBinding" | "restoreProjectBinding",
+    archived: boolean,
+  ) => (ctx: ServiceContext, input: BindingLifecycleCommand & { claimedBbProjectId?: string }): DomainResult<ProjectBinding> => {
+    const parsed = bindingLifecycleCommandSchema.safeParse(withoutClaim(input));
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const current = requireBinding(parsed.data.bindingId);
+      if (!current.ok) return current;
+      const scope = assertBindingScope(ctx, current.value, input.claimedBbProjectId);
+      if (!scope.ok) return scope;
+      return remember(ctx, { requestId: parsed.data.requestId, kind, payload: parsed.data, scopeBindingIds: [current.value.id] }, () => {
+        const revision = matchRevision(current.value.revision, parsed.data);
+        if (!revision.ok) return revision;
+        if (Boolean(current.value.archivedAt) === archived) return ok(current.value);
+        if (!archived) {
+          const existing = repos.binding.findActiveByPlacement(current.value.environmentId, current.value.canonicalRoot);
+          if (existing && existing.id !== current.value.id) {
+            return fail("binding_duplicate", `folder ${current.value.canonicalRoot} is already connected as ${existing.id}`);
+          }
+        }
+        const now = nowUtc(ctx);
+        const next: ProjectBinding = {
+          ...current.value,
+          archivedAt: archived ? now : null,
+          revision: revision.value.nextRevision,
+          updatedAt: now,
+        };
+        repos.binding.update(next);
+        const { archivedAt, ...rest } = next;
+        return ok(archivedAt ? next : rest);
+      });
+    })();
+  };
+
+  /** Disconnect: history stays, new jobs, department links and launches stop. */
+  const archiveProjectBinding = changeBindingConnection("archiveProjectBinding", true);
+  const restoreProjectBinding = changeBindingConnection("restoreProjectBinding", false);
+
+  /** Delete only an unused connection. A project with jobs is disconnected instead. */
+  const deleteProjectBinding = (
+    ctx: ServiceContext,
+    input: BindingLifecycleCommand & { claimedBbProjectId?: string },
+  ): DomainResult<{ bindingId: string }> => {
+    const parsed = bindingLifecycleCommandSchema.safeParse(withoutClaim(input));
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const current = requireBinding(parsed.data.bindingId);
+      if (!current.ok) return current;
+      const scope = assertBindingScope(ctx, current.value, input.claimedBbProjectId);
+      if (!scope.ok) return scope;
+      return remember(ctx, { requestId: parsed.data.requestId, kind: "deleteProjectBinding", payload: parsed.data, scopeBindingIds: [current.value.id] }, () => {
+        const revision = matchRevision(current.value.revision, parsed.data);
+        if (!revision.ok) return revision;
+        const usage = repos.binding.usage(current.value.id);
+        if (usage.jobs > 0 || usage.publishIntents > 0) {
+          return fail(
+            "binding_in_use",
+            `binding ${current.value.id} has ${usage.jobs} jobs and ${usage.publishIntents} file records; disconnect it instead`,
+          );
+        }
+        repos.binding.delete(current.value.id);
+        return ok({ bindingId: current.value.id });
+      });
+    })();
+  };
+
+  const unlinkDepartment = (
+    ctx: ServiceContext,
+    input: UnlinkDepartmentCommand & { claimedBbProjectId?: string },
+  ): DomainResult<ProjectDepartment> => {
+    const parsed = unlinkDepartmentCommandSchema.safeParse(withoutClaim(input));
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const binding = requireBinding(parsed.data.bindingId);
+      if (!binding.ok) return binding;
+      const scope = assertBindingScope(ctx, binding.value, input.claimedBbProjectId);
+      if (!scope.ok) return scope;
+      return remember(ctx, { requestId: parsed.data.requestId, kind: "unlinkDepartment", payload: parsed.data, scopeBindingIds: [binding.value.id] }, () => {
+        const department = requireDepartment(parsed.data.departmentId);
+        if (!department.ok) return department;
+        if (departmentAvailability(department.value.id) === "selected") {
+          const open = openJobsOfDepartment(department.value.id).find((row) => row.bindingId === binding.value.id);
+          if (open) {
+            return fail("department_in_use", `department has ${open.n} open jobs in this project; close or move them first`);
+          }
+        }
+        if (!repos.projectDepartment.remove(binding.value.id, department.value.id)) {
+          return fail("not_found", `department ${department.value.id} is not linked to ${binding.value.id}`);
+        }
+        return ok({ bindingId: binding.value.id, departmentId: department.value.id });
+      });
+    })();
+  };
+
+  const setDepartmentAvailability = (ctx: ServiceContext, input: SetDepartmentAvailabilityCommand): DomainResult<Department> => {
+    const parsed = setDepartmentAvailabilityCommandSchema.safeParse(input);
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() =>
+      remember(ctx, { requestId: parsed.data.requestId, kind: "setDepartmentAvailability", payload: parsed.data, scopeBindingIds: [] }, () => {
+        const current = requireDepartment(parsed.data.departmentId);
+        if (!current.ok) return current;
+        const revision = matchRevision(current.value.revision, parsed.data);
+        if (!revision.ok) return revision;
+        if (parsed.data.availability === "selected") {
+          const linked = new Set(repos.projectDepartment.listByDepartment(current.value.id).map((row) => row.bindingId));
+          const stranded = openJobsOfDepartment(current.value.id).filter((row) => !linked.has(row.bindingId));
+          if (stranded.length) {
+            const jobs = stranded.reduce((sum, row) => sum + row.n, 0);
+            return fail(
+              "department_in_use",
+              `department has ${jobs} open jobs in ${stranded.length} projects it is not linked to; link those projects first`,
+            );
+          }
+        }
+        const { availability: _previous, ...base } = current.value;
+        const next: Department = {
+          ...base,
+          ...(parsed.data.availability === "selected" ? { availability: "selected" as const } : {}),
+          revision: revision.value.nextRevision,
+          updatedAt: nowUtc(ctx),
+        };
+        repos.department.update(next);
+        return ok(next);
+      }),
+    )();
+  };
+
   const linkDepartment = (ctx: ServiceContext, input: LinkDepartmentInput): DomainResult<ProjectDepartment> => {
     return db.transaction(() => {
       const binding = requireBinding(input.bindingId);
@@ -787,6 +1113,8 @@ export function createDomainStore(db: SqlDatabase) {
         payload: input,
         scopeBindingIds: [binding.value.id],
       }, () => {
+        const active = assertBindingActive(binding.value);
+        if (!active.ok) return active;
         const department = requireDepartment(input.departmentId);
         if (!department.ok) return department;
         const link: ProjectDepartment = { bindingId: input.bindingId, departmentId: input.departmentId };
@@ -814,12 +1142,22 @@ export function createDomainStore(db: SqlDatabase) {
         payload: parsed.data,
         scopeBindingIds: [binding.value.id],
       }, () => {
+        const active = assertBindingActive(binding.value);
+        if (!active.ok) return active;
         const linked = assertDepartmentOnBinding(
           parsed.data.bindingId,
           parsed.data.departmentId,
           repos.projectDepartment.listByBinding(parsed.data.bindingId),
+          departmentAvailability(parsed.data.departmentId),
         );
         if (!linked.ok) return linked;
+        const picked = parsed.data.assignedAgentId
+          ? ok(parsed.data.assignedAgentId)
+          : parsed.data.assignment
+            ? pickAssignee(parsed.data.departmentId, parsed.data.assignment, parsed.data.reviewerAgentIds ?? [])
+            : ok(null);
+        if (!picked.ok) return picked;
+        const assignedAgentId = picked.value;
         if (parsed.data.parentJobId) {
           const parent = requireJob(parsed.data.parentJobId);
           if (!parent.ok) return parent;
@@ -827,11 +1165,17 @@ export function createDomainStore(db: SqlDatabase) {
             return fail("binding_mismatch", "parent job belongs to another binding");
           }
         }
-        if (parsed.data.assignedAgentId) {
-          const membership = repos.membership.get(parsed.data.departmentId, parsed.data.assignedAgentId);
+        if (assignedAgentId) {
+          const membership = repos.membership.get(parsed.data.departmentId, assignedAgentId);
           if (!membership) {
             return fail("assignee_not_member", "assigned agent must belong to the job department");
           }
+        }
+        const assigneeActive = assertAgentActive(assignedAgentId);
+        if (!assigneeActive.ok) return assigneeActive;
+        if (parsed.data.parentJobId) {
+          const round = assertReworkRoundAllowed(parsed.data.parentJobId, parsed.data.departmentId, assignedAgentId);
+          if (!round.ok) return round;
         }
         const team = assertJobTeamMembership({
           departmentId: parsed.data.departmentId,
@@ -840,9 +1184,11 @@ export function createDomainStore(db: SqlDatabase) {
           isMember: (departmentId, agentId) => Boolean(repos.membership.get(departmentId, agentId)),
         });
         if (!team.ok) return team;
+        const notReviewer = assertAssigneeNotReviewer(assignedAgentId, team.value.reviewerAgentIds);
+        if (!notReviewer.ok) return notReviewer;
         const job: Job = {
           id: newOpaqueId("job"),
-          key: parsed.data.key,
+          key: parsed.data.key ?? repos.job.nextKey(),
           bindingId: parsed.data.bindingId,
           departmentId: parsed.data.departmentId,
           title: parsed.data.title,
@@ -850,11 +1196,12 @@ export function createDomainStore(db: SqlDatabase) {
           acceptance: parsed.data.acceptance,
           state: "backlog",
           parentJobId: parsed.data.parentJobId,
-          assignedAgentId: parsed.data.assignedAgentId,
+          assignedAgentId,
           reviewerAgentIds: team.value.reviewerAgentIds,
           observerAgentIds: team.value.observerAgentIds,
           priority: parsed.data.priority,
           dueAt: parsed.data.dueAt,
+          ...(parsed.data.contract && !contractIsEmpty(parsed.data.contract) ? { contract: parsed.data.contract } : {}),
           revision: 1,
           updatedAt: nowUtc(ctx),
         };
@@ -890,10 +1237,15 @@ export function createDomainStore(db: SqlDatabase) {
         if (!nextBinding.ok) return nextBinding;
         const scope = assertBindingScope(ctx, nextBinding.value, input.claimedBbProjectId);
         if (!scope.ok) return scope;
+        if (nextBinding.value.id !== scoped.value.binding.id) {
+          const active = assertBindingActive(nextBinding.value);
+          if (!active.ok) return active;
+        }
         const linked = assertDepartmentOnBinding(
           nextBinding.value.id,
           departmentId,
           repos.projectDepartment.listByBinding(nextBinding.value.id),
+          departmentAvailability(departmentId),
         );
         if (!linked.ok) return linked;
         const assignedAgentId = effectiveAssignedAgentId(scoped.value.job.assignedAgentId, parsed.data.assignedAgentId);
@@ -903,6 +1255,19 @@ export function createDomainStore(db: SqlDatabase) {
           assignedAgentId ? Boolean(repos.membership.get(departmentId, assignedAgentId)) : true,
         );
         if (!assignee.ok) return assignee;
+        if (assignedAgentId !== scoped.value.job.assignedAgentId) {
+          const active = assertAgentActive(assignedAgentId);
+          if (!active.ok) return active;
+        }
+        // The card must name who actually works: no reassignment or department move under a live thread.
+        if (
+          (assignedAgentId !== scoped.value.job.assignedAgentId || departmentId !== scoped.value.job.departmentId) &&
+          liveAttempt(scoped.value.job.id)
+        ) {
+          return fail("job_has_live_run", "stop the running attempt before changing the assignee or department");
+        }
+        const ownWork = assertNotSelfReview({ departmentId, assignedAgentId }, inputSourceJobIds(scoped.value.job.id));
+        if (!ownWork.ok) return ownWork;
         const team = assertJobTeamMembership({
           departmentId,
           reviewerAgentIds: effectiveJobTeamIds(scoped.value.job.reviewerAgentIds ?? [], parsed.data.reviewerAgentIds),
@@ -910,6 +1275,8 @@ export function createDomainStore(db: SqlDatabase) {
           isMember: (deptId, agentId) => Boolean(repos.membership.get(deptId, agentId)),
         });
         if (!team.ok) return team;
+        const notReviewer = assertAssigneeNotReviewer(assignedAgentId, team.value.reviewerAgentIds);
+        if (!notReviewer.ok) return notReviewer;
         const moving = nextBinding.value.id !== scoped.value.job.bindingId;
         const children = (
           db.prepare(`SELECT id FROM agency_job WHERE parent_job_id = ?`).all(scoped.value.job.id) as Array<{ id: string }>
@@ -932,8 +1299,11 @@ export function createDomainStore(db: SqlDatabase) {
           hasRun: isActiveRunState(scoped.value.job.state, facts?.threadBound === true),
         });
         if (!blocked.ok) return blocked;
+        const { contract: _previousContract, ...current } = scoped.value.job;
+        const contract = parsed.data.contract === undefined ? scoped.value.job.contract : parsed.data.contract;
         const next: Job = {
-          ...scoped.value.job,
+          ...current,
+          ...(contract && !contractIsEmpty(contract) ? { contract } : {}),
           title: parsed.data.title ?? scoped.value.job.title,
           brief: parsed.data.brief ?? scoped.value.job.brief,
           acceptance: parsed.data.acceptance ?? scoped.value.job.acceptance,
@@ -1035,6 +1405,10 @@ export function createDomainStore(db: SqlDatabase) {
           reworkComment: parsed.data.reworkComment,
         });
         if (!allowed.ok) return allowed;
+        // Canceling a job does not stop its thread; launch cancel does, then the job may be canceled.
+        if (parsed.data.to === "canceled" && ctx.actor.kind !== "system" && liveAttempt(scoped.value.job.id)) {
+          return fail("job_has_live_run", "stop the running attempt (launch cancel) before canceling the job");
+        }
         const next: Job = {
           ...scoped.value.job,
           state: parsed.data.to,
@@ -1075,6 +1449,10 @@ export function createDomainStore(db: SqlDatabase) {
     return db.transaction(() => {
       const scoped = scopedJob(ctx, parsed.data.jobId, input.claimedBbProjectId);
       if (!scoped.ok) return scoped;
+      // A closed job keeps its accepted result: a new version would leave «Готово» with an unaccepted file.
+      if (scoped.value.job.state === "done" || scoped.value.job.state === "canceled") {
+        return fail("job_closed", `job ${scoped.value.job.key} is ${scoped.value.job.state}; new versions are not accepted`);
+      }
       const artifact = repos.artifact.get(parsed.data.artifactId);
       if (!artifact || artifact.jobId !== parsed.data.jobId) {
         return fail("artifact_scope_mismatch", "artifact does not belong to this job");
@@ -1117,6 +1495,65 @@ export function createDomainStore(db: SqlDatabase) {
     })();
   };
 
+  /**
+   * Automatic assignment: the lead, or the active member of a role type on a
+   * launchable CLI with the fewest open jobs (ties by name). Team reviewers of
+   * the job are skipped for an executor pick.
+   */
+  function pickAssignee(departmentId: string, role: "lead" | "executor" | "reviewer", reviewerIds: readonly string[]): DomainResult<string> {
+    if (role === "lead") {
+      const department = repos.department.get(departmentId);
+      return department ? ok(department.leadAgentId) : fail("not_found", `department ${departmentId} not found`);
+    }
+    const rows = db
+      .prepare(
+        `SELECT m.agent_id, v.provider_id,
+                (SELECT COUNT(*) FROM agency_job j WHERE j.assigned_agent_id = m.agent_id AND j.state NOT IN ('done', 'canceled')) AS open_jobs
+         FROM agency_membership m
+         JOIN agency_agent a ON a.id = m.agent_id
+         LEFT JOIN agency_agent_version v ON v.id = a.current_version_id
+         WHERE m.department_id = ? AND m.role = ? AND a.state = 'active'
+         ORDER BY open_jobs ASC, a.name ASC`,
+      )
+      .all(departmentId, role) as { agent_id: string; provider_id: string | null; open_jobs: number }[];
+    const pick = rows.find(
+      (row) => (ISOLATION_PROVEN_PROVIDERS as readonly string[]).includes(row.provider_id ?? "") && !(role === "executor" && reviewerIds.includes(row.agent_id)),
+    );
+    if (!pick) {
+      return fail(
+        "no_member_for_assignment",
+        role === "reviewer"
+          ? "В отделе нет активного проверяющего, которого Агентство может запустить. Добавьте его в «Составе» отдела или назначьте вручную."
+          : "В отделе нет активного исполнителя, которого Агентство может запустить. Добавьте его в «Составе» отдела или назначьте вручную.",
+      );
+    }
+    return ok(pick.agent_id);
+  }
+
+  /**
+   * The owner accepts anything. An employee accepts only a version of a job its
+   * own attempt delegated (the parent job), and never a version it authored.
+   */
+  function assertMayAccept(ctx: ServiceContext, job: Job, version: ArtifactVersion): DomainResult<true> {
+    const caller = ctx.caller;
+    if (!caller) return ok(true);
+    if (caller.jobId === job.id) {
+      return fail("self_acceptance", `Результат ${job.key} принимает руководитель родительской задачи или владелец, а не исполнитель этой задачи.`);
+    }
+    if (version.author.kind === "run") {
+      const author = db
+        .prepare(`SELECT j.assigned_agent_id AS agent_id FROM agency_run_attempt a JOIN agency_job j ON j.id = a.job_id WHERE a.id = ?`)
+        .get(version.author.runId) as { agent_id: string | null } | undefined;
+      if (author?.agent_id && author.agent_id === caller.agentId) {
+        return fail("self_acceptance", `Версия ${job.key} создана этим же сотрудником: свою работу он не принимает.`);
+      }
+    }
+    if (job.parentJobId !== caller.jobId) {
+      return fail("accept_not_lead", `Версию ${job.key} принимает тот, кто поручил задачу (попытка родительской задачи), или владелец.`);
+    }
+    return ok(true);
+  }
+
   const acceptArtifactVersion = (
     ctx: ServiceContext,
     input: AcceptArtifactVersionCommand & { claimedBbProjectId?: string },
@@ -1137,6 +1574,8 @@ export function createDomainStore(db: SqlDatabase) {
         const versions = repos.artifactVersion.listByScope(parsed.data.artifactId, parsed.data.jobId);
         const accepted = assertAcceptCurrentVersion(versions, parsed.data);
         if (!accepted.ok) return accepted;
+        const acceptor = assertMayAccept(ctx, scoped.value.job, accepted.value);
+        if (!acceptor.ok) return acceptor;
         db.prepare(
           `INSERT INTO agency_artifact_acceptance (artifact_id, job_id, version, hash, accepted_at)
            VALUES (?, ?, ?, ?, ?)
@@ -1189,7 +1628,12 @@ export function createDomainStore(db: SqlDatabase) {
     removeMembership,
     createProjectBinding,
     updateProjectBinding,
+    archiveProjectBinding,
+    restoreProjectBinding,
+    deleteProjectBinding,
     linkDepartment,
+    unlinkDepartment,
+    setDepartmentAvailability,
     createJob,
     updateJob,
     addJobDependency,
@@ -1217,6 +1661,22 @@ export function createDomainStore(db: SqlDatabase) {
     listActivity: (jobId: string) => repos.activity.listByJob(jobId),
     inboxCount: () => repos.inbox.count(),
     assertBindingAccess,
+    assertNotSelfReview,
+    reworkBlocksReview: (jobId: string, publishedHash: string | null) => reworkBlocksReview(db, jobId, publishedHash),
+    handInCommentMissing: (jobId: string) => handInCommentMissing(db, jobId),
+    currentAgencyRules: () => currentAgencyRules(db),
+    knowledgeForLaunch: (departmentId: string, bindingId: string) => {
+      const agency = knowledgeBlock(db, "agency", null);
+      const project = knowledgeBlock(db, "project", bindingId);
+      const department = knowledgeBlock(db, "department", departmentId);
+      const ids = [...agency.ids, ...project.ids, ...department.ids];
+      return ids.length ? { agency: agency.text, project: project.text, department: department.text, ids } : null;
+    },
+    getWorkRules,
+    memberRole,
+    saveWorkRules,
+    rulesForDepartment: (departmentId: string) => rulesForDepartment(db, departmentId),
+    resolveRework: (jobId: string) => resolveRework(db, jobId, new Date().toISOString()),
     scopedJob,
   };
 }

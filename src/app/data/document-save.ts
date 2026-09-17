@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { MutationFailure, MutationOutcome } from "./envelope";
 import { clearFileDraft } from "./job-record-patch";
 
@@ -24,7 +25,7 @@ export function applyDraftsAfterSave(
 }
 
 export function saveThrownMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : "Не удалось сохранить файл.";
+  return error instanceof Error && error.message.trim() ? error.message : tr("Не удалось сохранить файл.");
 }
 
 export async function commitDocumentSave<T>(input: {

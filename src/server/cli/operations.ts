@@ -1,3 +1,9 @@
+import { saveKnowledgeInputSchema } from "../../shared/rpc-contract";
+import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
+import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
+import { getWorkRulesInputSchema } from "../../shared/rpc-contract";
+import { saveWorkRulesCommandSchema } from "../../shared/contracts/work-rules";
+import { listDashboardUsageInputSchema } from "../../shared/contracts/dashboard-usage";
 import type { ZodType } from "zod";
 import {
   attachJobInputRpcSchema,
@@ -9,10 +15,15 @@ import {
   getDepartmentInputSchema,
   getJobInputSchema,
   linkDepartmentRpcSchema,
+  bindingLifecycleRpcSchema,
+  readProjectRulesInputSchema,
+  saveProjectRulesInputSchema,
+  unlinkDepartmentRpcSchema,
   listArtifactVersionsInputSchema,
   listWorkspaceInputSchema,
   openArtifactRpcSchema,
   cancelLaunchCommandSchema,
+  returnJobForReworkCommandSchema,
   getIsolationReadinessRpcSchema,
   getLaunchRpcSchema,
   interpretWorkerCompletionRpcSchema,
@@ -42,6 +53,7 @@ import {
   createJobCommentRpcSchema,
   createMembershipCommandSchema,
   createPolicyVersionCommandSchema,
+  setDepartmentAvailabilityCommandSchema,
   createProjectBindingCommandSchema,
   removeMembershipCommandSchema,
   saveAgentProfileCommandSchema,
@@ -55,6 +67,10 @@ export const CLI_OPERATIONS = {
   listBbCatalog: { input: emptyObjectSchema, summary: "Каталог BB-проектов и окружений; label политики не есть права" },
   listCapabilityCatalog: { input: capabilityCatalogInputSchema, summary: "Read-only навыки/MCP из SDK" },
   getJob: { input: getJobInputSchema, summary: "Карточка задачи по id или AG-ключу" },
+  listDashboardUsage: {
+    input: listDashboardUsageInputSchema,
+    summary: "Расход токенов и оценка стоимости: rootJobId — задача вместе с подзадачами",
+  },
   getAgent: { input: getAgentInputSchema, summary: "Сотрудник и текущая версия" },
   getDepartment: { input: getDepartmentInputSchema, summary: "Отдел, процесс и membership" },
   listArtifactVersions: { input: listArtifactVersionsInputSchema, summary: "Версии артефакта задачи" },
@@ -67,6 +83,27 @@ export const CLI_OPERATIONS = {
   removeMembership: { input: removeMembershipCommandSchema, summary: "Убрать сотрудника из отдела" },
   createProjectBinding: { input: createProjectBindingCommandSchema, summary: "Привязать существующий каталог BB" },
   linkDepartment: { input: linkDepartmentRpcSchema, summary: "Связать отдел с привязкой проекта" },
+  unlinkDepartment: { input: unlinkDepartmentRpcSchema, summary: "Убрать отдел из выбранных отделов проекта" },
+  archiveProjectBinding: { input: bindingLifecycleRpcSchema, summary: "Отключить проект: история остаётся, новые задачи и запуски закрыты" },
+  restoreProjectBinding: { input: bindingLifecycleRpcSchema, summary: "Вернуть отключённый проект" },
+  deleteProjectBinding: { input: bindingLifecycleRpcSchema, summary: "Удалить подключение проекта без задач; BB-проект и файлы не трогаются" },
+  setDepartmentAvailability: { input: setDepartmentAvailabilityCommandSchema, summary: "Отдел для всех проектов (all) или только для выбранных (selected)" },
+  getWorkRules: { input: getWorkRulesInputSchema, summary: "Правила работы уровня: agency, department:<id> или agent:<id> — сохранённые, действующие и их источник" },
+  listTemplates: { input: emptyObjectSchema, summary: "Шаблоны форм: регламент, должностные инструкции по типам ролей, бриф и критерии; custom — задан владельцем" },
+  saveTemplate: { input: saveTemplateInputSchema, summary: "Сохранить шаблон (text) или сбросить к стандартному (text: null); expectedRevision из listTemplates" },
+  getAgencyRules: { input: emptyObjectSchema, summary: "Общие правила Агентства: действующая версия и история" },
+  saveAgencyRules: { input: saveAgencyRulesInputSchema, summary: "Новая версия общих правил Агентства; пустой текст выключает слой. expectedVersion = latestVersion" },
+  listKnowledge: { input: emptyObjectSchema, summary: "Знания Агентства, отделов и проектов: принятые (идут в запуски по области), предложения и архив" },
+  saveKnowledge: { input: saveKnowledgeInputSchema, summary: "Материал знаний; из треда сотрудника сохраняется как предложение до решения владельца" },
+  listGoals: { input: emptyObjectSchema, summary: "Цели над главными задачами с прогрессом" },
+  setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), summary: "Привязать главную задачу к цели (goalId null — отвязать)" },
+  searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
+  agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
+  listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },
+  listBudgets: { input: emptyObjectSchema, summary: "Бюджеты в месяц: уровни с лимитом, оценка расхода за календарный месяц (UTC) и процент" },
+  saveWorkRules: { input: saveWorkRulesCommandSchema, summary: "Сохранить правила уровня целиком: отсутствующий ключ возвращает значение по умолчанию" },
+  readProjectRules: { input: readProjectRulesInputSchema, summary: "Прочитать правила проекта (.bb/AGENTS.md) на машине привязки" },
+  saveProjectRules: { input: saveProjectRulesInputSchema, summary: "Сохранить правила проекта, если файл не менялся после чтения (expectedHash)" },
   createJob: { input: createJobRpcSchema, summary: "Создать задачу; state задаёт переход, не create" },
   updateJob: { input: updateJobRpcSchema, summary: "Обновить поля задачи, включая назначение" },
   transitionJob: { input: transitionJobRpcSchema, summary: "Сменить состояние задачи" },
@@ -86,6 +123,11 @@ export const CLI_OPERATIONS = {
   },
   acceptArtifactVersion: { input: acceptArtifactRpcSchema, summary: "Принять текущую версию" },
   openArtifact: { input: openArtifactRpcSchema, summary: "Открыть версию; bytes в CLI не печатаются" },
+  enqueueLaunch: {
+    input: enqueueLaunchRpcSchema,
+    summary: "Поставить задачу в очередь запуска: стартует сама, когда лимиты параллельности и бюджета позволят; backlog переводится в queued",
+  },
+  dequeueLaunch: { input: dequeueLaunchRpcSchema, summary: "Убрать задачу из очереди запуска" },
   prepareLaunch: {
     input: prepareLaunchRpcSchema,
     summary: "Prepare launch на текущем instance; spawn только после handshake этого runtime",
@@ -103,6 +145,10 @@ export const CLI_OPERATIONS = {
   getIsolationReadiness: {
     input: getIsolationReadinessRpcSchema,
     summary: "GET spawn-contract + typed spawn; engines не готовность; только claude-code",
+  },
+  returnJobForRework: {
+    input: returnJobForReworkCommandSchema,
+    summary: "Вернуть версию на доработку: замечание уходит в тред исполнителя, задача снова в работе",
   },
   cancelLaunch: {
     input: cancelLaunchCommandSchema,

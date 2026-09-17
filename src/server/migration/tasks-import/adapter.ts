@@ -9,7 +9,7 @@ import {
 /**
  * Tasks adapter = RPC records from builtin Tasks 0.1.2 / BB 0.43.1.
  * Copied from local source, not invented:
- * `/Users/vechkasov/.local/share/bb-source-agy-16-0431/plugins/tasks/shared/contract.ts`
+ * `<исходники BB>/plugins/tasks/shared/contract.ts`
  * SQL CHECKs: `.../plugins/tasks/db/schema.ts`
  *
  * Tasks ids are Crockford ULIDs. Agency ids are opaque `kind_…`.
