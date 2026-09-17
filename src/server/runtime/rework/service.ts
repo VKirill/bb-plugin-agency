@@ -164,7 +164,10 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
       .prepare(`SELECT COUNT(*) AS n FROM agency_rework WHERE job_id = ? AND send_state = 'confirmed'`)
       .get(job.id) as { n: number }).n;
     if (done >= limit) {
-      return fail("rework_limit_reached", `the job was returned ${done} time(s), the department limit is ${limit}`);
+      return fail(
+        "rework_limit_reached",
+        `the job was returned ${done} time(s), the department limit is ${limit}. Choose the best version already made, say why and what it lacks, and hand it to the owner instead of another round.`,
+      );
     }
   }
   if (!row) {

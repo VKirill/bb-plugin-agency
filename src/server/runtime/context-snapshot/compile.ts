@@ -270,7 +270,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
   for (const id of input.coreSkillIds) {
     const entry = requireSkill(skillIndex, id, "core");
     if (!entry.ok) return entry;
-    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "core" });
+    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "core", ...(entry.value.name ? { name: entry.value.name } : {}) });
     selectedIds.add(entry.value.id);
   }
   for (const id of input.helperSkillIds) {
@@ -279,14 +279,14 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     }
     const entry = requireSkill(skillIndex, id, "helper");
     if (!entry.ok) return entry;
-    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "helper" });
+    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "helper", ...(entry.value.name ? { name: entry.value.name } : {}) });
     selectedIds.add(entry.value.id);
   }
   for (const id of agentVersion.skillIds) {
     const entry = requireSkill(skillIndex, id, "method");
     if (!entry.ok) return entry;
     if (selectedIds.has(entry.value.id)) continue;
-    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "method" });
+    selected.push({ id: entry.value.id, hash: entry.value.hash, role: "method", ...(entry.value.name ? { name: entry.value.name } : {}) });
     selectedIds.add(entry.value.id);
   }
 
@@ -526,7 +526,7 @@ function buildPromptLevels(args: {
     withoutSandbox,
     roleInstructions,
   } = args;
-  const selectedLines = selected.map((skill) => `${skill.role} ${skill.id} hash=${skill.hash}`).join("\n");
+  const selectedLines = selected.map((skill) => `${skill.role} ${skill.name ?? "?"} ${skill.id} hash=${skill.hash}`).join("\n");
   const mcpLines =
     selectedMcps.length === 0
       ? "MCP none"
@@ -598,7 +598,7 @@ function buildPromptLevels(args: {
       `secretDependencies ${effective.secretDependencies.join(",") || "none"}`,
       agentVersion.role,
       agentVersion.instructions,
-      "Selected skills (explicit IDs only; catalog bodies are not injected):",
+      "Your skills (name, id, hash). Work that falls under one of them: read that skill before starting and follow it; the bodies are not injected here.",
       selectedLines || "none",
       mcpLines,
       ...(plugins.ids.length

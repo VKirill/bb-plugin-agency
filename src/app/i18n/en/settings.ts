@@ -226,4 +226,20 @@ export const EN_SETTINGS: Record<string, string> = {
   "Подставляется, когда сотрудника добавляют в отдел помощником.": "Used when an employee joins a department as an assistant.",
   "Помощник готовит материал для сотрудника: читает, ищет, собирает. Решения принимает тот, кому он помогает.":
     "An assistant prepares material for an employee: reads, searches, collects. The decisions belong to the one they help.",
+  // templates-settings.tsx — base role instructions
+  "Базовая инструкция руководителя": "Base lead instruction",
+  "Базовая инструкция исполнителя": "Base executor instruction",
+  "Базовая инструкция проверяющего": "Base reviewer instruction",
+  "Базовая инструкция помощника": "Base assistant instruction",
+  "Общий порядок работы: как принять поручение, оценить, разбить, назначить, проверить и собрать итог.":
+    "The common order of work: how to take a job, judge it, split it, assign it, check it and assemble the result.",
+  "Доходит до каждого запуска руководителя отдельным слоем — копировать его в должностные инструкции не нужно.":
+    "Reaches every lead launch as its own layer — there is no need to copy it into job descriptions.",
+  "Общий порядок: сверить с собой, проверить входы, найти навык, сделать, проверить себя, сдать версией.":
+    "The common order: compare with yourself, check the inputs, find the skill, do the work, check yourself, hand in a version.",
+  "Доходит до каждого запуска исполнителя отдельным слоем.": "Reaches every executor launch as its own layer.",
+  "Общий порядок проверки: открыть версию, пройти по критериям, воспроизвести, описать дефекты, дать вердикт.":
+    "The common order of a review: open the version, walk the criteria, reproduce, describe the defects, give the verdict.",
+  "Общий порядок: взять только названное, не додумывать, дать ссылку на каждый факт, сдать выжимку.":
+    "The common order: take only what was named, never guess, reference every fact, hand in a digest.",
 };

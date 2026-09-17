@@ -418,7 +418,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     if (rounds >= limit) {
       return fail(
         "rework_limit_reached",
-        `${rounds} rework round(s) already under this job, the department limit is ${limit}; ask the owner with report-needs-input before another round`,
+        `${rounds} rework round(s) already under this job, the department limit is ${limit}. Pick the best of the versions already made, say in a comment why it is the best and what it lacks, and hand it to the owner with report-needs-input instead of another round.`,
       );
     }
     return ok(true);

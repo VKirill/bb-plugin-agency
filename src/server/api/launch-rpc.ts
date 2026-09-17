@@ -1,5 +1,8 @@
 import { WAIT_CODES } from "../runtime/launch-queue/service";
 import { buildWorkerInstructions, readJobRoleContext } from "../delegation/instructions";
+import { listTemplates } from "../templates/store";
+import type { MembershipRole } from "../../shared/contracts";
+import type { PlaybookKey } from "../../shared/templates";
 import { sandboxEscapeCounts } from "../runtime/sandbox-escape/service";
 import type { PluginDirectory } from "../integrations/plugin-directory";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
@@ -117,6 +120,14 @@ function officialCancelPorts(threads: BbPluginApi["sdk"]["threads"]): {
 }
 
 /** Tools of the selected plugins; a plugin that is not installed or not running stops the launch. */
+/** Which base instruction reaches which role type. */
+const PLAYBOOK_TEMPLATE: Record<MembershipRole, PlaybookKey> = {
+  lead: "playbookLead",
+  executor: "playbookExecutor",
+  reviewer: "playbookReviewer",
+  assistant: "playbookAssistant",
+};
+
 export function pluginToolsFrom(plugins: PluginDirectory) {
   return async (pluginIds: readonly string[]): Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>> => {
     let installed;
@@ -276,7 +287,10 @@ export function createIsolatedLaunchRpc(deps: {
           ...(deps.plugins ? { pluginTools: pluginToolsFrom(deps.plugins) } : {}),
           roleInstructions: (jobId) => {
             const role = readJobRoleContext(deps.db, jobId);
-            return role ? buildWorkerInstructions(role) : null;
+            if (!role) return null;
+            // The owner's base instruction of this role type: one order of work for every job.
+            const playbook = listTemplates(deps.db).find((row) => row.key === PLAYBOOK_TEMPLATE[role.assigneeType])?.text ?? null;
+            return buildWorkerInstructions({ ...role, playbook });
           },
           server: {
             applicable: DEFAULT_APPLICABLE,

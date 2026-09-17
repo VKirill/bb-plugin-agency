@@ -96,6 +96,8 @@ export type SelectedSkill = {
   id: CatalogSkillId;
   hash: string;
   role: SkillRole;
+  /** Catalog name: an employee cannot pick a skill they only know by id. */
+  name?: string;
 };
 
 export type SelectedMcp = {

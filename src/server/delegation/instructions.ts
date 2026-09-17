@@ -23,6 +23,9 @@ export type DelegationMode = (typeof DELEGATION_MODES)[number];
 
 export const INSTRUCTIONS_LIMIT = 4_000;
 
+/** The owner's base role instruction is theirs to write; the prompt caps it so one layer cannot eat the rest. */
+export const PLAYBOOK_LIMIT = 4_000;
+
 export type DepartmentRoute = {
   departmentId: string;
   name: string;
@@ -58,6 +61,8 @@ export type WorkerContext = {
   isLead: boolean;
   /** Role type of the assignee in the job's department; a lead-run job is `lead`. */
   assigneeType: MembershipRole;
+  /** Owner's base instruction for this role type: the same order of work for every job. */
+  playbook?: string | null;
   members: WorkerMember[];
   /** Department work rules that change how the lead and the reviewer act. */
   rules?: {
@@ -161,7 +166,9 @@ export function readJobRoleContext(db: SqlDatabase, jobId: string): WorkerContex
     name: row.name,
     role: row.role ?? "",
     lead: row.membership_role === "lead",
-    type: (row.membership_role === "lead" || row.membership_role === "reviewer" ? row.membership_role : "executor") as MembershipRole,
+    type: (row.membership_role === "lead" || row.membership_role === "reviewer" || row.membership_role === "assistant"
+      ? row.membership_role
+      : "executor") as MembershipRole,
   }));
   const isLead = Boolean(job.assigned_agent_id) && job.assigned_agent_id === job.lead_agent_id;
   const rules = rulesForDepartment(db, job.department_id);
@@ -289,7 +296,7 @@ export function workLanguageLine(lang: AgencyLanguage = agencyLanguage()): strin
 function leadRuleLines(rules: WorkerContext["rules"]): string[] {
   if (!rules) return [];
   return [
-    `- Department rules: at most ${rules.reworkLimit} rework rounds per job; after that the server refuses another rework and the decision goes to the owner (report-needs-input).`,
+    `- Department rules: at most ${rules.reworkLimit} rework rounds per job. When they run out the server refuses another rework: compare the versions already made, pick the best one, say in a comment why it is the best and what it still lacks, and hand it to the owner as "accepted with remarks" (report-needs-input). Do not stall on a fourth round.`,
     rules.minorDefectsWithoutRound
       ? "- Minor defects do not open a new round: list them in the final report and assemble the result."
       : "- Every open defect, minor ones included, gets a rework subtask and another review.",
@@ -339,7 +346,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "A subtask returned to you as blocked with \"Return\" (or \"Возврат\"): reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
       workLanguageLine(),
     ];
-    return fit(head, list, tail);
+    return withPlaybook(worker, [fit(head, list, tail)]);
   }
   const common = [
     "- Job comments are Markdown: first line the outcome, details as a list (`\\n` line breaks in JSON), technical ids only when needed. Long material goes to the report.",
@@ -352,8 +359,18 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     "- Work you could not finish is reported as such: say which acceptance criteria are not met and what is missing. A promise to do it later is not a result.",
     workLanguageLine(),
   ];
+  if (worker.assigneeType === "assistant") {
+    return withPlaybook(worker, [
+      `## Your role: assistant in ${worker.jobKey}`,
+      `Job "${worker.title}" of the "${worker.departmentName}" department. You prepare material for a colleague; the decisions are theirs.`,
+      "- Read and collect only what the brief names. Every fact carries a reference (path:line, URL, clause, date); what you did not find is said plainly.",
+      "- Do not decide what to do next and do not create jobs: that belongs to the lead and to the employee you help.",
+      "- Hand in a short digest as a version and a final comment. Your work goes to a colleague, so it needs no independent review.",
+      ...common,
+    ]);
+  }
   if (worker.assigneeType === "reviewer") {
-    return [
+    return withPlaybook(worker, [
       `## Your role: reviewer of ${worker.jobKey}`,
       `Job "${worker.title}" of the "${worker.departmentName}" department. You review someone else's version independently; you do not fix it.`,
       "- Review the input versions of this job (`bb agency job get` → inputs, then `bb agency artifact open` with the hash), not working files on trust. No input version or no criteria: return it to the lead.",
@@ -362,15 +379,24 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "- The job turns out to be a review of your own work, or an implementation: do not take it. `bb agency job comment` \"Return: reason\", then `bb agency job transition` to blocked and end your turn.",
       "- Hand in: verdict report .agency/jobs/<key>/report.md (verdict, criteria table, defects, commands and output) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` with the verdict → end your turn. Do not accept the result: the lead or the owner decides.",
       ...common,
-    ].join("\n");
+    ]);
   }
-  return [
+  return withPlaybook(worker, [
     `## Your role: executor of ${worker.jobKey}`,
     `Job "${worker.title}" of the "${worker.departmentName}" department. Do the work yourself within the brief.`,
     "- First compare the job with your job description. Not your kind of work, or required inputs are missing: do not start. `bb agency job comment` \"Return: reason; who fits; what is missing\", then `bb agency job transition` to blocked and end your turn. The lead is notified.",
     "- Hand in: report .agency/jobs/<key>/report.md (outcome, what was done and where, how it was checked, what was not done) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` for the lead with a link to the version → end your turn. Saying \"done\" is not acceptance.",
     ...common,
-  ].join("\n");
+  ]);
+}
+
+/**
+ * The owner's base instruction of this role type goes under the role section: one order of work
+ * for every job, so it never has to be copied into every job description.
+ */
+function withPlaybook(worker: WorkerContext, lines: string[]): string {
+  const playbook = worker.playbook?.trim();
+  return [...lines, ...(playbook ? ["", playbook.slice(0, PLAYBOOK_LIMIT)] : [])].join("\n");
 }
 
 /** Instructions for ordinary BB chats: route work to the Agency or do it in the chat. */
