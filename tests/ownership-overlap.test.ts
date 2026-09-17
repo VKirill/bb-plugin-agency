@@ -25,11 +25,11 @@ function database() {
 }
 
 /** A job row with its contract and, optionally, an attempt in a live state. */
-function insertJob(db: ReturnType<typeof database>, input: { id: string; key: string; owns: string[]; attemptState?: string; bindingId?: string }) {
+function insertJob(db: ReturnType<typeof database>, input: { id: string; key: string; owns: string[]; attemptState?: string; bindingId?: string; parentJobId?: string }) {
   db.prepare(
-    `INSERT INTO agency_job (id, key, binding_id, department_id, title, brief, acceptance, state, priority, revision, updated_at, reviewer_agent_ids, observer_agent_ids, contract_json)
-     VALUES (?, ?, ?, 'dep_aaaaaaaa', 'Job', 'Brief', 'Acceptance', 'running', 'normal', 1, ?, '[]', '[]', ?)`,
-  ).run(input.id, input.key, input.bindingId ?? "bnd_aaaaaaaa", new Date().toISOString(), JSON.stringify(contract(input.owns)));
+    `INSERT INTO agency_job (id, key, binding_id, department_id, title, brief, acceptance, state, priority, revision, updated_at, reviewer_agent_ids, observer_agent_ids, contract_json, parent_job_id)
+     VALUES (?, ?, ?, 'dep_aaaaaaaa', 'Job', 'Brief', 'Acceptance', 'running', 'normal', 1, ?, '[]', '[]', ?, ?)`,
+  ).run(input.id, input.key, input.bindingId ?? "bnd_aaaaaaaa", new Date().toISOString(), JSON.stringify(contract(input.owns)), input.parentJobId ?? null);
   if (!input.attemptState) return;
   db.prepare(
     `INSERT INTO agency_run_attempt (id, job_id, attempt_no, snapshot_id, digest, thread_id, launch_id, state, revision, created_at, updated_at)
@@ -64,6 +64,23 @@ describe("two jobs that may change the same files", () => {
       expect(assertOwnershipFree(db, { id: "job_new000003", bindingId: "bnd_aaaaaaaa", contract: contract(["src/billing/**"]) }, true)).toEqual({ ok: true, value: true });
       // A job without a contract is not held back.
       expect(assertOwnershipFree(db, { id: "job_new000004", bindingId: "bnd_aaaaaaaa", contract: undefined }, true)).toEqual({ ok: true, value: true });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("never holds a subtask back because of its own main job or a sibling's child", () => {
+    const db = database();
+    try {
+      // The lead of AG-10 is running with the same files it hands to its subtasks.
+      insertJob(db, { id: "job_parent0001", key: "AG-10", owns: ["pilot/**"], attemptState: "running" });
+      insertJob(db, { id: "job_child00001", key: "AG-11", owns: ["pilot/slug.mjs"], parentJobId: "job_parent0001" });
+      insertJob(db, { id: "job_stranger01", key: "AG-12", owns: ["tools/report.mjs"], attemptState: "running" });
+      expect(assertOwnershipFree(db, { id: "job_child00001", bindingId: "bnd_aaaaaaaa", contract: contract(["pilot/slug.mjs"]) }, true)).toEqual({ ok: true, value: true });
+      // A job outside the family still waits.
+      const blocked = assertOwnershipFree(db, { id: "job_outsider01", bindingId: "bnd_aaaaaaaa", contract: contract(["tools/report.mjs"]) }, true);
+      expect(blocked).toMatchObject({ ok: false, error: { code: "owns_overlap" } });
+      expect(!blocked.ok && blocked.error.message).toContain("AG-12");
     } finally {
       db.close();
     }

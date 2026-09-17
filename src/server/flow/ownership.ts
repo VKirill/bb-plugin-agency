@@ -49,21 +49,49 @@ function contractOf(json: string | null): JobContract | null {
 }
 
 /**
- * Jobs of the same project folder with a live attempt. Another folder is another
- * checkout, so its files cannot collide with this one.
+ * The job's own family: its parents up to the main job and everything under it. A lead
+ * waits for its subtasks and hands them the same files on purpose, so a subtask must never
+ * wait for its own parent — that would be a deadlock.
+ */
+function familyIds(db: SqlDatabase, jobId: string): Set<string> {
+  const family = new Set<string>([jobId]);
+  let cursor: string | null = jobId;
+  while (cursor) {
+    const row = db.prepare(`SELECT parent_job_id FROM agency_job WHERE id = ?`).get(cursor) as { parent_job_id: string | null } | undefined;
+    cursor = row?.parent_job_id ?? null;
+    if (cursor && !family.has(cursor)) family.add(cursor);
+    else cursor = null;
+  }
+  const queue = [...family];
+  while (queue.length) {
+    const parent = queue.shift()!;
+    const children = db.prepare(`SELECT id FROM agency_job WHERE parent_job_id = ?`).all(parent) as { id: string }[];
+    for (const child of children) {
+      if (family.has(child.id)) continue;
+      family.add(child.id);
+      queue.push(child.id);
+    }
+  }
+  return family;
+}
+
+/**
+ * Jobs of the same project folder with a live attempt, outside this job's own family.
+ * Another folder is another checkout, so its files cannot collide with this one.
  */
 function runningJobs(db: SqlDatabase, job: Pick<Job, "id" | "bindingId">): { key: string; contract: JobContract | null }[] {
   const placeholders = LIVE_ATTEMPT_STATES.map(() => "?").join(", ");
+  const family = familyIds(db, job.id);
   const rows = db
     .prepare(
-      `SELECT j.key, j.contract_json FROM agency_job j
-       WHERE j.binding_id = ? AND j.id != ? AND EXISTS (
+      `SELECT j.id, j.key, j.contract_json FROM agency_job j
+       WHERE j.binding_id = ? AND EXISTS (
          SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id AND a.state IN (${placeholders})
        )
        ORDER BY j.rowid`,
     )
-    .all(job.bindingId, job.id, ...LIVE_ATTEMPT_STATES) as { key: string; contract_json: string | null }[];
-  return rows.map((row) => ({ key: row.key, contract: contractOf(row.contract_json) }));
+    .all(job.bindingId, ...LIVE_ATTEMPT_STATES) as { id: string; key: string; contract_json: string | null }[];
+  return rows.filter((row) => !family.has(row.id)).map((row) => ({ key: row.key, contract: contractOf(row.contract_json) }));
 }
 
 /** Launch gate: waits while another running job owns one of this job's files. */
