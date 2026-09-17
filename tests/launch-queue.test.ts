@@ -95,7 +95,14 @@ describe("launch queue", () => {
     expect(await sweepLaunchQueue(ports)).toEqual({ launched: 0, removed: 1 });
     expect(comments.at(-1)).toContain("Снята с очереди запуска");
     expect(owner.at(-1)?.text).toContain("Снята с очереди запуска");
+    // The dropped row stays: the queue does not retry in a loop and the repair leaves it alone.
     expect(listLaunchQueue(db)).toEqual([]);
+    expect(repairQueuedJobs(db, "2026-09-17T12:00:00.000Z")).toEqual([]);
+    expect(await sweepLaunchQueue(ports)).toEqual({ launched: 0, removed: 0 });
+    expect(comments.filter((text) => text.includes("Снята с очереди"))).toHaveLength(1);
+    // Putting it back by hand starts a new round.
+    enqueueLaunch(db, item.id, "2026-09-17T12:05:00.000Z");
+    expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([item.id]);
   });
 
   it("puts a queued job with no queue row and no attempt back in line", () => {

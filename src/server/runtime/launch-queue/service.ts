@@ -44,8 +44,18 @@ const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, l
 
 export type QueueEntry = { jobId: string; position: number; requestedAt: string; waitingReason: string | null };
 
+/** Puts the job in line. A job the queue had dropped starts a new round: the reason is cleared. */
 export function enqueueLaunch(db: SqlDatabase, jobId: string, now: string): void {
   db.prepare(`INSERT OR IGNORE INTO agency_launch_queue (job_id, requested_at, waiting_reason, updated_at) VALUES (?, ?, NULL, ?)`).run(jobId, now, now);
+  db.prepare(`UPDATE agency_launch_queue SET dropped_at = NULL, failing_since = NULL, waiting_reason = NULL, requested_at = ?, updated_at = ? WHERE job_id = ? AND dropped_at IS NOT NULL`).run(now, now, jobId);
+}
+
+/**
+ * A job the queue gave up on keeps its row with `dropped_at`: the launch is not retried in a
+ * loop, the reason stays visible, and the owner decides. A new `enqueueLaunch` starts it over.
+ */
+export function dropFromQueue(db: SqlDatabase, jobId: string, reason: string, now: string): void {
+  db.prepare(`UPDATE agency_launch_queue SET dropped_at = ?, waiting_reason = ?, updated_at = ? WHERE job_id = ?`).run(now, reason, now, jobId);
 }
 
 export function dequeueLaunch(db: SqlDatabase, jobId: string): boolean {
@@ -56,7 +66,7 @@ export function listLaunchQueue(db: SqlDatabase): QueueEntry[] {
   const rows = db
     .prepare(
       `SELECT q.job_id, q.requested_at, q.waiting_reason, j.priority
-       FROM agency_launch_queue q JOIN agency_job j ON j.id = q.job_id`,
+       FROM agency_launch_queue q JOIN agency_job j ON j.id = q.job_id WHERE q.dropped_at IS NULL`,
     )
     .all() as { job_id: string; requested_at: string; waiting_reason: string | null; priority: string }[];
   return rows
@@ -164,11 +174,11 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
         continue;
       }
     }
-    dequeueLaunch(ports.db, job.id);
     removed += 1;
     const text = en
       ? `Left the launch queue: ${result.error.message}. Check readiness in the job card and launch by hand.`
       : `Снята с очереди запуска: ${result.error.message}. Проверьте готовность в карточке задачи и запустите вручную.`;
+    dropFromQueue(ports.db, job.id, result.error.message, now);
     ports.comment(job, text);
     ports.notifyOwner?.({ jobId: job.id, dedupeKey: `launch-queue-left:${job.id}:${entry.requestedAt}`, text: `${job.key}: ${text}` });
   }

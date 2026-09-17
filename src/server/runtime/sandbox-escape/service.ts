@@ -46,7 +46,8 @@ export async function scanSandboxEscapes(
   attempts: readonly AttemptRef[],
 ): Promise<string[]> {
   // BB returns at most 100 thread events per call.
-  const pageSize = Math.min(deps.pageSize ?? 100, 100);
+  // BB refuses an event limit of 100 («Thread event limit cannot exceed 100»), so pages stay smaller.
+  const pageSize = Math.min(deps.pageSize ?? 50, 99);
   const maxPages = deps.maxPages ?? 20;
   const grew: string[] = [];
   for (const attempt of attempts) {
