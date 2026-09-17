@@ -156,7 +156,16 @@ export const saveDepartmentProfileCommandSchema = changeCommandSchema
     leadAgentId: opaqueIdSchema,
     process: processVersionDraftSchema.optional(),
     memberships: z
-      .array(z.object({ agentId: opaqueIdSchema, role: membershipRoleSchema }).strict())
+      .array(
+        z
+          .object({
+            agentId: opaqueIdSchema,
+            role: membershipRoleSchema,
+            /** Assistants: the employee of this department they help. */
+            helpsAgentId: opaqueIdSchema.nullable().optional(),
+          })
+          .strict(),
+      )
       .optional(),
   })
   .strict();

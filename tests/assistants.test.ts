@@ -122,3 +122,49 @@ describe("what an assistant may be given", () => {
     expect(subtask.ok).toBe(true);
   });
 });
+
+describe("saving a department with assistants", () => {
+  it("keeps «helps whom» through the department profile", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const helper = s.store.provisionAgent(s.ctx, {
+      requestId: randomUUID(),
+      name: "Помощник",
+      state: "active",
+      version: {
+        version: 1,
+        role: "Помощник разработчика",
+        instructions: "Читает и собирает.",
+        providerId: "claude-code",
+        model: "claude-haiku-4-5",
+        reasoningEffort: "low",
+        skillIds: [],
+        mcpIds: [],
+        policyVersionId: s.policyVersionId,
+      },
+    } as never);
+    if (!helper.ok) throw new Error(helper.error.message);
+    const department = s.store.getDepartment(s.departmentId)!;
+    const saved = s.store.saveDepartmentProfile(s.ctx, {
+      requestId: randomUUID(),
+      expectedRevision: department.revision,
+      departmentId: s.departmentId,
+      name: department.name,
+      leadAgentId: department.leadAgentId,
+      memberships: [
+        { agentId: s.lead, role: "lead" },
+        { agentId: s.developer, role: "executor" },
+        { agentId: s.reviewer, role: "reviewer" },
+        { agentId: helper.value.agent.id, role: "assistant", helpsAgentId: s.developer },
+      ],
+    } as never);
+    expect(saved.ok).toBe(true);
+    const rows = s.store.listMemberships(s.departmentId);
+    expect(rows.find((row) => row.agentId === helper.value.agent.id)).toMatchObject({
+      role: "assistant",
+      helpsAgentId: s.developer,
+    });
+    // An executor never carries the field, whatever the caller sends.
+    expect(rows.find((row) => row.agentId === s.developer)?.helpsAgentId).toBeNull();
+  });
+});

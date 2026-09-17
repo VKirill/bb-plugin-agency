@@ -49,7 +49,8 @@ function setup() {
 
 describe("starter kit", () => {
   it("has a lead and routable charters in both languages in every department", () => {
-    expect(STARTER_KIT.map((item) => item.key)).toEqual(["development", "dev-conveyor", "research", "writing"]);
+    // The owner's office comes first: it is the address for work no other department takes.
+    expect(STARTER_KIT.map((item) => item.key)).toEqual(["owner-office", "development", "dev-conveyor", "research", "writing"]);
     for (const item of STARTER_KIT) {
       expect(item.agents.filter((agent) => agent.roleType === "lead")).toHaveLength(1);
       expect(charterAccepts(item.text.ru.charter)).toBeTruthy();
@@ -118,10 +119,10 @@ describe("starter kit", () => {
     const { id: _id, agentId: _agentId, ...draft } = version;
     const edited = t.s.store.saveAgentProfile(t.s.bootstrap, { requestId: randomUUID(), expectedRevision: agent.revision, agentId: agent.id, name: agent.name, state: agent.state, version: { ...draft, instructions: `${version.instructions}\nПишу только короткие тексты.` } });
     expect(edited.ok).toBe(true);
-    expect(starterKitView(t.db, "en", NOW)).toMatchObject({ translatable: 3, edited: 1 });
+    expect(starterKitView(t.db, "en", NOW)).toMatchObject({ translatable: 4, edited: 1 });
 
     const translated = translateStarterKit(t.ports, "en");
-    expect(translated.ok && translated.value).toMatchObject({ translated: 3, edited: [{ kind: "agent", name: "Автор" }] });
+    expect(translated.ok && translated.value).toMatchObject({ translated: 4, edited: [{ kind: "agent", name: "Автор" }] });
     expect(t.names()).toEqual(expect.arrayContaining(["Editorial lead", "Editor", "Автор"]));
     const department = t.db.prepare(`SELECT d.name, pv.instructions FROM agency_department d JOIN agency_process_version pv ON pv.id = d.process_version_id WHERE d.name = 'Texts and documentation'`).get() as { name: string; instructions: string };
     expect(department.instructions.startsWith("## Purpose")).toBe(true);

@@ -326,7 +326,7 @@ export const starterKitViewSchema = z
                 key: z.string(),
                 name: z.string(),
                 role: z.string(),
-                roleType: z.enum(["lead", "executor", "reviewer"]),
+                roleType: z.enum(["lead", "executor", "reviewer", "assistant"]),
                 /** CLI and model this employee is meant for; absent means the role default. */
                 model: z.object({ providerId: z.string(), model: z.string(), label: z.string() }).strict().optional(),
               })

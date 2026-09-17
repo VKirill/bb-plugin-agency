@@ -212,7 +212,7 @@ export type StarterKitPorts = {
   resolveModel?: (wish: { providerId: string; model: string }) => ModelChoice;
   provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
   provisionDepartment: (input: { requestId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<{ department: { id: string } }>;
-  addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" }) => DomainResult<unknown>;
+  addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" | "assistant"; helpsAgentId?: string }) => DomainResult<unknown>;
   saveAgentProfile: (input: { requestId: string; expectedRevision: number; agentId: string; name: string; state: string; version: AgentState["version"] }) => DomainResult<unknown>;
   saveDepartmentProfile: (input: { requestId: string; expectedRevision: number; departmentId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<unknown>;
 };
@@ -305,7 +305,14 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
     remember(ports.db, "department", department.value.department.id, item.key, now);
     for (const agent of item.agents) {
       if (agent.roleType === "lead") continue;
-      ports.addMembership({ requestId: ports.newRequestId(), departmentId: department.value.department.id, agentId: agentIds.get(agent.key)!, role: agent.roleType });
+      const helps = agent.helpsKey ? agentIds.get(agent.helpsKey) : undefined;
+      ports.addMembership({
+        requestId: ports.newRequestId(),
+        departmentId: department.value.department.id,
+        agentId: agentIds.get(agent.key)!,
+        role: agent.roleType,
+        ...(helps ? { helpsAgentId: helps } : {}),
+      });
     }
     outcome.installed.push({
       key,

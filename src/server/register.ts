@@ -388,7 +388,12 @@ export function registerAgency(bb: BbPluginApi) {
     db,
     getJob: (jobId) => store.getJob(jobId),
     // The employee may switch auto review off for their own work; the department rule is the default.
-    enabled: (job) => rulesForLaunch(db, job.departmentId, job.assignedAgentId ?? "").autoReview,
+    enabled: (job) => {
+      // An assistant's brief is material for a colleague, not a result to review independently.
+      const membership = job.assignedAgentId ? store.getMembership(job.departmentId, job.assignedAgentId) : null;
+      if (membership?.role === "assistant") return false;
+      return rulesForLaunch(db, job.departmentId, job.assignedAgentId ?? "").autoReview;
+    },
     memberRole: (departmentId, agentId) => store.memberRole(departmentId, agentId),
     latestVersion: (jobId) => {
       const row = db

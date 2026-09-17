@@ -959,6 +959,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
               departmentId: current.value.id,
               agentId: row.agentId,
               role: row.role,
+              helpsAgentId: row.role === "assistant" ? row.helpsAgentId ?? null : null,
             }))
           : (() => {
               const rows = repos.membership.listByDepartment(current.value.id).map((row) => ({
@@ -1877,6 +1878,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     getDepartment: (id: string) => repos.department.get(id),
     getProcessVersion: (id: string) => repos.processVersion.get(id),
     listMemberships: (departmentId: string) => repos.membership.listByDepartment(departmentId),
+    getMembership: (departmentId: string, agentId: string) => repos.membership.get(departmentId, agentId),
     getBinding: (id: string) => repos.binding.get(id),
     listProjectDepartments: (bindingId: string) => repos.projectDepartment.listByBinding(bindingId),
     getJob: (id: string) => repos.job.get(id),
