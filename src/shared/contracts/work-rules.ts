@@ -112,8 +112,12 @@ export const INHERITED_RULE_KEYS = [
   "budgetWarnPercent",
 ] as const satisfies readonly WorkRuleKey[];
 
-/** Inherited keys an employee may override for their own launches. */
-export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox"] as const satisfies readonly WorkRuleKey[];
+/**
+ * Inherited keys an employee may override for their own launches. «Проверка создаётся
+ * автоматически» belongs here too: a scout who only collects material for a colleague
+ * has nothing for a reviewer to check.
+ */
+export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox", "autoReview"] as const satisfies readonly WorkRuleKey[];
 
 /**
  * Inherited keys a machine may override for every launch on it, e.g. a Linux server

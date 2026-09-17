@@ -181,7 +181,13 @@ export function starterKitView(db: SqlDatabase, language: KitLanguage, now: stri
       key: item.key,
       name: item.text[language].name,
       purpose: purposeOf(item.text[language].charter),
-      agents: item.agents.map((agent) => ({ key: agent.key, name: agent.text[language].name, role: agent.text[language].role, roleType: agent.roleType })),
+      agents: item.agents.map((agent) => ({
+        key: agent.key,
+        name: agent.text[language].name,
+        role: agent.text[language].role,
+        roleType: agent.roleType,
+        ...(agent.preset ? { model: { providerId: agent.preset.providerId, model: agent.preset.model, label: agent.preset.label[language] } } : {}),
+      })),
       installed: installedByKey.get(item.key) ?? null,
     })),
     translatable,
@@ -197,6 +203,8 @@ export type StarterKitPorts = {
   policyVersionId: () => DomainResult<string>;
   /** CLI, model, reasoning and fast mode for a role type from the agency work rules. */
   defaults: (roleType: KitAgent["roleType"]) => { providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier: ServiceTier | null };
+  /** CLIs connected in BB. An employee whose preset CLI is missing starts on the role default. */
+  providerAvailable?: (providerId: string) => boolean;
   provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
   provisionDepartment: (input: { requestId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<{ department: { id: string } }>;
   addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" }) => DomainResult<unknown>;
@@ -204,7 +212,7 @@ export type StarterKitPorts = {
   saveDepartmentProfile: (input: { requestId: string; expectedRevision: number; departmentId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<unknown>;
 };
 
-export type InstallOutcome = { installed: { key: string; departmentId: string; agents: number }[]; skipped: { key: string; reason: string }[] };
+export type InstallOutcome = { installed: { key: string; departmentId: string; agents: number; note?: string }[]; skipped: { key: string; reason: string }[] };
 
 /** Installs the chosen starter departments with their employees in the given language. */
 export function installStarterKit(ports: StarterKitPorts, input: { keys: string[]; language: KitLanguage }, en: boolean): DomainResult<InstallOutcome> {
@@ -231,8 +239,13 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
     }
     const agentIds = new Map<string, string>();
     let failed: string | null = null;
+    const missingCli: string[] = [];
     for (const agent of item.agents) {
-      const defaults = ports.defaults(agent.roleType);
+      const preset = agent.preset && (ports.providerAvailable?.(agent.preset.providerId) ?? true) ? agent.preset : null;
+      if (agent.preset && !preset) missingCli.push(`${agent.text[input.language].name} (${agent.preset.providerId})`);
+      const defaults = preset
+        ? { providerId: preset.providerId, model: preset.model, reasoningEffort: preset.reasoningEffort as ReasoningEffort, serviceTier: (preset.serviceTier ?? null) as ServiceTier | null }
+        : ports.defaults(agent.roleType);
       const created = ports.provisionAgent({
         requestId: ports.newRequestId(),
         name: agent.text[input.language].name,
@@ -278,7 +291,18 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
       if (agent.roleType === "lead") continue;
       ports.addMembership({ requestId: ports.newRequestId(), departmentId: department.value.department.id, agentId: agentIds.get(agent.key)!, role: agent.roleType });
     }
-    outcome.installed.push({ key, departmentId: department.value.department.id, agents: agentIds.size });
+    outcome.installed.push({
+      key,
+      departmentId: department.value.department.id,
+      agents: agentIds.size,
+      ...(missingCli.length
+        ? {
+            note: en
+              ? `CLI is not connected in BB, the role default is used: ${missingCli.join(", ")}.`
+              : `CLI не подключён в BB, взята модель роли по умолчанию: ${missingCli.join(", ")}.`,
+          }
+        : {}),
+    });
   }
   return ok(outcome);
 }

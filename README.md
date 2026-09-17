@@ -144,12 +144,21 @@ columns. The interface and the standard templates switch between Russian and
 English.
 
 The Agency creates nothing by itself. An empty Agency offers starter departments —
-development, research and writing, each with a lead, executors, reviewers, a charter
-and job descriptions, in Russian or English — or you create your own departments,
-employees and rules from scratch. Starter records are ordinary data: edit, archive
+development, a development conveyor, research and writing, each with a lead, executors,
+reviewers, a charter and job descriptions, in Russian or English — or you create your own
+departments, employees and rules from scratch. The conveyor department comes with a CLI per
+role: a strong model plans, a cheap one reads the code, a fast one writes it and a model from
+another vendor reviews it; when a CLI is not connected in BB that employee starts on the role
+default. How to build and tune such a department:
+[skills/agency/references/dev-conveyor.md](skills/agency/references/dev-conveyor.md) (Russian). Starter records are ordinary data: edit, archive
 or delete them; untouched ones switch language with one button. A department or an
 employee goes to the archive with its history kept, and is deleted only when it
 never worked.
+
+An implementation subtask carries an execution contract: what to read first, which interfaces
+and invariants to keep, which files it may change, what must not be touched and which checks
+must pass. Two subtasks of one project folder that may change the same files do not run at
+once — the later one waits in the launch queue.
 
 A job's work order is in its card: which jobs must be done before it launches, and
 a "next step" for another department that the Agency creates by itself after

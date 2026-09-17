@@ -332,7 +332,7 @@ export const EN_TEAM: Record<string, string> = {
   "У проекта нет свободной рабочей папки. Папка появляется после первого треда в этом проекте BB; уже подключённые папки здесь не показываются.":
     "The project has no free working folder. A folder appears after the first thread in this BB project; folders that are already connected aren't shown here.",
   // organization-kit.tsx: starter departments, archive and delete
-  "Добавлено отделов: {count}. Сотрудники созданы с моделями по умолчанию из «Правил работы».": "Departments added: {count}. Employees were created with the default models from Work rules.",
+  "Добавлено отделов: {count}. Сотрудники без своей модели созданы с моделями по умолчанию из «Правил работы».": "Departments added: {count}. Employees without a model of their own start on the defaults from the work rules.",
   "Стартовые отделы": "Starter departments",
   "Готовые отделы с руководителем, исполнителями и проверяющими, регламентом и должностными инструкциями. Отметьте нужные — или закройте окно и создайте свой отдел. Всё добавленное можно менять, отправлять в архив и удалять.": "Ready departments with a lead, executors and reviewers, a charter and job descriptions. Pick the ones you need, or close this window and create your own department. Everything you add can be edited, archived and deleted.",
   "Читаем стартовый набор…": "Reading the starter set…",

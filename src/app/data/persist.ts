@@ -1,5 +1,5 @@
 import { tr } from "../i18n";
-import type { JobState } from "../../shared/contracts";
+import { CONTRACT_PARTS, type JobState } from "../../shared/contracts";
 import type { Agent, Group, Job, TaskFile } from "../prototype/data";
 import type { AgencyApi } from "./agency-api";
 import { asRelativePath, bytesToBase64, fileBytes, isOpaqueRecordId, mimeOf, sha256Hex } from "./content-hash";
@@ -496,7 +496,7 @@ export async function persistAnswerNeedsInput(
 }
 
 function sameContract(a: Job["contract"], b: Job["contract"]): boolean {
-  const norm = (value: Job["contract"]) => JSON.stringify(value ?? { mayChange: [], mustNotTouch: [], checks: [] });
+  const norm = (value: Job["contract"]) => JSON.stringify(CONTRACT_PARTS.map((part) => value?.[part] ?? []));
   return norm(a) === norm(b);
 }
 

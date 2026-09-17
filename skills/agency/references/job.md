@@ -89,10 +89,14 @@ bb agency job return --input-json '{"requestId":"<uuid>","jobId":"<id>","expecte
    **Контракт исполнения** — граница работы для подзадачи реализации, поле `contract`:
 
    ```json
-   "contract": {"mayChange": ["src/cards/**"], "mustNotTouch": ["src/billing/**", "публичный API"], "checks": ["npm test", "npm run build"]}
+   "contract": {"readFirst": ["docs/architecture.md", "src/cards/card.tsx"], "interfaces": ["openCard(id: string): Promise<Card>"], "mayChange": ["src/cards/**"], "mustNotTouch": ["src/billing/**", "публичный API"], "checks": ["npm test", "npm run build"]}
    ```
 
+   `readFirst` — что прочитать до первой правки, `interfaces` — сигнатуры и инварианты, которые результат обязан сохранить, `mayChange` — только файлы этой подзадачи, `mustNotTouch` — что остаётся как есть, `checks` — команды, которые исполнитель прогоняет до сдачи.
+
    Контракт попадает в промпт запуска и закрепляется в снимке: правка после `launch prepare` делает подготовленный запуск недействительным (`live_job_mismatch`). Изменить — `job update` с новым `contract`, очистить — `"contract": null`.
+
+   **Параллельные подзадачи.** Две задачи одной папки проекта, у которых пересекается `mayChange`, одновременно не запускаются: вторая отвечает `owns_overlap` и ждёт в очереди запуска, пока первая не закончит. Разводи подзадачи по разным файлам или связывай через `job depend`. Разбор конвейера разработки — [Отдел программистов: конвейер](dev-conveyor.md).
 3. **Входы.** Результат одной подзадачи для другой передай версией: `bb agency job attach-input` (`targetJobId`, `sourceJobId`, `artifactId`, `version`, `hash`). Ссылка на родителя не даёт доступа к файлам.
 4. **Порядок подзадач.** Подзадача, которой нужен результат другой, ждёт её: `bb agency job depend --input-json '{"requestId":"<UUID>","jobId":"<ждёт>","dependsOnJobId":"<должна быть готова>"}'`. Пока зависимость не готова, запуск отвечает `dependencies_open`; поставь такие подзадачи в очередь (`bb agency launch queue`) — каждая стартует сама, когда её зависимости будут готовы. Отменённая зависимость снимает задачу с очереди (`dependency_canceled`): реши сам. Убрать — `job undepend`. Циклы сервер не пускает (`dependency_cycle`).
    **Следующий шаг** — работа другого отдела после приёмки: `bb agency job next-step --input-json '{"jobId":"<ранняя задача>","step":{"departmentId":"…","title":"…","brief":"…","acceptance":"…","assignment":"lead"}}'`. Когда ранняя задача станет done, Агентство само создаст задачу рядом с ней (та же папка, тот же родитель), приложит принятые версии и поставит в очередь; итог пишется в историю обеих задач. `step: null` убирает шаг; выполненный шаг не меняется.

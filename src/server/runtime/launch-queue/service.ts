@@ -20,7 +20,7 @@ export const LAUNCH_QUEUE_MIGRATION = `CREATE TABLE agency_launch_queue (
 export const LAUNCH_QUEUE_SWEEP_MS = 15_000;
 
 /** Refusals that mean «wait», not «stop». */
-export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted", "dependencies_open"]);
+export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted", "dependencies_open", "owns_overlap"]);
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 

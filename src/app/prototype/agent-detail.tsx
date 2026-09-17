@@ -19,7 +19,7 @@ import { CustomMcpEditor } from "./custom-mcp";
 import { AgentMark, Button, Choice, Empty, Field, PageHead, Panel, Rows, SearchInput, TabBar, TextField } from "./shared";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { JOB_DESCRIPTION_LABEL, jobDescriptionKind, jobDescriptionTemplate } from "../data/instruction-templates";
-import { AGENT_SANDBOX_RULE_GROUP, LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
+import { AGENT_REVIEW_RULE_GROUP, AGENT_SANDBOX_RULE_GROUP, LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
 import { tr } from "../i18n";
 
 export function AgentDetail({
@@ -246,7 +246,7 @@ export function AgentDetail({
               </Panel>
             )}
             <p className="pt-2 text-xs text-muted-foreground">{tr("Правила сотрудника — лимиты и песочница — сохраняются своей кнопкой и не меняют версию профиля.")}</p>
-            <WorkRulesEditor key={agent.id} scope={`agent:${agent.id}`} inheritable notice={notice} groups={[LIMIT_RULE_GROUP("сотрудника", false), AGENT_SANDBOX_RULE_GROUP]} saveLabel="Сохранить правила сотрудника" inheritLabel="Как в отделе" />
+            <WorkRulesEditor key={agent.id} scope={`agent:${agent.id}`} inheritable notice={notice} groups={[LIMIT_RULE_GROUP("сотрудника", false), AGENT_REVIEW_RULE_GROUP, AGENT_SANDBOX_RULE_GROUP]} saveLabel="Сохранить правила сотрудника" inheritLabel="Как в отделе" />
           </>
         )}
         {tab === "Исполнение" && !live && (

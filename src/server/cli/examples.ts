@@ -133,6 +133,8 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     acceptance: "Текст принят.",
     contract: {
       mayChange: ["src/cards/**"],
+      readFirst: ["docs/architecture.md"],
+      interfaces: ["openCard(id: string): Promise<Card>"],
       mustNotTouch: ["src/billing/**", "публичный API"],
       checks: ["npm test", "npm run build"],
     },

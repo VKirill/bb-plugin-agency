@@ -24,6 +24,10 @@ const contractLineSchema = z.string().trim().min(1).max(500);
  */
 export const jobContractSchema = z
   .object({
+    /** What to read before starting: files, documents, previous results. Absent on older contracts. */
+    readFirst: z.array(contractLineSchema).max(30).optional(),
+    /** Signatures, contracts and invariants the result must keep. Absent on older contracts. */
+    interfaces: z.array(contractLineSchema).max(30).optional(),
     /** Files, modules or areas the employee may change. */
     mayChange: z.array(contractLineSchema).max(30).default([]),
     /** What must stay untouched. */
@@ -36,17 +40,25 @@ export const jobContractSchema = z
 export type JobContract = z.infer<typeof jobContractSchema>;
 
 export function contractIsEmpty(contract: JobContract | null | undefined): boolean {
-  return !contract || (contract.mayChange.length === 0 && contract.mustNotTouch.length === 0 && contract.checks.length === 0);
+  return !contract || CONTRACT_PARTS.every((part) => (contract[part] ?? []).length === 0);
 }
+
+/** Order of the contract in its text, in the card and in the form. */
+export const CONTRACT_PARTS = ["readFirst", "interfaces", "mayChange", "mustNotTouch", "checks"] as const;
+export type ContractPart = (typeof CONTRACT_PARTS)[number];
 
 /** Canonical text of a contract: pinned in the prompt and hashed in the snapshot. Empty contract → "". */
 export function contractText(contract: JobContract | null | undefined): string {
   if (!contract || contractIsEmpty(contract)) return "";
   const block = (title: string, lines: readonly string[]) => (lines.length ? [title, ...lines.map((line) => `- ${line}`)] : []);
   return [
+    // Appended in this order; an empty list adds nothing, so contracts written before
+    // «Прочитать сначала» and «Интерфейсы» keep their text and their snapshot hash.
     ...block("Можно менять:", contract.mayChange),
     ...block("Нельзя трогать:", contract.mustNotTouch),
     ...block("Проверки перед сдачей:", contract.checks),
+    ...block("Прочитать сначала:", contract.readFirst ?? []),
+    ...block("Интерфейсы и инварианты:", contract.interfaces ?? []),
   ].join("\n");
 }
 

@@ -1,6 +1,6 @@
 import { ACCEPTANCE_TEMPLATE, BRIEF_TEMPLATE, defaultTemplates } from "../../shared/templates";
 import { useState, type ReactNode } from "react";
-import type { JobContract } from "../../shared/contracts/job";
+import { contractIsEmpty, type ContractPart, type JobContract } from "../../shared/contracts/job";
 import { ROLE_TYPE_LABELS, type Agent, type Group } from "./data";
 import { Button, Choice, Field, TextField } from "./shared";
 import { tr, uiLanguage } from "../i18n";
@@ -119,6 +119,8 @@ export function AssigneeField({
 }
 
 const CONTRACT_FIELDS = [
+  { key: "readFirst", label: "Прочитать сначала", placeholder: "docs/architecture.md\nsrc/cards/card.tsx\nотчёт AG-12", hint: "Что исполнитель читает до начала: файлы, документы, отчёты прошлых задач. Экономит поиск и не даёт додумывать." },
+  { key: "interfaces", label: "Интерфейсы и инварианты", placeholder: "openCard(id: string): Promise<Card>\nцены считает только billing\nответ API не меняется", hint: "Сигнатуры, договорённости и правила, которые результат обязан сохранить. Менять их — вопрос руководителю." },
   { key: "mayChange", label: "Можно менять", placeholder: "src/cards/**\nстили карточки", hint: "Файлы, модули или области, в которых исполнитель работает. Одна строка — один пункт." },
   { key: "mustNotTouch", label: "Нельзя трогать", placeholder: "src/billing/**\nпубличный API\nмиграции базы", hint: "Что должно остаться как есть. Выход за границу — вопрос руководителю, а не решение исполнителя." },
   { key: "checks", label: "Проверки перед сдачей", placeholder: "npm test\nnpm run build\nскриншот страницы на 375 px", hint: "Команды и проверки, которые исполнитель проходит до публикации версии и упоминает в итоговом комментарии." },
@@ -130,8 +132,11 @@ function contractLines(text: string): string[] {
 
 /** Lines to a contract; an empty contract is no contract. */
 export function contractFromTexts(texts: Record<(typeof CONTRACT_FIELDS)[number]["key"], string>): JobContract | undefined {
-  const contract = { mayChange: contractLines(texts.mayChange), mustNotTouch: contractLines(texts.mustNotTouch), checks: contractLines(texts.checks) };
-  return contract.mayChange.length || contract.mustNotTouch.length || contract.checks.length ? contract : undefined;
+  // An empty optional list is left out, so a contract without them keeps its old shape and hash.
+  const contract = Object.fromEntries(
+    CONTRACT_FIELDS.map((field) => [field.key, contractLines(texts[field.key])]).filter(([key, lines]) => (lines as string[]).length || key === "mayChange" || key === "mustNotTouch" || key === "checks"),
+  ) as JobContract;
+  return contractIsEmpty(contract) ? undefined : contract;
 }
 
 export const CONTRACT_HINT: ReactNode = (
@@ -146,12 +151,8 @@ export const CONTRACT_HINT: ReactNode = (
  * as typed and turned into lists on every change, so new lines are not eaten.
  */
 export function JobContractFields({ value, onChange, defaultOpen }: { value?: JobContract; onChange: (next: JobContract | undefined) => void; defaultOpen?: boolean }) {
-  const [texts, setTexts] = useState(() => ({
-    mayChange: (value?.mayChange ?? []).join("\n"),
-    mustNotTouch: (value?.mustNotTouch ?? []).join("\n"),
-    checks: (value?.checks ?? []).join("\n"),
-  }));
-  const count = (value?.mayChange.length ?? 0) + (value?.mustNotTouch.length ?? 0) + (value?.checks.length ?? 0);
+  const [texts, setTexts] = useState(() => Object.fromEntries(CONTRACT_FIELDS.map((field) => [field.key, (value?.[field.key] ?? []).join("\n")])) as Record<ContractPart, string>);
+  const count = CONTRACT_FIELDS.reduce((total, field) => total + (value?.[field.key]?.length ?? 0), 0);
   return (
     <details className="rounded-lg border border-border px-3 py-2" open={defaultOpen ?? count > 0}>
       <summary className="cursor-pointer text-sm font-medium">

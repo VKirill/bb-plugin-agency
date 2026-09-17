@@ -29,13 +29,14 @@ import { createDashboardUsageReader, dashboardUsageCatalogFromSql } from "./runt
 import { listStoredBindings, listStoredDepartments, listStoredPolicies } from "./api/catalog";
 import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
 import { acceptedVersions, assertDependenciesDone, sweepNextSteps, type NextStepPorts } from "./flow/service";
+import { assertOwnershipFree } from "./flow/ownership";
 import { recheckJobText, sweepNightlyRecheck, type NightlyRecheckPorts } from "./runtime/nightly-recheck/service";
 import { buildDigest, listOwnerMessages, markOwnerMessagesRead, readOwnerMessage, recordOwnerMessage, scriptTemplates, setTelegramState } from "./owner-messages/service";
 import { serverDay } from "./runtime/nightly-recheck/service";
 import { sweepRemarkPatterns } from "./knowledge/remark-patterns";
 import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, departmentArchivedAt, departmentDeleteBlocker, restoreDepartment } from "./organization/lifecycle";
 import { installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "./organization/starter-kit";
-import { workRulesView } from "./rules/work-rules";
+import { rulesForLaunch, workRulesView } from "./rules/work-rules";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
@@ -263,8 +264,11 @@ export function registerAgency(bb: BbPluginApi) {
   };
   /** Every launch, by hand or from the queue: the jobs it depends on are done, then the limits. */
   const checkLaunchGate = async (job: Job) => {
-    const dependencies = assertDependenciesDone(db, job, agencyLanguage() === "en");
+    const en = agencyLanguage() === "en";
+    const dependencies = assertDependenciesDone(db, job, en);
     if (!dependencies.ok) return dependencies;
+    const ownership = assertOwnershipFree(db, job, en);
+    if (!ownership.ok) return ownership;
     return checkLaunchLimits(limitDeps, job);
   };
   const catalogRolesFile = join(bb.server.experimental_dataDir, ISOLATED_CATALOG_ROLES_FILENAME);
@@ -323,7 +327,8 @@ export function registerAgency(bb: BbPluginApi) {
   const autoReviewPorts = (): AutoReviewPorts => ({
     db,
     getJob: (jobId) => store.getJob(jobId),
-    enabled: (job) => store.rulesForDepartment(job.departmentId).autoReview,
+    // The employee may switch auto review off for their own work; the department rule is the default.
+    enabled: (job) => rulesForLaunch(db, job.departmentId, job.assignedAgentId ?? "").autoReview,
     memberRole: (departmentId, agentId) => store.memberRole(departmentId, agentId),
     latestVersion: (jobId) => {
       const row = db
@@ -450,6 +455,19 @@ export function registerAgency(bb: BbPluginApi) {
     saveDepartmentProfile: (input) => store.saveDepartmentProfile(ctx, input),
   });
   const kitLanguage = (language?: "ru" | "en") => language ?? agencyLanguage();
+  /** CLIs BB knows on the machine of an active project; null when the catalog is unavailable. */
+  const connectedProviders = async (): Promise<Set<string> | null> => {
+    const binding = listStoredBindings(db).find((row) => !row.archivedAt);
+    try {
+      const providers = binding
+        ? await bb.sdk.providers.list({ hostId: binding.hostId, signal: AbortSignal.timeout(12_000) })
+        : await bb.sdk.providers.list({ signal: AbortSignal.timeout(12_000) });
+      const available = providers.filter((provider) => provider.available).map((provider) => provider.id);
+      return available.length ? new Set(available) : null;
+    } catch {
+      return null;
+    }
+  };
   const organization = {
     starterKit: async (input: { language?: "ru" | "en" }) => {
       const access = readOnly();
@@ -459,7 +477,13 @@ export function registerAgency(bb: BbPluginApi) {
     installStarterKit: async (input: { keys: string[]; language?: "ru" | "en" }) => {
       const access = ownerOnly();
       if (!access.ok) return access;
-      const result = installStarterKit(starterKitPorts(access.value.ctx), { keys: input.keys, language: kitLanguage(input.language) }, agencyLanguage() === "en");
+      // A starter employee meant for Grok or GPT starts on the role default when that CLI is not connected here.
+      const connected = await connectedProviders();
+      const result = installStarterKit(
+        { ...starterKitPorts(access.value.ctx), ...(connected ? { providerAvailable: (providerId: string) => connected.has(providerId) } : {}) },
+        { keys: input.keys, language: kitLanguage(input.language) },
+        agencyLanguage() === "en",
+      );
       if (result.ok && result.value.installed.length) onChanged();
       return result;
     },

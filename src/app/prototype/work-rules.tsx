@@ -99,10 +99,18 @@ export const HOST_SANDBOX_RULE_GROUP: RuleGroup = {
   fields: [SANDBOX_FIELD],
 };
 
-/** The one rule an employee may set for their own launches. */
+/** Rules an employee may set for their own launches. */
 export const AGENT_SANDBOX_RULE_GROUP: RuleGroup = {
   title: "Песочница",
   fields: [SANDBOX_FIELD],
+};
+
+export const AGENT_REVIEW_RULE_GROUP: RuleGroup = {
+  title: "Проверка работы сотрудника",
+  hint: <p><Tr text={"По умолчанию действует правило отдела. Выключите, если этот сотрудник собирает материал для коллеги: проверять там нечего, а проверка отдела стоит денег."}/></p>,
+  fields: [
+    { key: "autoReview", label: "Проверка создаётся автоматически", kind: "bool", hint: <><p><Tr text={"Включено — когда этот сотрудник сдаёт работу, Агентство само создаёт подзадачу проверки на свободного проверяющего отдела."}/></p><p><Tr text={"Выключено — его работу принимает тот, кто её поручил: руководитель или владелец."}/></p></> },
+  ],
 };
 
 export const LIMIT_RULE_GROUP = (scopeLabel: string, withWarn = true): RuleGroup => ({

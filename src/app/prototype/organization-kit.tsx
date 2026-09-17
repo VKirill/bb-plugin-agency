@@ -53,7 +53,8 @@ export function StarterKitDialog({ open, onOpenChange, notice, onChanged }: { op
     }
     const added = result.value.installed.length;
     const skipped = result.value.skipped.map((row) => `${view?.departments.find((item) => item.key === row.key)?.name ?? row.key}: ${row.reason}`);
-    notice([tr("Добавлено отделов: {count}. Сотрудники созданы с моделями по умолчанию из «Правил работы».", { count: added }), ...skipped].join(" "));
+    const notes = result.value.installed.map((row) => row.note).filter((note): note is string => Boolean(note));
+    notice([tr("Добавлено отделов: {count}. Сотрудники без своей модели созданы с моделями по умолчанию из «Правил работы».", { count: added }), ...notes, ...skipped].join(" "));
     onChanged?.();
     onOpenChange(false);
   };
@@ -86,8 +87,13 @@ export function StarterKitDialog({ open, onOpenChange, notice, onChanged }: { op
                     {installed && <span className="ml-2 text-xs font-normal text-muted-foreground">{tr("уже есть")}</span>}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{department.purpose}</span>
-                  <span className="mt-1.5 block text-xs text-muted-foreground">
-                    {department.agents.map((agent) => `${agent.name} · ${tr(ROLE_TYPE_LABELS[agent.roleType]).toLowerCase()}`).join("; ")}
+                  <span className="mt-1.5 block space-y-0.5 text-xs text-muted-foreground">
+                    {department.agents.map((agent) => (
+                      <span key={agent.key} className="block">
+                        {agent.name} · {tr(ROLE_TYPE_LABELS[agent.roleType]).toLowerCase()}
+                        {agent.model ? ` · ${agent.model.label}` : ""}
+                      </span>
+                    ))}
                   </span>
                 </span>
               </label>

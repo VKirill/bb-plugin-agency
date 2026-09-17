@@ -47,8 +47,8 @@ function setup() {
 }
 
 describe("starter kit", () => {
-  it("has three departments with a lead each, routable charters in both languages", () => {
-    expect(STARTER_KIT.map((item) => item.key)).toEqual(["development", "research", "writing"]);
+  it("has a lead and routable charters in both languages in every department", () => {
+    expect(STARTER_KIT.map((item) => item.key)).toEqual(["development", "dev-conveyor", "research", "writing"]);
     for (const item of STARTER_KIT) {
       expect(item.agents.filter((agent) => agent.roleType === "lead")).toHaveLength(1);
       expect(charterAccepts(item.text.ru.charter)).toBeTruthy();
@@ -56,6 +56,17 @@ describe("starter kit", () => {
       expect(item.text.en.charter).not.toMatch(/[А-Яа-яЁё]/);
       for (const agent of item.agents) expect(agent.text.en.instructions + agent.text.en.name + agent.text.en.role).not.toMatch(/[А-Яа-яЁё]/);
     }
+  });
+
+  it("gives the conveyor employees the CLI their work is meant for", () => {
+    const conveyor = STARTER_KIT.find((item) => item.key === "dev-conveyor")!;
+    const preset = (key: string) => conveyor.agents.find((agent) => agent.key === key)?.preset;
+    // The code is written by Grok in fast mode, planning and review go to other vendors.
+    expect(preset("conveyor-coder")).toMatchObject({ providerId: "acp-cursor", model: "grok-4.6", reasoningEffort: "medium", serviceTier: "fast" });
+    expect(preset("conveyor-lead")).toMatchObject({ providerId: "claude-code" });
+    expect(preset("conveyor-scout")).toMatchObject({ providerId: "codex", serviceTier: "fast" });
+    expect(preset("conveyor-reviewer")).toMatchObject({ providerId: "codex", reasoningEffort: "high" });
+    expect(conveyor.agents.every((agent) => agent.preset?.label.ru && agent.preset.label.en && !/[А-Яа-яЁё]/.test(agent.preset.label.en))).toBe(true);
   });
 
   it("installs only the chosen departments, with default models, and never twice", () => {
@@ -94,7 +105,7 @@ describe("starter kit", () => {
 
   it("recognizes records created earlier from the starter texts", () => {
     const t = setup();
-    const item = STARTER_KIT[1]!;
+    const item = STARTER_KIT.find((row) => row.key === "research")!;
     const policy = t.ports.policyVersionId();
     if (!policy.ok) throw new Error(policy.error.message);
     const lead = item.agents[0]!;

@@ -495,7 +495,7 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
 
 /** The contract in the card: three short lists under the brief. */
 function JobContractView({ contract }: { contract: NonNullable<Job["contract"]> }) {
- const blocks=[["Можно менять",contract.mayChange],["Нельзя трогать",contract.mustNotTouch],["Проверки перед сдачей",contract.checks]] as const;
+ const blocks: [string, readonly string[]][]=[["Прочитать сначала",contract.readFirst??[]],["Интерфейсы и инварианты",contract.interfaces??[]],["Можно менять",contract.mayChange],["Нельзя трогать",contract.mustNotTouch],["Проверки перед сдачей",contract.checks]];
  return <div className="mt-4 rounded-lg border border-border p-3" aria-label={tr("Контракт исполнения")}>
   <div className="mb-2 flex items-center gap-1"><h3 className="text-[13px] font-semibold">{tr("Контракт исполнения")}</h3><InfoHint title="Контракт исполнения">{CONTRACT_HINT}</InfoHint></div>
   <div className="grid gap-3 sm:grid-cols-3">{blocks.filter(([,lines])=>lines.length>0).map(([title,lines])=><div key={title}><p className="mb-1 text-xs text-muted-foreground">{tr(title)}</p><ul className="list-disc space-y-0.5 pl-4 text-sm">{lines.map(line=><li key={line} className="break-words">{line}</li>)}</ul></div>)}</div>

@@ -327,7 +327,8 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "How to work:",
       `0. Intake first: \`bb agency job comment\` on jobId ${worker.jobId} with a short reason and references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return).`,
       `1. Split the job into subtasks with a checkable result: \`bb agency job create\` with parentJobId=${worker.jobId}, the departmentId and the member's assignedAgentId. The server assigns the key. Work of another department is a subtask in that department for its lead.`,
-      "   Give implementation subtasks a `contract`: mayChange, mustNotTouch, checks. It is frozen at launch. The subtask's bindingId is this job's folder unless the job layer lists other project folders or employee workplaces.",
+      "   Give implementation subtasks a `contract`: readFirst (what to read before starting), interfaces (signatures and invariants to keep), mayChange (only the files this subtask owns), mustNotTouch, checks (the commands it must pass). It is frozen at launch. The subtask's bindingId is this job's folder unless the job layer lists other project folders or employee workplaces.",
+      "   Two subtasks that may change the same files do not run at once: the Agency holds the later one in the launch queue until the first is done. Give each subtask its own files, or order them with `job depend`.",
       "2. Implementation and rework go to executors, review to reviewers. Pass inputs with `bb agency job attach-input`. Launch with `bb agency launch readiness`, then `launch prepare`.",
       "   Order: `bb agency job depend` (jobId waits for dependsOnJobId), then `bb agency launch queue` for each subtask; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
       "3. When a subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Do not poll in a loop: end your turn and wait.",
@@ -347,7 +348,8 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     "- Handing in means a published version and a final job comment. Without the final comment after publishing, the job does not go to review.",
     `- Ending a turn without a published version or a final comment brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
     `- The Agency watches the attempt: ${worker.rules?.watchStallMinutes ?? 30} min without new events or ${worker.rules?.watchCeilingHours ?? 2} h of continuous work sends the job to the lead as blocked. Split long work into stages and note them in comments.`,
-    "- If the job has an execution contract, stay inside it: leave mustNotTouch alone, run every check and list them in the final comment. Going outside it is a question to the lead, not a decision.",
+    "- If the job has an execution contract, start with readFirst, keep interfaces as they are, change only what mayChange lists, leave mustNotTouch alone, run every check and list them with their output in the final comment. Going outside it is a question to the lead, not a decision.",
+    "- Work you could not finish is reported as such: say which acceptance criteria are not met and what is missing. A promise to do it later is not a result.",
     workLanguageLine(),
   ];
   if (worker.assigneeType === "reviewer") {

@@ -134,6 +134,7 @@ export type { JobTeamFields } from "./job-team";
 export {
   DEFAULT_BOARD_POLICY,
   boardPolicySchema,
+  CONTRACT_PARTS,
   contractIsEmpty,
   contractText,
   createJobCommandSchema,
@@ -147,6 +148,7 @@ export {
   type BoardPolicy,
   type CreateJobCommand,
   type Job,
+  type ContractPart,
   type JobContract,
   type JobDependency,
   type JobPriority,

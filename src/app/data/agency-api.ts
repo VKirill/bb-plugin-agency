@@ -164,7 +164,7 @@ export interface AgencyApi {
   listSavedViews(): Promise<MutationOutcome<SavedViewRecord[]>>;
   listPlugins(): Promise<MutationOutcome<PluginDirectoryView>>;
   starterKit(input: { language?: "ru" | "en" }): Promise<MutationOutcome<StarterKitViewRecord>>;
-  installStarterKit(input: { keys: string[]; language?: "ru" | "en" }): Promise<MutationOutcome<{ installed: { key: string; departmentId: string; agents: number }[]; skipped: { key: string; reason: string }[] }>>;
+  installStarterKit(input: { keys: string[]; language?: "ru" | "en" }): Promise<MutationOutcome<{ installed: { key: string; departmentId: string; agents: number; note?: string }[]; skipped: { key: string; reason: string }[] }>>;
   translateStarterKit(input: { language?: "ru" | "en" }): Promise<MutationOutcome<{ translated: number; unchanged: number; edited: { kind: "department" | "agent"; name: string }[] }>>;
   recordLifecycle(input: { kind: "department" | "agent"; id: string }): Promise<MutationOutcome<{ deletable: boolean; reason: string | null; archivedAt: string | null }>>;
   archiveDepartment(input: { departmentId: string }): Promise<MutationOutcome<{ archivedAt: string }>>;

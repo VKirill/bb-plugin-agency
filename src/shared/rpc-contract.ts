@@ -241,7 +241,18 @@ export const starterKitViewSchema = z
           key: z.string(),
           name: z.string(),
           purpose: z.string(),
-          agents: z.array(z.object({ key: z.string(), name: z.string(), role: z.string(), roleType: z.enum(["lead", "executor", "reviewer"]) }).strict()),
+          agents: z.array(
+            z
+              .object({
+                key: z.string(),
+                name: z.string(),
+                role: z.string(),
+                roleType: z.enum(["lead", "executor", "reviewer"]),
+                /** CLI and model this employee is meant for; absent means the role default. */
+                model: z.object({ providerId: z.string(), model: z.string(), label: z.string() }).strict().optional(),
+              })
+              .strict(),
+          ),
           installed: z.object({ departmentId: z.string(), language: kitLanguageSchema.nullable() }).strict().nullable(),
         })
         .strict(),
@@ -254,7 +265,7 @@ export type StarterKitViewRecord = z.infer<typeof starterKitViewSchema>;
 export const installStarterKitInputSchema = z.object({ keys: z.array(z.string().max(40)).min(1).max(20), language: kitLanguageSchema.optional() }).strict();
 export const installStarterKitOutputSchema = z
   .object({
-    installed: z.array(z.object({ key: z.string(), departmentId: z.string(), agents: z.number().int() }).strict()),
+    installed: z.array(z.object({ key: z.string(), departmentId: z.string(), agents: z.number().int(), note: z.string().optional() }).strict()),
     skipped: z.array(z.object({ key: z.string(), reason: z.string() }).strict()),
   })
   .strict();
