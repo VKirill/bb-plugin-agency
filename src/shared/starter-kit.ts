@@ -1,3 +1,8 @@
+import { ADMIN_KIT, SALES_KIT } from "./starter-kit/business.js";
+import { ADS_KIT, MARKETING_KIT, SEO_KIT, SOCIAL_KIT } from "./starter-kit/marketing.js";
+import { AUTOMATION_KIT, INFRA_KIT } from "./starter-kit/operations.js";
+import { DESIGN_KIT, PRODUCT_KIT } from "./starter-kit/product-design.js";
+
 /**
  * Starter departments and employees, in Russian and English. The Agency never
  * creates them by itself: the owner installs the departments they want, or builds
@@ -34,6 +39,8 @@ export type KitAgent = {
 
 export type KitDepartment = {
   key: string;
+  /** A branch department: its parent in the catalog, linked when both are installed. */
+  parentKey?: string;
   text: Record<KitLanguage, { name: string; charter: string; acceptance: string }>;
   /** The lead first, then executors and reviewers. */
   agents: KitAgent[];
@@ -328,6 +335,16 @@ export const STARTER_KIT: KitDepartment[] = [
       },
     ],
   },
+  PRODUCT_KIT,
+  DESIGN_KIT,
+  INFRA_KIT,
+  MARKETING_KIT,
+  SEO_KIT,
+  ADS_KIT,
+  SOCIAL_KIT,
+  SALES_KIT,
+  ADMIN_KIT,
+  AUTOMATION_KIT,
 ];
 
 export function kitDepartment(key: string): KitDepartment | undefined {

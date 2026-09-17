@@ -50,7 +50,39 @@ function setup() {
 describe("starter kit", () => {
   it("has a lead and routable charters in both languages in every department", () => {
     // The owner's office comes first: it is the address for work no other department takes.
-    expect(STARTER_KIT.map((item) => item.key)).toEqual(["owner-office", "development", "dev-conveyor", "research", "writing"]);
+    expect(STARTER_KIT.map((item) => item.key)).toEqual([
+      "owner-office",
+      "development",
+      "dev-conveyor",
+      "research",
+      "writing",
+      "product",
+      "design",
+      "infrastructure",
+      "marketing",
+      "seo",
+      "ads",
+      "social",
+      "sales",
+      "administration",
+      "automation",
+    ]);
+    // A branch names a parent that is in the catalogue, and no parent is a branch itself.
+    for (const item of STARTER_KIT) {
+      if (!item.parentKey) continue;
+      const parent = STARTER_KIT.find((row) => row.key === item.parentKey);
+      expect(parent, item.key).toBeTruthy();
+      expect(parent?.parentKey).toBeUndefined();
+    }
+    // Every assistant helps someone of their own department, and never another assistant.
+    for (const item of STARTER_KIT) {
+      for (const agent of item.agents.filter((row) => row.roleType === "assistant")) {
+        if (!agent.helpsKey) continue;
+        const helped = item.agents.find((row) => row.key === agent.helpsKey);
+        expect(helped, `${item.key}/${agent.key}`).toBeTruthy();
+        expect(helped?.roleType).not.toBe("assistant");
+      }
+    }
     for (const item of STARTER_KIT) {
       expect(item.agents.filter((agent) => agent.roleType === "lead")).toHaveLength(1);
       expect(charterAccepts(item.text.ru.charter)).toBeTruthy();

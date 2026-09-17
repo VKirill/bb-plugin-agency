@@ -487,6 +487,7 @@ export function registerAgency(bb: BbPluginApi) {
     db,
     now: () => new Date().toISOString(),
     newRequestId: () => randomUUID(),
+    setDepartmentParent: (input) => setDepartmentParent(db, input, new Date().toISOString()),
     policyVersionId: () => {
       // The profile names the CLI; the standard policy allows any, so the owner may switch it later.
       const standard = listStoredPolicies(db).find(

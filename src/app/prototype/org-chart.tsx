@@ -12,7 +12,18 @@ interface Props {
 export function OrgChart({group,kind,agents,departments,openAgent,openDepartment}:Props) {
  const [collapsed,setCollapsed]=useState<string[]>([]);
  const isProject=kind==="projects";
- const members=[...new Set(group.members)].filter(name=>isProject||name!==group.lead);
+ /** Assistants hang under the employee they help; a shared one stays in the row with everybody. */
+ const helpersOf=(team:Group,ref:string)=>[...new Set(team.members)].filter(member=>team.memberRoles?.[member]==="assistant"&&team.memberHelps?.[member]===ref);
+ const ownRow=(team:Group,ref:string)=>{const helps=team.memberHelps?.[ref];return !(team.memberRoles?.[ref]==="assistant"&&helps&&team.members.includes(helps));};
+ /** The branch under an employee: руководитель → сотрудник → помощник. */
+ function helpers(team:Group,ref:string) {
+  const rows=helpersOf(team,ref);
+  if(!rows.length)return null;
+  return <ul aria-label={tr("Помощники сотрудника {name}", { name: agentLabel(agents,ref) })} className="ml-4 w-52 list-none border-l border-foreground/30 pl-4">
+   {rows.map(helper=><li key={helper} className="relative pt-4 [&>button]:w-full"><span aria-hidden className="absolute -left-4 top-10 w-4 border-t border-foreground/30"/>{person(helper,"Помощник")}</li>)}
+  </ul>;
+ }
+ const members=[...new Set(group.members)].filter(name=>isProject||(name!==group.lead&&ownRow(group,name)));
  function person(ref:string,label:string,primary=false) {
   const agent=resolveAgent(agents,ref);
   const shown=agentLabel(agents,ref);
@@ -30,17 +41,17 @@ export function OrgChart({group,kind,agents,departments,openAgent,openDepartment
      {members.map((name,i)=>{
       const department=isProject?resolveDepartment(departments,name):undefined;
       const hidden=department&&collapsed.includes(department.id);
-      const team=department?[...new Set(department.members)].filter(n=>n!==department.lead):[];
+      const team=department?[...new Set(department.members)].filter(n=>n!==department.lead&&ownRow(department,n)):[];
       const shown=department?.name||name;
       return <li key={name} className="relative flex w-64 flex-col items-center px-4 pt-8">
        {members.length>1&&<span aria-hidden className={`absolute top-0 border-t border-foreground/30 ${isProject?"border-dashed":""}`} style={{left:i===0?"50%":0,right:i===members.length-1?"50%":0}}/>}
        <span aria-hidden className={`absolute top-0 h-8 border-l border-foreground/30 ${isProject?"border-dashed":""}`}/>
-       {!isProject?person(name,ROLE_TYPE_LABELS[group.memberRoles?.[name]??"executor"]):<>
+       {!isProject?<>{person(name,ROLE_TYPE_LABELS[group.memberRoles?.[name]??"executor"])}{helpers(group,name)}</>:<>
         <div className="w-56 rounded-lg border border-border bg-background p-3">
          <button type="button" disabled={!department} onClick={()=>department&&openDepartment(department.id)} className="flex w-full items-center gap-2 text-left text-sm font-semibold focus-visible:outline focus-visible:outline-ring"><Icon name="Layers" className="size-4 shrink-0"/>{shown}</button>
          {department?<Button size="sm" variant="ghost" className="mt-2 h-7 w-full justify-between px-0 text-xs text-muted-foreground" aria-expanded={!hidden} onClick={()=>setCollapsed(hidden?collapsed.filter(id=>id!==department.id):[...collapsed,department.id])}>{tr("Команда · {count}", { count: new Set([department.lead,...department.members]).size })}<span aria-hidden>{hidden?"+":"−"}</span></Button>:<p className="mt-2 text-xs text-muted-foreground">{tr("Отдел недоступен")}</p>}
         </div>
-        {department&&!hidden&&<><div aria-hidden className="h-5 border-l border-foreground/30"/>{person(department.lead,"Руководитель отдела")}{team.length>0&&<ul aria-label={tr("Сотрудники отдела {name}", { name: shown })} className="ml-4 w-52 list-none border-l border-foreground/30 pl-4">{team.map(member=><li key={member} className="relative pt-4 [&>button]:w-full"><span aria-hidden className="absolute -left-4 top-10 w-4 border-t border-foreground/30"/>{person(member,ROLE_TYPE_LABELS[department.memberRoles?.[member]??"executor"])}</li>)}</ul>}</>}
+        {department&&!hidden&&<><div aria-hidden className="h-5 border-l border-foreground/30"/>{person(department.lead,"Руководитель отдела")}{team.length>0&&<ul aria-label={tr("Сотрудники отдела {name}", { name: shown })} className="ml-4 w-52 list-none border-l border-foreground/30 pl-4">{team.map(member=><li key={member} className="relative pt-4 [&>button]:w-full"><span aria-hidden className="absolute -left-4 top-10 w-4 border-t border-foreground/30"/>{person(member,ROLE_TYPE_LABELS[department.memberRoles?.[member]??"executor"])}{helpers(department,member)}</li>)}</ul>}</>}
        </>}
       </li>;
      })}

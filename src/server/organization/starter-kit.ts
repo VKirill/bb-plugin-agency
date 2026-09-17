@@ -215,7 +215,20 @@ export type StarterKitPorts = {
   addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" | "assistant"; helpsAgentId?: string }) => DomainResult<unknown>;
   saveAgentProfile: (input: { requestId: string; expectedRevision: number; agentId: string; name: string; state: string; version: AgentState["version"] }) => DomainResult<unknown>;
   saveDepartmentProfile: (input: { requestId: string; expectedRevision: number; departmentId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<unknown>;
+  /** Branch departments: linked to their parent when both of them are installed. */
+  setDepartmentParent?: (input: { departmentId: string; parentDepartmentId: string }) => DomainResult<unknown>;
 };
+
+/** The department installed from a starter key, if it is still there. */
+function installedDepartmentId(db: SqlDatabase, key: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT r.record_id AS id FROM agency_kit_record r JOIN agency_department d ON d.id = r.record_id
+       WHERE r.record_kind = 'department' AND r.kit_key = ? AND d.archived_at IS NULL LIMIT 1`,
+    )
+    .get(key) as { id: string } | undefined;
+  return row?.id ?? null;
+}
 
 export type InstallOutcome = { installed: { key: string; departmentId: string; agents: number; note?: string }[]; skipped: { key: string; reason: string }[] };
 
@@ -337,6 +350,15 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
           }
         : {}),
     });
+  }
+  // Branches point at their parent once both sides exist, whichever order they were installed in.
+  if (ports.setDepartmentParent) {
+    for (const row of outcome.installed) {
+      const parentKey = kitDepartment(row.key)?.parentKey;
+      if (!parentKey) continue;
+      const parentId = installedDepartmentId(ports.db, parentKey);
+      if (parentId) ports.setDepartmentParent({ departmentId: row.departmentId, parentDepartmentId: parentId });
+    }
   }
   return ok(outcome);
 }

@@ -142,6 +142,7 @@ export const EN_CORE: Record<string, string> = {
   "Кэш отдельно от входных токенов.": "Cache is separate from input tokens.",
   "Период": "Period",
   "Кому помогает": "Helps whom",
+  "Помощники сотрудника {name}": "Assistants of {name}",
   "Решает руководитель": "The lead decides",
   "Помощник": "Assistant",
   "помощника": "an assistant",
