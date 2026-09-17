@@ -14,7 +14,7 @@ import {
   type UsageGroupBy,
 } from "../data/usage-dashboard";
 import type { ListDashboardUsageOutput } from "../../shared/contracts/dashboard-usage";
-import type { BudgetStatusView } from "../../shared/rpc-contract";
+import type { BudgetStatusView, ProviderUsageView } from "../../shared/rpc-contract";
 import { Empty } from "./shared";
 import { tr } from "../i18n";
 import { UsageDashboard } from "./usage-dashboard";
@@ -47,6 +47,7 @@ export function UsagePage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!demoMode);
   const [budgets, setBudgets] = useState<BudgetStatusView[]>([]);
+  const [providers, setProviders] = useState<ProviderUsageView[]>([]);
   const gate = useRef(createUsageFetchGate());
 
   useEffect(() => {
@@ -72,12 +73,14 @@ export function UsagePage({
     const token = gate.current.begin();
     setLoading(true);
     try {
-      const [result, budgetList] = await Promise.all([
+      const [result, budgetList, providerList] = await Promise.all([
         api.listDashboardUsage(dashboardQueryFromFilter(filter)),
         api.listBudgets ? api.listBudgets().catch(() => null) : Promise.resolve(null),
+        api.providerUsage ? api.providerUsage().catch(() => null) : Promise.resolve(null),
       ]);
       if (!gate.current.accept(token)) return;
       setBudgets(budgetList?.ok ? budgetList.value : []);
+      setProviders(providerList?.ok ? providerList.value : []);
       if (!result.ok) {
         setPayload(null);
         setError(result.failure.kind === "unavailable" ? tr(STAGE1_UNAVAILABLE.usage) : tr(USAGE_LOAD_FAILED));
@@ -119,6 +122,7 @@ export function UsagePage({
       onFilter={setFilter}
       onOpenJob={openJob}
       budgets={budgets}
+      providers={providers}
     />
   );
 }

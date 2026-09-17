@@ -15,7 +15,7 @@ import type { InternalRunStoreReads } from "../run-store/types.js";
 import type { ServiceContext } from "../../services/context.js";
 import { assertBindingAccess } from "../../services/context.js";
 import { filterDaysByPeriod, mergeAttributedDayDeltas, type AttributedDayDelta } from "./days.js";
-import { foldClaudeThreadUsage } from "./epochs.js";
+import { foldThreadUsage } from "./epochs.js";
 import { collectJobSubtree, resolveRowRootJobId } from "./subtree.js";
 import { listJobsForBindings, listStoredBindings } from "../../api/catalog.js";
 import type { SqlDatabase } from "../../db/sql.js";
@@ -191,7 +191,7 @@ export function createDashboardUsageReader(deps: {
           });
           continue;
         }
-        const fold = foldClaudeThreadUsage(listed);
+        const fold = foldThreadUsage(listed);
         if (fold.unknown) {
           foldByThread.set(threadId, {
             units: { unknown: true, reason: fold.reason },

@@ -57,7 +57,7 @@ function daysInsideEpoch(events: readonly TokenUsageEvent[]): Array<TokenUsageTo
   return days;
 }
 
-export function foldClaudeThreadUsage(rawEvents: readonly unknown[]): ThreadUsageFold {
+export function foldThreadUsage(rawEvents: readonly unknown[]): ThreadUsageFold {
   const events: TokenUsageEvent[] = [];
   let malformed = false;
   for (const raw of rawEvents) {

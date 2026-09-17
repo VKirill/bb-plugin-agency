@@ -2,7 +2,7 @@ import type { OwnerMessageView, StarterKitViewRecord } from "../../shared/rpc-co
 import type { AgentMetricsView, BackupFileView, DependencyLinkRecord, GoalViewRecord, JobNextStepRecord, JobSearchHitView, KnowledgeItemView, NextStepViewRecord, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
 import type { RuleScheduleView, WebhookSourceView } from "../../shared/rpc-contract";
 import type { AgencyRulesView, TemplateView } from "../../shared/rpc-contract";
-import type { BudgetStatusView } from "../../shared/rpc-contract";
+import type { BudgetStatusView, ProviderUsageView } from "../../shared/rpc-contract";
 import type { SaveWorkRulesCommand, WorkRulesView } from "../../shared/contracts/work-rules";
 import type {
   AcceptArtifactVersionCommand,
@@ -136,6 +136,7 @@ export interface AgencyApi {
   getWorkRules(input: { scope: string }): Promise<MutationOutcome<WorkRulesView>>;
   saveWorkRules(input: SaveWorkRulesCommand): Promise<MutationOutcome<WorkRulesView>>;
   listBudgets(): Promise<MutationOutcome<BudgetStatusView[]>>;
+  providerUsage(): Promise<MutationOutcome<ProviderUsageView[]>>;
   listTemplates(): Promise<MutationOutcome<TemplateView[]>>;
   saveTemplate(input: { key: TemplateView["key"]; expectedRevision: number; text: string | null }): Promise<MutationOutcome<TemplateView>>;
   getAgencyRules(): Promise<MutationOutcome<AgencyRulesView>>;

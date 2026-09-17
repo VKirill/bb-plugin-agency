@@ -51,6 +51,7 @@ export const STAGE1_RPC = {
   getWorkRules: "getWorkRules",
   saveWorkRules: "saveWorkRules",
   listBudgets: "listBudgets",
+  providerUsage: "providerUsage",
   listTemplates: "listTemplates",
   saveTemplate: "saveTemplate",
   getAgencyRules: "getAgencyRules",

@@ -124,8 +124,14 @@ export function sortUsageEvents(events: readonly TokenUsageEvent[]): TokenUsageE
   });
 }
 
-export const PROVEN_USAGE_PROVIDER_IDS = ["claude-code"] as const;
+/**
+ * CLIs whose token events the Agency folds into spending. Both report the same shape:
+ * a running total per session that resets when the provider starts a new epoch, plus the
+ * delta of the last turn. ACP providers (Cursor, OpenCode, Antigravity) send no token
+ * events at all — BB has nothing to pass on, so their threads stay «unknown».
+ */
+export const PROVEN_USAGE_PROVIDER_IDS = ["claude-code", "codex"] as const;
 
 export function hasProvenUsageSemantics(providerId: string | null): boolean {
-  return providerId === "claude-code";
+  return (PROVEN_USAGE_PROVIDER_IDS as readonly string[]).includes(providerId ?? "");
 }

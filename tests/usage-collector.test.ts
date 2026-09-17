@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { foldClaudeThreadUsage } from "../src/server/runtime/dashboard-usage/epochs";
+import { foldThreadUsage } from "../src/server/runtime/dashboard-usage/epochs";
 import type { TokenUsageEventPort } from "../src/server/runtime/dashboard-usage/service";
 import { parseTokenUsageEvent } from "../src/server/runtime/dashboard-usage/units";
 import {
@@ -90,7 +90,7 @@ describe("usage collector", () => {
       "evt_s4d993mv97",
       "evt_zdpnwdvxsr",
     ]);
-    const fold = foldClaudeThreadUsage(envelopes);
+    const fold = foldThreadUsage(envelopes);
     expect(fold.unknown).toBe(false);
     if (fold.unknown) return;
     expect(fold.peaks.totalTokens).toBe(6_697_149);

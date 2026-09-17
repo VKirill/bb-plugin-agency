@@ -320,6 +320,7 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     outcome: "succeeded",
   },
   listBudgets: {},
+  providerUsage: {},
   starterKit: { language: "en" },
   installStarterKit: { keys: ["development", "research"], language: "en" },
   translateStarterKit: { language: "en" },

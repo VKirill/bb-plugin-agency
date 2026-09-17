@@ -233,6 +233,34 @@ export const getJobInputSchema = z
   .refine((value) => Boolean(value.jobId || value.key), "jobId or key is required");
 
 const kitLanguageSchema = z.enum(["ru", "en"]);
+/**
+ * What BB knows about a provider's subscription: the plan and its windows. This is the only
+ * spending a CLI without token events (Cursor, OpenCode, Antigravity) reports at all.
+ */
+export const providerUsageSchema = z
+  .object({
+    providerId: z.string(),
+    name: z.string(),
+    status: z.enum(["ok", "not_installed", "unauthenticated", "expired", "error"]),
+    planLabel: z.string().nullable(),
+    message: z.string().optional(),
+    /** True when the Agency counts this CLI's tokens itself. */
+    countsTokens: z.boolean(),
+    windows: z.array(
+      z
+        .object({
+          label: z.string(),
+          usedPercent: z.number(),
+          resetsAt: z.string().nullable(),
+          usedUsdCents: z.number().optional(),
+          limitUsdCents: z.number().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ProviderUsageView = z.infer<typeof providerUsageSchema>;
+
 export const starterKitViewSchema = z
   .object({
     departments: z.array(
@@ -944,6 +972,7 @@ export const rpcContract = defineRpcContract({
   machines: { input: z.null(), output: z.array(machineSchema) },
   agencyLanguage: { input: z.null(), output: z.object({ language: z.enum(["ru", "en"]) }).strict() },
   listBudgets: { input: z.null(), output: domainResultSchema(z.array(budgetStatusSchema)) },
+  providerUsage: { input: z.null(), output: domainResultSchema(z.array(providerUsageSchema)) },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },
   getSkillPins: { input: z.null(), output: domainResultSchema(skillPinStatusSchema) },
   listBackups: { input: z.null(), output: domainResultSchema(z.array(backupFileSchema)) },

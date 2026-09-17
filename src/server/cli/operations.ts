@@ -121,6 +121,7 @@ export const CLI_OPERATIONS = {
   },
   listScriptTemplates: { input: emptyObjectSchema, summary: "Шаблоны скриптов для cron/launchd: сводка за день, сторож, регулярная задача из внешних данных" },
   listBudgets: { input: emptyObjectSchema, summary: "Бюджеты в месяц: уровни с лимитом, оценка расхода за календарный месяц (UTC) и процент" },
+  providerUsage: { input: emptyObjectSchema, summary: "Расход подписок CLI по данным BB: план, окна, процент и сброс; countsTokens — считает ли Агентство токены этого CLI" },
   saveWorkRules: { input: saveWorkRulesCommandSchema, summary: "Сохранить правила уровня целиком: отсутствующий ключ возвращает значение по умолчанию" },
   readProjectRules: { input: readProjectRulesInputSchema, summary: "Прочитать правила проекта (.bb/AGENTS.md) на машине привязки" },
   saveProjectRules: { input: saveProjectRulesInputSchema, summary: "Сохранить правила проекта, если файл не менялся после чтения (expectedHash)" },

@@ -133,6 +133,7 @@ export function createRpcAgencyApi(rpc: RpcCaller): AgencyApi {
     getWorkRules: (input) => mutate(rpc, STAGE1_RPC.getWorkRules, input),
     saveWorkRules: (input) => mutate(rpc, STAGE1_RPC.saveWorkRules, input),
     listBudgets: () => mutate(rpc, STAGE1_RPC.listBudgets, null),
+    providerUsage: () => mutate(rpc, STAGE1_RPC.providerUsage, null),
     listTemplates: () => mutate(rpc, STAGE1_RPC.listTemplates, null),
     saveTemplate: (input) => mutate(rpc, STAGE1_RPC.saveTemplate, input),
     getAgencyRules: () => mutate(rpc, STAGE1_RPC.getAgencyRules, null),

@@ -13,7 +13,7 @@ import {
   collectJobSubtree,
   createDashboardUsageReader,
   dashboardUsageCatalogFromSql,
-  foldClaudeThreadUsage,
+  foldThreadUsage,
   hasProvenUsageSemantics,
 } from "../src/server/runtime/dashboard-usage";
 import { createInternalRunStoreReads, createRunStore } from "../src/server/runtime/run-store";
@@ -228,7 +228,7 @@ function bindAttempt(db: SqlDatabase, seeded: ReturnType<typeof seedProject>, jo
 
 describe("dashboard usage fold", () => {
   it("sums visible epoch peaks, not latest total; days only after unique thread + last proof", () => {
-    const fold = foldClaudeThreadUsage(fableEvents);
+    const fold = foldThreadUsage(fableEvents);
     expect(fold.unknown).toBe(false);
     if (fold.unknown) return;
     expect(fold.epochCount).toBe(2);
@@ -244,8 +244,8 @@ describe("dashboard usage fold", () => {
   });
 
   it("treats empty events as unknown and single retained total as incomplete lower bound", () => {
-    expect(foldClaudeThreadUsage([]).unknown).toBe(true);
-    const child = foldClaudeThreadUsage(chainObserved.thr_9erjutvnvd);
+    expect(foldThreadUsage([]).unknown).toBe(true);
+    const child = foldThreadUsage(chainObserved.thr_9erjutvnvd);
     expect(child.unknown).toBe(false);
     if (child.unknown) return;
     expect(child.peaks.totalTokens).toBe(2_797_751);
@@ -255,24 +255,26 @@ describe("dashboard usage fold", () => {
   });
 
   it("smokes calculator chain: empty Cursor unknown; sum of peaks is not latest-root", () => {
-    expect(foldClaudeThreadUsage(chainObserved.thr_4nwum7332u).unknown).toBe(true);
-    const root = foldClaudeThreadUsage(chainObserved.thr_uu5jukubj5);
+    expect(foldThreadUsage(chainObserved.thr_4nwum7332u).unknown).toBe(true);
+    const root = foldThreadUsage(chainObserved.thr_uu5jukubj5);
     expect(root.unknown).toBe(false);
     if (root.unknown) return;
     const known = [
       root.peaks.totalTokens,
-      foldClaudeThreadUsage(chainObserved.thr_9erjutvnvd),
-      foldClaudeThreadUsage(chainObserved.thr_prjxsh88y2),
-      foldClaudeThreadUsage(chainObserved.thr_f5224efmvs),
-      foldClaudeThreadUsage(chainObserved.thr_w583shecbg),
+      foldThreadUsage(chainObserved.thr_9erjutvnvd),
+      foldThreadUsage(chainObserved.thr_prjxsh88y2),
+      foldThreadUsage(chainObserved.thr_f5224efmvs),
+      foldThreadUsage(chainObserved.thr_w583shecbg),
     ].map((item) => (typeof item === "number" ? item : item.unknown ? 0 : item.peaks.totalTokens));
     expect(known.reduce((sum, value) => sum + value, 0)).toBe(24_948_508);
     expect(hasProvenUsageSemantics("claude-code")).toBe(true);
-    expect(hasProvenUsageSemantics("codex")).toBe(false);
+    // Codex reports the same token events; ACP providers report none at all.
+    expect(hasProvenUsageSemantics("codex")).toBe(true);
+    expect(hasProvenUsageSemantics("acp-cursor")).toBe(false);
   });
 
   it("keeps malformed in reasons when at least one event is valid", () => {
-    const fold = foldClaudeThreadUsage([...fableEvents, { id: "evt_bad", seq: 999 }]);
+    const fold = foldThreadUsage([...fableEvents, { id: "evt_bad", seq: 999 }]);
     expect(fold.unknown).toBe(false);
     if (fold.unknown) return;
     expect(fold.peaks.totalTokens).toBe(6_697_149);
@@ -416,11 +418,11 @@ describe("dashboard usage reader", () => {
     }
   });
 
-  it("does not invent Claude totals for unsupported provider even when events exist", async () => {
+  it("does not invent totals for a provider that reports no usage, even when events exist", async () => {
     const { db, close } = openFileDb();
     try {
-      const seeded = seedProject(db, "codex");
-      bindAttempt(db, seeded, seeded.job, "thr_codex0001");
+      const seeded = seedProject(db, "acp-cursor");
+      bindAttempt(db, seeded, seeded.job, "thr_cursor0001");
       const reader = createDashboardUsageReader({
         reads: createInternalRunStoreReads(db),
         catalog: dashboardUsageCatalogFromSql(db),

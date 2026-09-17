@@ -164,6 +164,21 @@ export function formatCostUsd(cents: number | null | undefined): string | null {
 }
 
 /** Cost of the visible rows, one thread counted once. Partial when some usage has no price. */
+/** Models whose tokens are counted but have no price: the owner adds them in the plugin settings. */
+export function modelsWithoutPrice(rows: readonly UsageDisplayRow[]): string[] {
+  const models = new Set<string>();
+  for (const row of rows) {
+    if (row.unknown || row.costUsdCents !== null || !row.model) continue;
+    models.add(row.model);
+  }
+  return [...models].sort();
+}
+
+/** A ready line for «Цены моделей»: USD per million tokens, zeros for the owner to fill in. */
+export function modelPriceSnippet(models: readonly string[]): string {
+  return JSON.stringify(Object.fromEntries(models.map((model) => [model, { input: 0, cachedInput: 0, output: 0 }])));
+}
+
 export function costForRows(rows: readonly UsageDisplayRow[]): { cents: number | null; partial: boolean } {
   const seen = new Map<string, number | null>();
   for (const row of rows) {

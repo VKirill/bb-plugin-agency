@@ -14,6 +14,8 @@ import {
   createUsageFetchGate,
   filteredUsageView,
   groupUsageRows,
+  modelPriceSnippet,
+  modelsWithoutPrice,
   parseDashboardUsage,
   peaksForRows,
   periodHeadline,
@@ -162,6 +164,19 @@ describe("dashboard usage adapter", () => {
     expect(gate.accept(first)).toBe(false);
     const second = gate.begin();
     expect(gate.accept(second)).toBe(true);
+  });
+
+  it("names the models whose tokens are counted without a price and offers a line for the setting", () => {
+    const rows = [
+      displayRow({ attemptId: "run_a", model: "claude-fable-5-1", costUsdCents: 42 }),
+      displayRow({ attemptId: "run_b", model: "gpt-5.6-sol", costUsdCents: null }),
+      displayRow({ attemptId: "run_c", model: "gpt-5.6-sol", costUsdCents: null }),
+      // A thread without token events has nothing to price.
+      displayRow({ attemptId: "run_d", model: "grok-4.6", costUsdCents: null, unknown: true }),
+    ];
+    expect(modelsWithoutPrice(rows)).toEqual(["gpt-5.6-sol"]);
+    expect(JSON.parse(modelPriceSnippet(["gpt-5.6-sol"]))).toEqual({ "gpt-5.6-sol": { input: 0, cachedInput: 0, output: 0 } });
+    expect(modelsWithoutPrice([])).toEqual([]);
   });
 
   it("maps opaque root id to the workspace key", () => {

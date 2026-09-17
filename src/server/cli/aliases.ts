@@ -27,6 +27,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "read") return "markOwnerMessagesRead";
   }
   if (head === "usage" && rest.length === 0) return "listDashboardUsage";
+  if (head === "usage" && rest.length === 1 && rest[0] === "providers") return "providerUsage";
   if (head === "rules" && rest.length === 1) {
     if (rest[0] === "get") return "getWorkRules";
     if (rest[0] === "save") return "saveWorkRules";

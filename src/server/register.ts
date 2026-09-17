@@ -26,6 +26,7 @@ import { createSdkSkillCatalogPort } from "./runtime/isolated-sdk";
 import { withCallerThread } from "./api/caller";
 import { attachDashboardUsageCollector, USAGE_CHANGED_CHANNEL } from "./api/dashboard-usage-rpc";
 import { createDashboardUsageReader, dashboardUsageCatalogFromSql } from "./runtime/dashboard-usage";
+import { PROVEN_USAGE_PROVIDER_IDS } from "./runtime/dashboard-usage/units";
 import { listStoredBindings, listStoredDepartments, listStoredPolicies } from "./api/catalog";
 import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
 import { acceptedVersions, assertDependenciesDone, sweepNextSteps, type NextStepPorts } from "./flow/service";
@@ -38,7 +39,7 @@ import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, d
 import { installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "./organization/starter-kit";
 import { rulesForLaunch, workRulesView } from "./rules/work-rules";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
-import { rpcContract } from "../shared/rpc-contract";
+import { rpcContract, type ProviderUsageView } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
 import { createInbox } from "./inbox/store";
 import { receiveNotification } from "./triggers/notify";
@@ -735,6 +736,39 @@ export function registerAgency(bb: BbPluginApi) {
       if (!access.ok) return access;
       return { ok: true as const, value: await listBudgets(limitDeps) };
     },
+    /** Subscription spending as BB sees it: the only number a CLI without token events reports. */
+    providerUsage: async () => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      const [limits, providers] = await Promise.all([
+        bb.sdk.system.usageLimits().catch(() => ({}) as Record<string, unknown>),
+        bb.sdk.providers.list().catch(() => [] as { id: string; displayName?: string }[]),
+      ]);
+      const names = new Map(providers.map((provider) => [provider.id, provider.displayName ?? provider.id]));
+      const rows: ProviderUsageView[] = Object.entries(limits as Record<string, Record<string, unknown>>).map(([providerId, raw]) => {
+        const status = typeof raw?.status === "string" ? raw.status : "error";
+        const windows = Array.isArray(raw?.windows) ? (raw.windows as Record<string, unknown>[]) : [];
+        return {
+          providerId,
+          name: names.get(providerId) ?? providerId,
+          status: (["ok", "not_installed", "unauthenticated", "expired", "error"].includes(status) ? status : "error") as ProviderUsageView["status"],
+          planLabel: typeof raw?.planLabel === "string" ? raw.planLabel : null,
+          ...(typeof raw?.message === "string" ? { message: raw.message } : {}),
+          countsTokens: (PROVEN_USAGE_PROVIDER_IDS as readonly string[]).includes(providerId),
+          windows: windows.map((window) => {
+            const cost = window.cost && typeof window.cost === "object" ? (window.cost as Record<string, unknown>) : null;
+            return {
+              label: typeof window.label === "string" ? window.label : "",
+              usedPercent: typeof window.usedPercent === "number" ? window.usedPercent : 0,
+              resetsAt: typeof window.resetsAt === "string" ? window.resetsAt : null,
+              ...(typeof cost?.usedUsdCents === "number" ? { usedUsdCents: cost.usedUsdCents } : {}),
+              ...(typeof cost?.limitUsdCents === "number" ? { limitUsdCents: cost.limitUsdCents } : {}),
+            };
+          }),
+        };
+      });
+      return { ok: true as const, value: rows.sort((left, right) => left.name.localeCompare(right.name)) };
+    },
     getSkillPins: async () => {
       const access = resolveRpcAccess(db);
       if (!access.ok) return access;
@@ -774,6 +808,7 @@ export function registerAgency(bb: BbPluginApi) {
   const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
     | "listBudgets"
+    | "providerUsage"
     | "getSkillPins"
     | "listBackups"
     | "createBackup"
