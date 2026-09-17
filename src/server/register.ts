@@ -930,7 +930,30 @@ export function registerAgency(bb: BbPluginApi) {
     now: () => new Date().toISOString(),
     limit: (job) => store.rulesForDepartment(job.departmentId).completionReminders,
   });
-  const runWatchPorts = (): RunWatchPorts => ({
+  /** Why BB put the thread in error, from its own events; null when it did not say. */
+  const providerErrorDetail = async (threadId: string): Promise<string | null> => {
+    try {
+      const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "20", types: ["provider/error"] });
+      for (const event of events as readonly { data?: unknown }[]) {
+        const data = event.data as { detail?: unknown; message?: unknown } | undefined;
+        const text = [data?.detail, data?.message].find((value) => typeof value === "string" && value.trim());
+        if (typeof text === "string") return text;
+      }
+    } catch {
+      /* the thread could not be read: the watch decides without a reason */
+    }
+    return null;
+  };
+  const jobHostOnline = async (job: Job): Promise<boolean | null> => {
+    const binding = store.getBinding(job.bindingId);
+    if (!binding) return null;
+    try {
+      return (await bb.sdk.hosts.get({ hostId: binding.hostId })).status === "connected";
+    } catch {
+      return null;
+    }
+  };
+  const runWatchPorts = (extra?: Partial<RunWatchPorts>): RunWatchPorts => ({
     db,
     getJob: (jobId) => store.getJob(jobId),
     attemptForLaunch,
@@ -948,6 +971,7 @@ export function registerAgency(bb: BbPluginApi) {
         ceilingMs: rules.watchCeilingHours * 3_600_000,
       };
     },
+    ...extra,
   });
   // Launch queue: waiting jobs start as soon as their limits allow.
   let queueBusy = false;
@@ -1321,7 +1345,15 @@ export function registerAgency(bb: BbPluginApi) {
         bb.log.warn(`Completion reminder for ${row.jobId}: ${String(error)}`);
       }
       try {
-        const watched = superviseRun(runWatchPorts(), row, {
+        // A thread in error may be waiting for BB itself: read the reason and the machine first.
+        let errorDetail: string | null = null;
+        let hostOnline: boolean | null = null;
+        if (reading.threadStatus === "error") {
+          errorDetail = await providerErrorDetail(row.threadId);
+          const job = store.getJob(row.jobId);
+          hostOnline = job ? await jobHostOnline(job) : null;
+        }
+        const watched = superviseRun(runWatchPorts({ providerError: () => errorDetail, hostOnline: () => hostOnline }), row, {
           threadStatus: reading.threadStatus,
           threadUpdatedAt: thread?.updatedAt ? new Date(thread.updatedAt).toISOString() : null,
           backgroundAgents: thread?.activeBackgroundAgentCount ?? 0,

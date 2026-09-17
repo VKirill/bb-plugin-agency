@@ -4,6 +4,7 @@ import { openMigratedDatabase } from "../src/server/db";
 import {
   RUN_WATCH_CEILING_MS,
   RUN_WATCH_ERROR_MS,
+  RUN_WATCH_PROVIDER_WAIT_MS,
   RUN_WATCH_QUIET_MS,
   RUN_WATCH_STALL_MS,
   RUN_WATCH_START_MS,
@@ -117,6 +118,34 @@ describe("run watch", () => {
     expect(superviseRun(failing.ports, failing.row, { ...active, threadStatus: "error" })).toBe("ok");
     failing.tick(1000);
     expect(superviseRun(failing.ports, failing.row, { ...active, threadStatus: "error" })).toBe("blocked");
+  });
+
+  it("waits out an error BB retries by itself, and still blocks a dead one", () => {
+    // A subscription window: BB waits for the reset and carries the same thread on.
+    const limited = harness({ providerError: () => "Rate limit reached; resets in 42 minutes" });
+    // The owner hears it once, then the watch simply waits.
+    expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("warned");
+    expect(limited.comments[0]).toContain("BB сам ждёт возможности продолжить");
+    limited.tick(RUN_WATCH_ERROR_MS + 1000);
+    expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("ok");
+    expect(limited.comments).toHaveLength(1);
+    expect(limited.blocked).toEqual([]);
+    // Six hours later it is not a wait any more.
+    limited.tick(RUN_WATCH_PROVIDER_WAIT_MS);
+    expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("blocked");
+
+    // The machine went offline: nothing is lost, the attempt waits for it to come back.
+    const offline = harness({ hostOnline: () => false });
+    expect(superviseRun(offline.ports, offline.row, { ...active, threadStatus: "error" })).toBe("warned");
+    offline.tick(RUN_WATCH_ERROR_MS + 1000);
+    expect(superviseRun(offline.ports, offline.row, { ...active, threadStatus: "error" })).toBe("ok");
+    expect(offline.blocked).toEqual([]);
+
+    // A dead attempt is still blocked: no balance, no retry.
+    const broke = harness({ providerError: () => "Internal error: Insufficient Balance", hostOnline: () => true });
+    superviseRun(broke.ports, broke.row, { ...active, threadStatus: "error" });
+    broke.tick(RUN_WATCH_ERROR_MS + 1000);
+    expect(superviseRun(broke.ports, broke.row, { ...active, threadStatus: "error" })).toBe("blocked");
   });
 
   it("leaves idle threads to the completion reminder and restarts the episode", () => {

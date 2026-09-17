@@ -18,6 +18,19 @@ export const RUN_WATCH_STALL_MS = 30 * 60_000;
 export const RUN_WATCH_START_MS = 10 * 60_000;
 /** Thread error this long (provider retry had its chance): blocked. */
 export const RUN_WATCH_ERROR_MS = 5 * 60_000;
+/**
+ * A provider error BB itself retries — a subscription window, an overload, a broken
+ * connection — is not a dead attempt. BB waits for the reset (up to six hours by default)
+ * and sends a continuation into the same thread, so the watch waits with it and only
+ * tells the owner. A machine that went offline is the same case: nothing is lost.
+ */
+export const RUN_WATCH_PROVIDER_WAIT_MS = 6 * 60 * 60_000;
+const PROVIDER_RETRY_TEXT = /rate.?limit|quota|usage limit|subscription|overload|too many requests|\b(429|50[0-9])\b|timed? ?out|timeout|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|not connected|disconnect/i;
+
+/** True when BB is expected to carry this thread on by itself. */
+export function providerWillRetry(detail: string | null | undefined): boolean {
+  return Boolean(detail && PROVIDER_RETRY_TEXT.test(detail));
+}
 /** Continuously active this long, even with progress: blocked. */
 export const RUN_WATCH_CEILING_MS = 2 * 60 * 60_000;
 
@@ -54,6 +67,10 @@ export type RunWatchPorts = {
   thresholds?: (job: Job) => Partial<RunWatchThresholds>;
   /** Comment and move the job to blocked; false when the transition was refused. */
   block: (job: Job, text: string) => boolean;
+  /** Why the thread is in error, as BB reported it; null when unknown. */
+  providerError?: (threadId: string) => string | null;
+  /** False when the machine of the job is offline: the attempt waits for it to come back. */
+  hostOnline?: (job: Job) => boolean | null;
   now: () => string;
 };
 
@@ -89,7 +106,7 @@ function minutes(ms: number): number {
 }
 
 export function runWatchText(
-  kind: "quiet" | "stalled" | "not_started" | "error" | "ceiling",
+  kind: "quiet" | "stalled" | "not_started" | "error" | "ceiling" | "provider_wait",
   jobKey: string,
   lang: AgencyLanguage = agencyLanguage(),
   t: RunWatchThresholds = DEFAULT_RUN_WATCH_THRESHOLDS,
@@ -112,6 +129,8 @@ export function runWatchText(
         return `Agency: the ${jobKey} thread has been in error for more than ${minutes(RUN_WATCH_ERROR_MS)} min (provider failure or subscription limit). The job moved to «needs decision». ${stopEn}`;
       case "ceiling":
         return `Agency: ${jobKey} has worked non-stop for more than ${minutes(RUN_WATCH_CEILING_MS) / 60} h — the limit of one attempt. The job moved to «needs decision»: check that the employee is not looping and split the work. ${stopEn}`;
+      case "provider_wait":
+        return `Agency: the ${jobKey} thread is in error, and BB is waiting to carry it on by itself — a subscription window, an overload or a machine that went offline. The job stays in work; nothing is lost. ${stopEn}`;
     }
   }
   const stop = `Остановить попытку: bb agency launch cancel; затем перезапустить или переназначить ${jobKey}.`;
@@ -126,6 +145,8 @@ export function runWatchText(
       return `Агентство: тред ${jobKey} в ошибке дольше ${minutes(RUN_WATCH_ERROR_MS)} мин (сбой провайдера или лимит подписки). Задача переведена в «Ожидает решения». ${stop}`;
     case "ceiling":
       return `Агентство: ${jobKey} работает без перерыва дольше ${minutes(RUN_WATCH_CEILING_MS) / 60} ч — это потолок одной попытки. Задача переведена в «Ожидает решения»: проверьте, не зациклился ли сотрудник, и разбейте работу. ${stop}`;
+    case "provider_wait":
+      return `Агентство: тред ${jobKey} в ошибке, но BB сам ждёт возможности продолжить — окно подписки, перегрузка провайдера или машина не в сети. Задача остаётся в работе, ничего не потеряно. ${stop}`;
   }
 }
 
@@ -225,6 +246,13 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
   }
   const inStatusMs = nowMs - Date.parse(record.status_since);
   if (status === "error") {
+    // BB retries a subscription window or an overload by itself; the attempt is not dead yet.
+    const waiting = providerWillRetry(ports.providerError?.(row.threadId)) || ports.hostOnline?.(job) === false;
+    if (waiting && inStatusMs < RUN_WATCH_PROVIDER_WAIT_MS) {
+      if (!record.warned_at && ports.comment(job, runWatchText("provider_wait", job.key, agencyLanguage(), t))) record.warned_at = now;
+      save(ports.db, record, now);
+      return record.warned_at === now ? "warned" : "ok";
+    }
     if (inStatusMs >= t.errorMs) return finish("error");
     save(ports.db, record, now);
     return "ok";
