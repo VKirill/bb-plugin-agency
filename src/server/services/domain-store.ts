@@ -1850,6 +1850,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     getArtifactVersion: (artifactId: string, jobId: string, version: number) =>
       repos.artifactVersion.get(artifactId, jobId, version),
     listActivity: (jobId: string) => repos.activity.listByJob(jobId),
+    /** The job with the comments of its subtasks: one conversation in the main job card. */
+    listActivityTree: (jobId: string) => repos.activity.listByJobTree(jobId),
     inboxCount: () => repos.inbox.count(),
     assertBindingAccess,
     assertNotSelfReview,

@@ -109,8 +109,17 @@ export function humanActivityLabel(kind: string): string {
   return tr(ACTIVITY_KIND_LABEL[kind] ?? kind.replaceAll("_", " "));
 }
 
-export function mapActivity(rows: Activity[], agents: readonly NamedActor[]): TaskActivity[] {
+/**
+ * History rows for a card. `subtaskOf` marks the job the card shows: a row from another
+ * job is a subtask comment, and the card labels it with that subtask's key.
+ */
+export function mapActivity(
+  rows: Activity[],
+  agents: readonly NamedActor[],
+  subtaskOf?: { jobId: string | undefined; keyOf: (jobId: string) => string | undefined },
+): TaskActivity[] {
   return rows.map((row) => {
+    const foreign = subtaskOf && subtaskOf.jobId && row.jobId !== subtaskOf.jobId ? subtaskOf.keyOf(row.jobId) : undefined;
     const author = actorLabel(row, agents);
     const isComment = row.kind === "comment" && Boolean(row.comment);
     const actor = row.actor;
@@ -127,6 +136,7 @@ export function mapActivity(rows: Activity[], agents: readonly NamedActor[]): Ta
       reasoningEffort: agent?.selection?.reasoningLevel,
       fileIds: row.references.filter((item) => item.type === "artifact").map((item) => item.id),
       references: row.references.map((item) => ({ type: item.type, id: item.id })),
+      ...(foreign ? { jobKey: foreign, jobId: row.jobId } : {}),
     };
   });
 }

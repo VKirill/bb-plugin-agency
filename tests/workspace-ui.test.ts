@@ -331,6 +331,14 @@ describe("workspace view models", () => {
     ];
     expect(mapActivity(rows, []).map((item) => item.author)).toEqual(["Система", "Вы", "agt_writer01"]);
     expect(mapActivity(rows, [{ id: "agt_writer01", name: "Анна" }]).map((item) => item.author)).toEqual(["Система", "Вы", "Анна"]);
+    // A main job card also shows what employees wrote in its subtasks, marked with the subtask key.
+    const fromChild = mapActivity(
+      [{ ...rows[2]!, jobId: "job_child00001" }],
+      [{ id: "agt_writer01", name: "Анна" }],
+      { jobId: "job_offer0001", keyOf: (id) => (id === "job_child00001" ? "AG-22" : undefined) },
+    );
+    expect(fromChild[0]).toMatchObject({ jobKey: "AG-22", jobId: "job_child00001", author: "Анна" });
+    expect(mapActivity([rows[2]!], [], { jobId: "job_offer0001", keyOf: () => "AG-22" })[0]?.jobKey).toBeUndefined();
     expect(artifactAuthorLabel({ kind: "system" })).toBe("Система");
   });
 

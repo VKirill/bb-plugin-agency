@@ -95,6 +95,30 @@ type AgentVersionRow = {
   service_tier?: string | null;
 };
 
+type ActivityRow = {
+  id: string;
+  job_id: string;
+  actor: string;
+  kind: string;
+  causation_id: string | null;
+  timestamp: string;
+  references_json: string;
+  comment: string | null;
+};
+
+function mapActivityRow(row: ActivityRow): Activity {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    actor: parseJson<ActivityActor>(row.actor),
+    kind: row.kind,
+    causationId: row.causation_id,
+    timestamp: row.timestamp,
+    references: parseJson(row.references_json),
+    ...(row.comment ? { comment: row.comment } : {}),
+  };
+}
+
 export function mapStoredAgentVersion(row: AgentVersionRow): AgentVersion {
   const parsed = reasoningEffortSchema.safeParse(row.reasoning_effort);
   return {
@@ -657,6 +681,32 @@ export function createRepositories(db: SqlDatabase) {
           row.comment ?? null,
         );
       },
+      /**
+       * The job's own history plus what employees wrote in its subtasks: the card of a main
+       * job then reads as one conversation instead of the lead talking to itself. Only
+       * comments come from subtasks; their system events stay in their own cards.
+       */
+      listByJobTree(jobId: string, limit = 400): Activity[] {
+        return (
+          db.prepare(
+            `WITH RECURSIVE tree(id) AS (
+               SELECT ? UNION SELECT j.id FROM agency_job j JOIN tree ON j.parent_job_id = tree.id
+             )
+             SELECT a.* FROM agency_activity a
+             WHERE a.job_id = ? OR (a.job_id IN (SELECT id FROM tree) AND a.kind = 'comment' AND a.comment IS NOT NULL)
+             ORDER BY a.timestamp LIMIT ?`,
+          ).all(jobId, jobId, limit) as Array<{
+            id: string;
+            job_id: string;
+            actor: string;
+            kind: string;
+            causation_id: string | null;
+            timestamp: string;
+            references_json: string;
+            comment: string | null;
+          }>
+        ).map(mapActivityRow);
+      },
       listByJob(jobId: string): Activity[] {
         return (
           db.prepare(`SELECT * FROM agency_activity WHERE job_id = ? ORDER BY timestamp`).all(jobId) as Array<{
@@ -669,16 +719,7 @@ export function createRepositories(db: SqlDatabase) {
             references_json: string;
             comment: string | null;
           }>
-        ).map((row) => ({
-          id: row.id,
-          jobId: row.job_id,
-          actor: parseJson<ActivityActor>(row.actor),
-          kind: row.kind,
-          causationId: row.causation_id,
-          timestamp: row.timestamp,
-          references: parseJson(row.references_json),
-          ...(row.comment ? { comment: row.comment } : {}),
-        }));
+        ).map(mapActivityRow);
       },
     },
     request: {

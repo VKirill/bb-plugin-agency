@@ -254,7 +254,7 @@ export function createDomainRpc(deps: {
         return ok({
           job: scoped.value.job,
           binding: scoped.value.binding,
-          activity: store.listActivity(job.id),
+          activity: store.listActivityTree(job.id),
           dependencies: store.listDependencies(job.id),
           links: dependencyLinks(db, job.id),
           nextStep: readNextStep(db, job.id),

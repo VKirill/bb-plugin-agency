@@ -218,6 +218,7 @@ export const EN_JOBS: Record<string, string> = {
   "Автоматически · исполнитель с наименьшей загрузкой": "Automatic · least busy executor",
   "Автоматически · проверяющий с наименьшей загрузкой": "Automatic · least busy reviewer",
   "В отделе нет активных сотрудников. Добавьте их в «Составе» отдела.": "The department has no active employees. Add them in the department's “Members”.",
+  "Открыть подзадачу {key}": "Open subtask {key}",
   "Прочитать сначала": "Read first",
   "Интерфейсы и инварианты": "Interfaces and invariants",
   "Что исполнитель читает до начала: файлы, документы, отчёты прошлых задач. Экономит поиск и не даёт додумывать.": "What the executor reads before starting: files, documents, reports of earlier jobs. It saves searching and leaves less to guess.",

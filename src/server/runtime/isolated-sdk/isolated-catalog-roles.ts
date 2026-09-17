@@ -1,3 +1,4 @@
+import { agencyLanguage } from "../../i18n/language.js";
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod";
 import { fail, ok, type DomainResult } from "../../../domain";
@@ -113,9 +114,14 @@ export async function pinCatalogRolesForPrepare(input: {
       );
     }
     if (hashed.value.hash !== pin.hash) {
+      // The owner edited or updated the skill: the pin is what a launch is checked against,
+      // so the message says where to renew it instead of leaving two hashes to compare.
+      const en = agencyLanguage() === "en";
       return fail(
         "catalog_skill_hash_mismatch",
-        `skill ${pin.id} package hash ${hashed.value.hash} !== configured ${pin.hash}`,
+        en
+          ? `The Agency skill changed after it was pinned, so no launch passes the check. Open Settings → Machines → «Pin current versions». (${pin.id}: ${hashed.value.hash.slice(0, 8)} instead of ${pin.hash.slice(0, 8)}.)`
+          : `Навык Агентства изменился после закрепления, поэтому запуск не проходит проверку. Откройте «Настройки → Машины» и нажмите «Закрепить текущие версии». (${pin.id}: ${hashed.value.hash.slice(0, 8)} вместо ${pin.hash.slice(0, 8)}.)`,
       );
     }
   }

@@ -23,7 +23,9 @@ export const sections = [
   ["knowledge", "Знания", "Info"], ["settings", "Настройки", "Settings"],
 ] as const;
 export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; version?:number; hash?:string; mime?:string; previousVersions?:{version:number;content:string;at:string}[]; }
-export interface TaskActivity {id:string;kind:"comment"|"event";text:string;at:string;author?:string;role?:string;providerId?:string;model?:string;reasoningEffort?:string;fileIds?:string[];references?:{type:string;id:string}[];}
+export interface TaskActivity {id:string;kind:"comment"|"event";text:string;at:string;author?:string;role?:string;providerId?:string;model?:string;reasoningEffort?:string;fileIds?:string[];references?:{type:string;id:string}[];
+ /** Set when the row came from a subtask of the shown job: its key and record id. */
+ jobKey?:string;jobId?:string;}
 export interface Job {
   id: string;
   title: string;
