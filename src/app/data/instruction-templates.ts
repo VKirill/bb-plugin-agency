@@ -8,12 +8,13 @@ import { uiLanguage } from "../i18n";
 
 export { DEPARTMENT_CHARTER_TEMPLATE };
 
-export type JobDescriptionKind = "lead" | "reviewer" | "executor";
+export type JobDescriptionKind = "lead" | "reviewer" | "executor" | "assistant";
 
 export function jobDescriptionKind(role: string): JobDescriptionKind {
   const value = role.trim().toLowerCase();
   if (/lead|руковод|manager|менеджер/.test(value)) return "lead";
   if (/review|провер|qa|audit/.test(value)) return "reviewer";
+  if (/помощ|assistant|разведчик|scout/.test(value)) return "assistant";
   return "executor";
 }
 
@@ -21,6 +22,7 @@ export const JOB_DESCRIPTION_TEMPLATE_KEY: Record<JobDescriptionKind, TemplateKe
   lead: "jobDescriptionLead",
   executor: "jobDescriptionExecutor",
   reviewer: "jobDescriptionReviewer",
+  assistant: "jobDescriptionAssistant",
 };
 
 /**
@@ -29,7 +31,10 @@ export const JOB_DESCRIPTION_TEMPLATE_KEY: Record<JobDescriptionKind, TemplateKe
  * use the standard ones.
  */
 export function jobDescriptionTemplate(roleOrKind: string, templates: Partial<Record<TemplateKey, string>> = defaultTemplates(uiLanguage())): string {
-  const kind = roleOrKind === "lead" || roleOrKind === "reviewer" || roleOrKind === "executor" ? roleOrKind : jobDescriptionKind(roleOrKind);
+  const kind =
+    roleOrKind === "lead" || roleOrKind === "reviewer" || roleOrKind === "executor" || roleOrKind === "assistant"
+      ? roleOrKind
+      : jobDescriptionKind(roleOrKind);
   const key = JOB_DESCRIPTION_TEMPLATE_KEY[kind];
   return templates[key] ?? defaultTemplates(uiLanguage())[key];
 }
@@ -38,4 +43,5 @@ export const JOB_DESCRIPTION_LABEL: Record<JobDescriptionKind, string> = {
   lead: "руководителя",
   reviewer: "проверяющего",
   executor: "исполнителя",
+  assistant: "помощника",
 };

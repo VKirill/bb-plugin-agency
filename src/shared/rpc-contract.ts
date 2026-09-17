@@ -283,6 +283,32 @@ export const modelPricesViewSchema = z
   })
   .strict();
 
+/** One employee against the models this BB can actually run. */
+export const agentModelRowSchema = z
+  .object({
+    agentId: z.string(),
+    name: z.string(),
+    providerId: z.string(),
+    model: z.string(),
+    status: z.enum(["exact", "substituted", "missing", "unchanged", "repaired", "blocked"]),
+    suggestedProviderId: z.string().nullable(),
+    suggestedModel: z.string().nullable(),
+    note: z.string().nullable(),
+  })
+  .strict();
+
+export const agentModelsViewSchema = z
+  .object({
+    /** The machine whose catalog was read; null when no project is connected. */
+    hostId: z.string().nullable(),
+    /** BB could not list models: nothing is judged and nothing is blocked. */
+    catalogUnavailable: z.boolean(),
+    rows: z.array(agentModelRowSchema),
+  })
+  .strict();
+
+export type AgentModelsView = z.infer<typeof agentModelsViewSchema>;
+
 export type ModelPricesView = z.infer<typeof modelPricesViewSchema>;
 export type ModelPriceRowView = z.infer<typeof modelPricesViewSchema>["rows"][number];
 
@@ -999,6 +1025,8 @@ export const rpcContract = defineRpcContract({
   listBudgets: { input: z.null(), output: domainResultSchema(z.array(budgetStatusSchema)) },
   providerUsage: { input: z.null(), output: domainResultSchema(z.array(providerUsageSchema)) },
   modelPrices: { input: z.null(), output: modelPricesViewSchema },
+  agentModels: { input: z.null(), output: domainResultSchema(agentModelsViewSchema) },
+  repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), output: domainResultSchema(agentModelsViewSchema) },
   setModelPrices: { input: z.object({ rows: z.array(modelPriceRowSchema).max(300) }).strict(), output: modelPricesViewSchema },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },
   getSkillPins: { input: z.null(), output: domainResultSchema(skillPinStatusSchema) },

@@ -8,6 +8,7 @@ import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCom
 import {
   assertAcceptCurrentVersion,
   assertAssigneeInDepartment,
+  assertAssistantLimits,
   assertBindingActive,
   assertBindingMoveAllowed,
   assertDepartmentOnBinding,
@@ -476,6 +477,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     for (const row of rows) {
       const agent = requireAgent(row.agentId);
       if (!agent.ok) return agent;
+      const assistants = assertAssistantLimits(row, rows);
+      if (!assistants.ok) return assistants;
     }
     return ok(rows);
   }
@@ -1048,7 +1051,10 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           departmentId: parsed.data.departmentId,
           agentId: parsed.data.agentId,
           role: parsed.data.role,
+          helpsAgentId: parsed.data.helpsAgentId ?? null,
         };
+        const assistants = assertAssistantLimits(membership, repos.membership.listByDepartment(parsed.data.departmentId));
+        if (!assistants.ok) return assistants;
         try {
           repos.membership.insert(membership);
         } catch {
@@ -1305,6 +1311,31 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     })();
   };
 
+  /**
+   * An assistant prepares material for one employee: they take subtasks, never the department's
+   * main job, and they do not hand work out themselves.
+   */
+  function assertAssistantWork(departmentId: string, assignedAgentId: string | null, parentJobId: string | null): DomainResult<true> {
+    if (!assignedAgentId || parentJobId) return ok(true);
+    const membership = repos.membership.get(departmentId, assignedAgentId);
+    if (membership?.role !== "assistant") return ok(true);
+    return fail(
+      "assistant_main_job",
+      "Помощник ведёт только подзадачу: главную задачу отдела поставьте руководителю или исполнителю.",
+    );
+  }
+
+  function assertCallerMayDelegate(ctx: ServiceContext): DomainResult<true> {
+    const agentId = ctx.caller?.agentId;
+    if (!agentId) return ok(true);
+    const memberships = repos.membership.listByAgent(agentId);
+    if (!memberships.length || memberships.some((row) => row.role !== "assistant")) return ok(true);
+    return fail(
+      "assistant_cannot_delegate",
+      "Помощник не создаёт поручения: напишите тому, кому помогаете, — он решит, что делать дальше.",
+    );
+  }
+
   const createJob = (ctx: ServiceContext, input: CreateJobCommand & { claimedBbProjectId?: string }): DomainResult<Job> => {
     const parsed = createJobCommandSchema.safeParse(withoutClaim(input));
     if (!parsed.success) return fail("invalid_command", parsed.error.message);
@@ -1354,6 +1385,10 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         }
         const assigneeActive = assertAgentActive(assignedAgentId);
         if (!assigneeActive.ok) return assigneeActive;
+        const helperWork = assertAssistantWork(parsed.data.departmentId, assignedAgentId, parsed.data.parentJobId ?? null);
+        if (!helperWork.ok) return helperWork;
+        const helperCaller = assertCallerMayDelegate(ctx);
+        if (!helperCaller.ok) return helperCaller;
         if (parsed.data.parentJobId) {
           const round = assertReworkRoundAllowed(parsed.data.parentJobId, parsed.data.departmentId, assignedAgentId);
           if (!round.ok) return round;
@@ -1439,6 +1474,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (assignedAgentId !== scoped.value.job.assignedAgentId) {
           const active = assertAgentActive(assignedAgentId);
           if (!active.ok) return active;
+          const helperWork = assertAssistantWork(departmentId, assignedAgentId, scoped.value.job.parentJobId);
+          if (!helperWork.ok) return helperWork;
         }
         if (assignedAgentId !== scoped.value.job.assignedAgentId || nextBinding.value.id !== scoped.value.job.bindingId) {
           const atWorkplace = assertWorkplace(assignedAgentId, nextBinding.value.id);

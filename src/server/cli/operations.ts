@@ -100,6 +100,8 @@ export const CLI_OPERATIONS = {
   setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), summary: "Привязать главную задачу к цели (goalId null — отвязать)" },
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
   agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
+  agentModels: { input: emptyObjectSchema, summary: "Модели сотрудников против того, что подключено в этом BB: exact, substituted (есть замена), missing (замены нет)" },
+  repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), summary: "Перевести сотрудников на доступные модели: новая версия профиля с ближайшей подключённой моделью" },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },
   starterKit: { input: z.object({ language: z.enum(["ru", "en"]).optional() }).strict(), summary: "Стартовые отделы и сотрудники: что есть в наборе, что установлено, сколько записей можно перевести" },
   installStarterKit: { input: installStarterKitInputSchema, summary: "Установить выбранные стартовые отделы с сотрудниками; language по умолчанию — язык Агентства" },

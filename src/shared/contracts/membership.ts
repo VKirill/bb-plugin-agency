@@ -10,7 +10,7 @@ export const agentStateSchema = z.enum(["active", "paused", "archived"]);
  * executor — does the work and hands in a version;
  * reviewer — checks someone else's version and may not check their own work.
  */
-export const MEMBERSHIP_ROLES = ["lead", "executor", "reviewer"] as const;
+export const MEMBERSHIP_ROLES = ["lead", "executor", "reviewer", "assistant"] as const;
 export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
 /** `member` is the pre-2026-09-16 name of executor; old payloads keep working. */
 export const membershipRoleSchema = z.preprocess(
@@ -59,6 +59,8 @@ export const membershipSchema = z
     departmentId: opaqueIdSchema,
     agentId: opaqueIdSchema,
     role: membershipRoleSchema,
+    /** Assistants only: the employee of this department they help; null means the lead decides. */
+    helpsAgentId: opaqueIdSchema.nullable().optional(),
   })
   .strict();
 
@@ -103,6 +105,7 @@ export const createMembershipCommandSchema = createCommandSchema
     departmentId: opaqueIdSchema,
     agentId: opaqueIdSchema,
     role: membershipRoleSchema,
+    helpsAgentId: opaqueIdSchema.nullable().optional(),
   })
   .strict();
 

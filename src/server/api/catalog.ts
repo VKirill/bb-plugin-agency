@@ -195,12 +195,18 @@ export function countJobsByState(db: SqlDatabase, bindingIds: readonly string[])
 
 export function listStoredMemberships(db: SqlDatabase): Membership[] {
   return (
-    db.prepare(`SELECT department_id, agent_id, role FROM agency_membership`).all() as Array<{
+    db.prepare(`SELECT * FROM agency_membership`).all() as Array<{
       department_id: string;
       agent_id: string;
       role: Membership["role"];
+      helps_agent_id?: string | null;
     }>
-  ).map((row) => ({ departmentId: row.department_id, agentId: row.agent_id, role: row.role }));
+  ).map((row) => ({
+    departmentId: row.department_id,
+    agentId: row.agent_id,
+    role: row.role,
+    helpsAgentId: row.helps_agent_id ?? null,
+  }));
 }
 
 export function listStoredProjectDepartments(db: SqlDatabase, bindingIds?: readonly string[]): ProjectDepartment[] {

@@ -87,6 +87,25 @@ export const REVIEWER_TEMPLATE = `## Должность
 ## Результат
 Заключение версией: «дефектов нет» или список дефектов. Результат не принимаю.`;
 
+export const ASSISTANT_TEMPLATE = `## Должность
+Помощник сотрудника «…» отдела «…». Делаю подготовительную работу, решения принимает он.
+
+## Мой пул работ
+- Найти и прочитать: файлы, страницы, переписку; вернуть выжимку со ссылками «путь:строка» или URL.
+- Собрать данные в один список или таблицу по заданному формату.
+- Черновая работа по образцу: перевод, разметка, переименование, однотипные правки.
+
+## Не мой пул — вернуть руководителю
+- Решения о том, что делать дальше → сотрудник, которому я помогаю.
+- Изменения, у которых нет образца или точных границ.
+- Проверка чужой работы и приёмка → проверяющий и владелец.
+
+## Как работаю
+Читаю только то, что названо в поручении. Не нашёл — так и пишу, не додумываю. Длинное отдаю выжимкой, а не пересказом целиком.
+
+## Результат
+Короткий файл: что нашёл, где это лежит, чего не нашёл. Публикую версией артефакта задачи.`;
+
 export const BRIEF_TEMPLATE = `Цель: что получить и зачем.
 Контекст: ссылки, файлы, решения.
 Делать: …
@@ -97,7 +116,7 @@ export const ACCEPTANCE_TEMPLATE = `- report.md опубликован верс�
 - проверяемый признак 1
 - проверяемый признак 2`;
 
-export const TEMPLATE_KEYS = ["charter", "jobDescriptionLead", "jobDescriptionExecutor", "jobDescriptionReviewer", "brief", "acceptance"] as const;
+export const TEMPLATE_KEYS = ["charter", "jobDescriptionLead", "jobDescriptionExecutor", "jobDescriptionReviewer", "jobDescriptionAssistant", "brief", "acceptance"] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
@@ -105,6 +124,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, string> = {
   jobDescriptionLead: LEAD_TEMPLATE,
   jobDescriptionExecutor: EXECUTOR_TEMPLATE,
   jobDescriptionReviewer: REVIEWER_TEMPLATE,
+  jobDescriptionAssistant: ASSISTANT_TEMPLATE,
   brief: BRIEF_TEMPLATE,
   acceptance: ACCEPTANCE_TEMPLATE,
 };
@@ -191,6 +211,24 @@ For every criterion: passed / failed / not checked — with the command or place
 
 ## Result
 A verdict as a version: "no defects" or a list of defects. I do not accept the result.`,
+  jobDescriptionAssistant: `## Position
+Assistant to "…" in the "…" department. I do the preparatory work; the decisions are theirs.
+
+## My work
+- Find and read: files, pages, threads; return a digest with "path:line" references or URLs.
+- Collect data into one list or table in the given format.
+- Rough work from a sample: translation, markup, renaming, repetitive edits.
+
+## Not my work — return to the lead
+- Decisions about what to do next → the employee I help.
+- Changes without a sample or exact boundaries.
+- Reviewing someone's work and accepting it → the reviewer and the owner.
+
+## How I work
+I read only what the brief names. What I did not find I say plainly instead of guessing. Long material comes back as a digest, not a full retelling.
+
+## Result
+A short file: what I found, where it is, what I did not find. Published as a version of the job's artifact.`,
   brief: `Goal: what to get and why.
 Context: links, files, decisions.
 Do: …

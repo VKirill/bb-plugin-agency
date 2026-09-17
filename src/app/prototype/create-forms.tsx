@@ -36,7 +36,7 @@ export function AgencyCreateDialogs({
   loadCatalog: () => Promise<boolean>;
   agents: { id: string; name: string; role?: string; enabled?: boolean; selection?: { providerId: string; model: string } }[];
   bindings: { id: string; name: string; archivedAt?: string; environmentId?: string; root?: string; bbProjectId?: string }[];
-  departments?: { id: string; name: string }[];
+  departments?: { id: string; name: string; members?: readonly string[]; lead?: string; memberRoles?: Record<string, string> }[];
   /** Machine whose model catalog the picker reads. */
   routingHostId?: string;
   existingDepartmentNames?: string[];
@@ -51,7 +51,8 @@ export function AgencyCreateDialogs({
     reasoningEffort?: ExperimentalProviderModelPickerValue["reasoningLevel"];
     serviceTier?: ExperimentalProviderModelPickerValue["serviceTier"];
     departmentId?: string;
-    roleType?: "executor" | "reviewer";
+    roleType?: "executor" | "reviewer" | "assistant";
+    helpsAgentId?: string;
   }) => Promise<boolean>;
   createDepartment: (input: { name: string; leadAgentId: string; instructions: string; acceptance: string; bindingId?: string; executorIds?: string[]; reviewerIds?: string[] }) => Promise<boolean>;
 }) {
@@ -79,6 +80,7 @@ export function AgencyCreateDialogs({
   const [role, setRole] = useState("");
   const [roleType, setRoleType] = useState<RoleType>("executor");
   const [agentDepartment, setAgentDepartment] = useState("none");
+  const [helpsAgentId, setHelpsAgentId] = useState("none");
   const [selection, setSelection] = useState<ExperimentalProviderModelPickerValue>(roleDefaults.executor);
   const [instructionsTouched, setInstructionsTouched] = useState(false);
   const [instructions, setInstructions] = useState("Выполняйте поручение и приложите проверяемый результат.");
@@ -165,7 +167,13 @@ export function AgencyCreateDialogs({
         model: selection.model,
         reasoningEffort: selection.reasoningLevel,
         ...(selection.serviceTier ? { serviceTier: selection.serviceTier } : {}),
-        ...(joinsDepartment ? { departmentId: agentDepartment, roleType: roleType === "reviewer" ? "reviewer" : "executor" } : {}),
+        ...(joinsDepartment
+          ? {
+              departmentId: agentDepartment,
+              roleType: roleType === "reviewer" || roleType === "assistant" ? roleType : "executor",
+              ...(roleType === "assistant" && helpsAgentId !== "none" ? { helpsAgentId } : {}),
+            }
+          : {}),
       });
     }
     if (kind === "department") {
@@ -247,9 +255,26 @@ export function AgencyCreateDialogs({
               {roleType === "lead" ? (
                 <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">{tr("Руководителя назначают в отделе: выберите этого сотрудника при создании отдела или в «Составе» существующего отдела.")}</p>
               ) : (
-                <Field label="Отдел" info={<><p>{tr("Сотрудник сразу войдёт в состав отдела с выбранным типом роли.")}</p><p>{tr("Без отдела ему нельзя поручить задачу: исполнитель задачи всегда из состава её отдела.")}</p></>}>
-                  <Choice label="Отдел" value={agentDepartment} onChange={setAgentDepartment} options={[{ value: "none", label: "Не добавлять сейчас" }, ...departments.map((item) => ({ value: item.id, label: item.name }))]} />
-                </Field>
+                <>
+                  <Field label="Отдел" info={<><p>{tr("Сотрудник сразу войдёт в состав отдела с выбранным типом роли.")}</p><p>{tr("Без отдела ему нельзя поручить задачу: исполнитель задачи всегда из состава её отдела.")}</p></>}>
+                    <Choice label="Отдел" value={agentDepartment} onChange={setAgentDepartment} options={[{ value: "none", label: "Не добавлять сейчас" }, ...departments.map((item) => ({ value: item.id, label: item.name }))]} />
+                  </Field>
+                  {roleType === "assistant" && agentDepartment !== "none" && (
+                    <Field label="Кому помогает" info={<><p>{tr("Помощник готовит материал для одного сотрудника отдела: тот ставит ему подзадачи и принимает результат.")}</p><p>{tr("У одного сотрудника не больше трёх помощников. «Решает руководитель» — помощник общий для отдела.")}</p></>}>
+                      <Choice
+                        label="Кому помогает"
+                        value={helpsAgentId}
+                        onChange={setHelpsAgentId}
+                        options={[
+                          { value: "none", label: "Решает руководитель" },
+                          ...(departments.find((item) => item.id === agentDepartment)?.members ?? [])
+                            .filter((memberId) => departments.find((item) => item.id === agentDepartment)?.memberRoles?.[memberId] !== "assistant")
+                            .map((memberId) => ({ value: memberId, label: agents.find((agent) => agent.id === memberId)?.name ?? memberId })),
+                        ]}
+                      />
+                    </Field>
+                  )}
+                </>
               )}
               <TextField label="Должность" value={role} onChange={setRole} maxLength={80} required placeholder={TITLE_PLACEHOLDER[roleType]} info={<><p>{tr("Свободный текст на языке команды: как эту работу называют у вас. Показывается в карточках и в инструкциях руководителю.")}</p><p>{tr("На поведение системы влияет тип роли, а не должность.")}</p></>} />
               <Field label="CLI и модель" required info={<><p>{tr("Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Модель, уровень рассуждения и быстрый режим выбираются здесь же.")}</p><p>{tr("Сильная модель нужна руководителю и проверяющему, для типовой работы исполнителя хватает более быстрой и дешёвой.")}</p><p>{tr("Значения по умолчанию для каждого типа роли задаются в «Настройки → Правила работы».")}</p></>}>

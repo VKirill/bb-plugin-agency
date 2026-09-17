@@ -371,28 +371,58 @@ export function createRepositories(db: SqlDatabase) {
     },
     membership: {
       insert(row: Membership): void {
+        // Written only when set, so a membership without a helper stays valid on an older schema.
+        const columns: [string, unknown][] = [
+          ["department_id", row.departmentId],
+          ["agent_id", row.agentId],
+          ["role", row.role],
+        ];
+        if (row.helpsAgentId) columns.push(["helps_agent_id", row.helpsAgentId]);
         db.prepare(
-          `INSERT INTO agency_membership (department_id, agent_id, role) VALUES (?, ?, ?)`,
-        ).run(row.departmentId, row.agentId, row.role);
+          `INSERT INTO agency_membership (${columns.map(([name]) => name).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+        ).run(...columns.map(([, value]) => value));
       },
       listByDepartment(departmentId: string): Membership[] {
         return (
-          db.prepare(`SELECT department_id, agent_id, role FROM agency_membership WHERE department_id = ?`).all(
-            departmentId,
-          ) as Array<{ department_id: string; agent_id: string; role: Membership["role"] }>
-        ).map((row) => ({ departmentId: row.department_id, agentId: row.agent_id, role: row.role }));
+          db.prepare(`SELECT * FROM agency_membership WHERE department_id = ?`).all(departmentId) as Array<{
+            department_id: string;
+            agent_id: string;
+            role: Membership["role"];
+            helps_agent_id?: string | null;
+          }>
+        ).map((row) => ({
+          departmentId: row.department_id,
+          agentId: row.agent_id,
+          role: row.role,
+          helpsAgentId: row.helps_agent_id ?? null,
+        }));
+      },
+      listByAgent(agentId: string): Membership[] {
+        return (
+          db.prepare(`SELECT * FROM agency_membership WHERE agent_id = ?`).all(agentId) as Array<{
+            department_id: string;
+            agent_id: string;
+            role: Membership["role"];
+            helps_agent_id?: string | null;
+          }>
+        ).map((row) => ({
+          departmentId: row.department_id,
+          agentId: row.agent_id,
+          role: row.role,
+          helpsAgentId: row.helps_agent_id ?? null,
+        }));
       },
       remove(departmentId: string, agentId: string): void {
         db.prepare(`DELETE FROM agency_membership WHERE department_id = ? AND agent_id = ?`).run(departmentId, agentId);
       },
       get(departmentId: string, agentId: string): Membership | undefined {
         const row = db.prepare(
-          `SELECT department_id, agent_id, role FROM agency_membership WHERE department_id = ? AND agent_id = ?`,
+          `SELECT * FROM agency_membership WHERE department_id = ? AND agent_id = ?`,
         ).get(departmentId, agentId) as
-          | { department_id: string; agent_id: string; role: Membership["role"] }
+          | { department_id: string; agent_id: string; role: Membership["role"]; helps_agent_id?: string | null }
           | undefined;
         return row
-          ? { departmentId: row.department_id, agentId: row.agent_id, role: row.role }
+          ? { departmentId: row.department_id, agentId: row.agent_id, role: row.role, helpsAgentId: row.helps_agent_id ?? null }
           : undefined;
       },
     },

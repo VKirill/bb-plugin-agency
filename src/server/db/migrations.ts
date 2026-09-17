@@ -23,6 +23,7 @@ import { WORK_RULES_MIGRATION } from "../rules/work-rules";
 import { DUE_REMINDER_MIGRATION } from "../runtime/due-reminder/service";
 import { USAGE_COLLECTOR_MIGRATION } from "../runtime/usage-collector/migration.js";
 import { CRON_OCCURRENCE_MIGRATION } from "../triggers/cron/migration.js";
+import { ASSISTANT_MEMBERSHIP_MIGRATION } from "../runtime/assistants/migration.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -633,6 +634,7 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
     CHECK (service_tier IS NULL OR service_tier IN ('default', 'fast'));`,
   `ALTER TABLE agency_launch_queue ADD COLUMN failing_since TEXT;`,
   `ALTER TABLE agency_launch_queue ADD COLUMN dropped_at TEXT;`,
+  ASSISTANT_MEMBERSHIP_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

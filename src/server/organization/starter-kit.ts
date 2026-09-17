@@ -2,6 +2,7 @@ import { fail, ok, type DomainResult } from "../../domain";
 import { STARTER_KIT, kitDepartment, type KitAgent, type KitDepartment, type KitLanguage } from "../../shared/starter-kit";
 import type { SqlDatabase } from "../db/sql";
 import type { ReasoningEffort, ServiceTier } from "../../shared/contracts/versions";
+import type { ModelChoice } from "../runtime/model-fallback.js";
 
 /**
  * Starter departments and employees. Installed records are remembered with their
@@ -203,8 +204,12 @@ export type StarterKitPorts = {
   policyVersionId: () => DomainResult<string>;
   /** CLI, model, reasoning and fast mode for a role type from the agency work rules. */
   defaults: (roleType: KitAgent["roleType"]) => { providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier: ServiceTier | null };
-  /** CLIs connected in BB. An employee whose preset CLI is missing starts on the role default. */
-  providerAvailable?: (providerId: string) => boolean;
+  /**
+   * What this BB can actually run. The preset CLI and model are matched against the connected
+   * catalog: a missing model becomes the closest one there, and only a hopeless case falls back
+   * to the role default from the work rules.
+   */
+  resolveModel?: (wish: { providerId: string; model: string }) => ModelChoice;
   provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
   provisionDepartment: (input: { requestId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<{ department: { id: string } }>;
   addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" }) => DomainResult<unknown>;
@@ -240,11 +245,22 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
     const agentIds = new Map<string, string>();
     let failed: string | null = null;
     const missingCli: string[] = [];
+    const swapped: string[] = [];
     for (const agent of item.agents) {
-      const preset = agent.preset && (ports.providerAvailable?.(agent.preset.providerId) ?? true) ? agent.preset : null;
+      const wish = agent.preset ? { providerId: agent.preset.providerId, model: agent.preset.model } : null;
+      const choice = wish && ports.resolveModel ? ports.resolveModel(wish) : null;
+      const preset = agent.preset && (!choice || choice.status !== "missing") ? agent.preset : null;
       if (agent.preset && !preset) missingCli.push(`${agent.text[input.language].name} (${agent.preset.providerId})`);
+      const substituted = preset && choice && choice.status === "substituted" ? choice : null;
+      if (substituted) swapped.push(`${agent.text[input.language].name}: ${substituted.wanted.model} → ${substituted.model}`);
       const defaults = preset
-        ? { providerId: preset.providerId, model: preset.model, reasoningEffort: preset.reasoningEffort as ReasoningEffort, serviceTier: (preset.serviceTier ?? null) as ServiceTier | null }
+        ? {
+            providerId: substituted ? substituted.providerId : preset.providerId,
+            model: substituted ? substituted.model : preset.model,
+            reasoningEffort: preset.reasoningEffort as ReasoningEffort,
+            // Fast mode belongs to the CLI it was set for; another CLI may not have it at all.
+            serviceTier: (substituted && substituted.providerId !== preset.providerId ? null : preset.serviceTier ?? null) as ServiceTier | null,
+          }
         : ports.defaults(agent.roleType);
       const created = ports.provisionAgent({
         requestId: ports.newRequestId(),
@@ -295,11 +311,22 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
       key,
       departmentId: department.value.department.id,
       agents: agentIds.size,
-      ...(missingCli.length
+      ...(missingCli.length || swapped.length
         ? {
-            note: en
-              ? `CLI is not connected in BB, the role default is used: ${missingCli.join(", ")}.`
-              : `CLI не подключён в BB, взята модель роли по умолчанию: ${missingCli.join(", ")}.`,
+            note: [
+              missingCli.length
+                ? en
+                  ? `CLI is not connected in BB, the role default is used: ${missingCli.join(", ")}.`
+                  : `CLI не подключён в BB, взята модель роли по умолчанию: ${missingCli.join(", ")}.`
+                : "",
+              swapped.length
+                ? en
+                  ? `The model is not connected here, the closest one is used: ${swapped.join(", ")}.`
+                  : `Модель здесь не подключена, взята ближайшая: ${swapped.join(", ")}.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
           }
         : {}),
     });

@@ -141,6 +141,23 @@ export const EN_CORE: Record<string, string> = {
   "Всего по доступным данным": "Total from available data",
   "Кэш отдельно от входных токенов.": "Cache is separate from input tokens.",
   "Период": "Period",
+  "Кому помогает": "Helps whom",
+  "Решает руководитель": "The lead decides",
+  "Помощник": "Assistant",
+  "помощника": "an assistant",
+  "Помощник готовит материал для одного сотрудника отдела: тот ставит ему подзадачи и принимает результат.":
+    "An assistant prepares material for one employee of the department, who gives them subtasks and takes the result.",
+  "У одного сотрудника не больше трёх помощников. «Решает руководитель» — помощник общий для отдела.":
+    "No employee carries more than three assistants. \"The lead decides\" makes the assistant a shared one.",
+  "Помогает сотруднику отдела мелкой работой на дешёвой модели: читает, ищет, собирает выжимку.":
+    "Helps an employee of the department with small work on a cheap model: reads, searches, collects a digest.",
+  "Разведчик по коду, сборщик ссылок, переводчик черновика — всё, что дорого делать сильной моделью.":
+    "A code scout, a link collector, a draft translator — everything a strong model is too expensive for.",
+  "Получает только подзадачи и только от руководителя; главную задачу отдела ему не поставить, чужую работу он не проверяет.":
+    "Takes subtasks only, and only from the lead; the department's main job never goes to them and they review nobody.",
+  "В карточке отдела у помощника указывают, кому он помогает. У одного сотрудника не больше трёх помощников.":
+    "The department card says whom an assistant helps. No employee carries more than three.",
+  "Например: Разведчик по коду": "For example: Code scout",
   "Выбрать период": "Pick a period",
   "Весь период": "All time",
   "Предыдущий месяц": "Previous month",

@@ -84,9 +84,9 @@ export interface DemoRun {
 }
 export interface Agent {
   /** Role type in the agent's department: lead, executor or reviewer. */
-  roleType?: "lead" | "executor" | "reviewer";
+  roleType?: MemberRoleType | "lead";
   /** Every department the agent belongs to, with the role type there. */
-  memberships?: { departmentId: string; departmentName: string; roleType: "lead" | "executor" | "reviewer" }[];
+  memberships?: { departmentId: string; departmentName: string; roleType: MemberRoleType | "lead" }[];
   /** What the profile's policy allows, in plain words. */
   policySummary?: string;
   policyVersionId?: string;
@@ -119,15 +119,18 @@ export interface Agent {
   recordId?: string;
   revision?: number;
 }
-export type MemberRoleType = "executor" | "reviewer";
-export const ROLE_TYPE_LABELS: Record<"lead" | "executor" | "reviewer", string> = {
+export type MemberRoleType = "executor" | "reviewer" | "assistant";
+export const ROLE_TYPE_LABELS: Record<MemberRoleType | "lead", string> = {
   lead: "Руководитель",
   executor: "Исполнитель",
   reviewer: "Проверяющий",
+  assistant: "Помощник",
 };
 export interface Group {
   /** Role type of each non-lead member by agent id; absent means executor. */
   memberRoles?: Record<string, MemberRoleType>;
+  /** For assistants: the member of this department they help. */
+  memberHelps?: Record<string, string>;
   returnLimit?: string;
   acceptance?: string;
   /** Department process: a reviewer must check each result before acceptance. */

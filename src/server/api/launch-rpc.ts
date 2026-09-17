@@ -146,6 +146,8 @@ export function createIsolatedLaunchRpc(deps: {
   loadCatalogRoles?: () => Promise<DomainResult<IsolatedCatalogRolesConfig | undefined>>;
   /** Machine readiness before a snapshot is reserved: online, provider CLI installed and allowed. */
   checkHost?: (input: { hostId: string; providerId: string }) => Promise<DomainResult<void>>;
+  /** The machine really has the employee's model; an unknown catalog blocks nothing. */
+  checkModel?: (input: { hostId: string; providerId: string; model: string }) => Promise<DomainResult<void>>;
   /** Concurrency and budget limits from the work rules; warnings do not stop the launch. */
   checkLimits?: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
   /** Installed BB plugins: tools of the plugins an employee profile selects. */
@@ -236,6 +238,14 @@ export function createIsolatedLaunchRpc(deps: {
         if (deps.checkHost) {
           const host = await deps.checkHost({ hostId: binding.hostId, providerId: assigned.value.providerId });
           if (!host.ok) return host;
+        }
+        if (deps.checkModel) {
+          const model = await deps.checkModel({
+            hostId: binding.hostId,
+            providerId: assigned.value.providerId,
+            model: assigned.value.model,
+          });
+          if (!model.ok) return model;
         }
         const files = createSdkHostFilePortFromBinding(deps.documents, binding);
         if (!files.ok) return files;
@@ -530,6 +540,17 @@ export function createIsolatedLaunchRpc(deps: {
               if (!host.ok) {
                 assignedErrorCode = host.error.code;
                 assignedReason = host.error.message;
+              }
+            }
+            if (!assignedErrorCode && deps.checkModel) {
+              const model = await deps.checkModel({
+                hostId: binding.hostId,
+                providerId: assignedProvider.providerId,
+                model: assignedProvider.model,
+              });
+              if (!model.ok) {
+                assignedErrorCode = model.error.code;
+                assignedReason = model.error.message;
               }
             }
             if (!assignedErrorCode) {

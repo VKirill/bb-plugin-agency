@@ -45,16 +45,20 @@ export const workRulesSchema = z
     defaultProviderLead: z.string().trim().min(1).max(80),
     defaultProviderExecutor: z.string().trim().min(1).max(80),
     defaultProviderReviewer: z.string().trim().min(1).max(80),
+    defaultProviderAssistant: z.string().trim().min(1).max(80),
     defaultModelLead: z.string().trim().min(1).max(120),
     defaultModelExecutor: z.string().trim().min(1).max(120),
     defaultModelReviewer: z.string().trim().min(1).max(120),
+    defaultModelAssistant: z.string().trim().min(1).max(120),
     defaultReasoningLead: reasoningSchema,
     defaultReasoningExecutor: reasoningSchema,
     defaultReasoningReviewer: reasoningSchema,
+    defaultReasoningAssistant: reasoningSchema,
     /** Null: the provider has no service tiers or the default tier is used. */
     defaultServiceTierLead: serviceTierSchema.nullable(),
     defaultServiceTierExecutor: serviceTierSchema.nullable(),
     defaultServiceTierReviewer: serviceTierSchema.nullable(),
+    defaultServiceTierAssistant: serviceTierSchema.nullable(),
   })
   .strict();
 
@@ -82,15 +86,20 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   defaultProviderLead: "claude-code",
   defaultProviderExecutor: "claude-code",
   defaultProviderReviewer: "claude-code",
+  // An assistant reads and collects: the cheapest fast model of the stack, not a reasoning one.
+  defaultProviderAssistant: "codex",
   defaultModelLead: "claude-opus-5[1m]",
   defaultModelExecutor: "claude-sonnet-5",
   defaultModelReviewer: "claude-opus-5[1m]",
+  defaultModelAssistant: "gpt-5.6-luna",
   defaultReasoningLead: "high",
   defaultReasoningExecutor: "medium",
   defaultReasoningReviewer: "high",
+  defaultReasoningAssistant: "low",
   defaultServiceTierLead: null,
   defaultServiceTierExecutor: null,
   defaultServiceTierReviewer: null,
+  defaultServiceTierAssistant: "fast",
 };
 
 /** Keys a department inherits from the agency and may override. */

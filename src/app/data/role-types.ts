@@ -6,7 +6,7 @@ import { tr } from "../i18n";
  * dialogs, profiles and department pages say the same thing.
  */
 
-export type RoleType = "lead" | "executor" | "reviewer";
+export type RoleType = "lead" | "executor" | "reviewer" | "assistant";
 
 export type HintedOption<T extends string = string> = {
   value: T;
@@ -45,12 +45,23 @@ export const ROLE_TYPE_OPTIONS: HintedOption<RoleType>[] = [
       "Сервер не даст проверяющему получить на проверку собственную работу.",
     ],
   },
+  {
+    value: "assistant",
+    label: "Помощник",
+    description: "Помогает сотруднику отдела мелкой работой на дешёвой модели: читает, ищет, собирает выжимку.",
+    hint: [
+      "Разведчик по коду, сборщик ссылок, переводчик черновика — всё, что дорого делать сильной моделью.",
+      "Получает только подзадачи и только от руководителя; главную задачу отдела ему не поставить, чужую работу он не проверяет.",
+      "В карточке отдела у помощника указывают, кому он помогает. У одного сотрудника не больше трёх помощников.",
+    ],
+  },
 ];
 
 export const TITLE_PLACEHOLDER: Record<RoleType, string> = {
   lead: "Например: Руководитель разработки",
   executor: "Например: Разработчик TypeScript",
   reviewer: "Например: Проверяющий кода",
+  assistant: "Например: Разведчик по коду",
 };
 
 /** A profile without a saved CLI starts on this one; any provider connected in BB can be chosen. */

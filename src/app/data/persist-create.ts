@@ -31,7 +31,9 @@ export type CreateAgentInput = {
   policyVersionId?: string;
   /** Adds the new employee to a department with this role type. */
   departmentId?: string;
-  roleType?: "executor" | "reviewer";
+  roleType?: "executor" | "reviewer" | "assistant";
+  /** Assistants only: the employee of that department they help. */
+  helpsAgentId?: string;
 };
 
 export type CreateDepartmentInput = {
@@ -116,6 +118,7 @@ export async function persistCreateAgent(
       departmentId: input.departmentId,
       agentId: created.value.agent.id,
       role: input.roleType ?? "executor",
+      ...(input.roleType === "assistant" && input.helpsAgentId ? { helpsAgentId: input.helpsAgentId } : {}),
     });
     if (!joined.ok) return joined;
   }

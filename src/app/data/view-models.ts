@@ -242,8 +242,13 @@ export function mapDepartments(snapshot: WorkspaceSnapshot): Group[] {
       members: snapshot.memberships.filter((row) => row.departmentId === department.id).map((row) => row.agentId),
       memberRoles: Object.fromEntries(
         snapshot.memberships
-          .filter((row) => row.departmentId === department.id && row.role === "reviewer")
-          .map((row) => [row.agentId, "reviewer" as const]),
+          .filter((row) => row.departmentId === department.id && (row.role === "reviewer" || row.role === "assistant"))
+          .map((row) => [row.agentId, row.role as "reviewer" | "assistant"]),
+      ),
+      memberHelps: Object.fromEntries(
+        snapshot.memberships
+          .filter((row) => row.departmentId === department.id && row.role === "assistant" && row.helpsAgentId)
+          .map((row) => [row.agentId, row.helpsAgentId!]),
       ),
       instructions: process?.instructions || "",
       acceptance: process?.acceptance,

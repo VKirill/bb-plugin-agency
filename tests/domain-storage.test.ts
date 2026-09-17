@@ -886,7 +886,7 @@ describe("artifact storage integration sqlite+fs", () => {
         }).n,
       ).toBe(processesBefore);
       expect(seeded.store.listMemberships(seeded.department.id)).toEqual([
-        { departmentId: seeded.department.id, agentId: seeded.agent.id, role: "lead" },
+        { departmentId: seeded.department.id, agentId: seeded.agent.id, role: "lead", helpsAgentId: null },
       ]);
     } finally {
       close();

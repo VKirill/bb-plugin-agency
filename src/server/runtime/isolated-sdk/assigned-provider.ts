@@ -8,6 +8,8 @@ export type LiveAssignedProvider = {
   agentId: string;
   agentVersionId: string;
   providerId: string;
+  /** The model of the live profile: the launch checks the machine really has it. */
+  model: string;
   source: typeof LIVE_ASSIGNED_PROVIDER_SOURCE;
 };
 
@@ -28,6 +30,7 @@ export function resolveLiveAssignedProvider(
     agentId: agent.id,
     agentVersionId: version.id,
     providerId: version.providerId,
+    model: version.model,
     source: LIVE_ASSIGNED_PROVIDER_SOURCE,
   });
 }

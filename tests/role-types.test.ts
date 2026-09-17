@@ -95,7 +95,7 @@ export function seed(db: SqlDatabase) {
     ).run(`run_${jobId}`, jobId, state);
     db.pragma("foreign_keys = ON");
   };
-  return { store, ctx, bootstrap, departmentId, lead, developer, reviewer, job, input, attempt };
+  return { store, ctx, bootstrap, departmentId, lead, developer, reviewer, job, input, attempt, policyVersionId: policy.value.id, bindingId: binding.value.id };
 }
 
 describe("role types in a department", () => {

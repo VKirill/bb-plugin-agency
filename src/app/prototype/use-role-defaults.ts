@@ -20,6 +20,7 @@ export function roleDefaultsFromRules(rules: WorkRules): RoleDefaults {
     lead: pick(rules.defaultProviderLead, rules.defaultModelLead, rules.defaultReasoningLead, rules.defaultServiceTierLead),
     executor: pick(rules.defaultProviderExecutor, rules.defaultModelExecutor, rules.defaultReasoningExecutor, rules.defaultServiceTierExecutor),
     reviewer: pick(rules.defaultProviderReviewer, rules.defaultModelReviewer, rules.defaultReasoningReviewer, rules.defaultServiceTierReviewer),
+    assistant: pick(rules.defaultProviderAssistant, rules.defaultModelAssistant, rules.defaultReasoningAssistant, rules.defaultServiceTierAssistant),
   };
 }
 

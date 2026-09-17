@@ -319,10 +319,12 @@ export async function persistDepartmentPatch(
           },
         }
       : {}),
-    memberships: wantedIds.map((agentId) => ({
-      agentId,
-      role: agentId === lead.id ? "lead" : next.memberRoles?.[agentId] === "reviewer" ? "reviewer" : "executor",
-    })),
+    memberships: wantedIds.map((agentId) => {
+      const role = agentId === lead.id ? "lead" : (next.memberRoles?.[agentId] ?? "executor");
+      // Who an assistant helps travels with the membership; for anyone else the field stays empty.
+      const helpsAgentId = role === "assistant" ? next.memberHelps?.[agentId] ?? null : null;
+      return { agentId, role, ...(helpsAgentId ? { helpsAgentId } : {}) };
+    }),
   });
   return result.ok ? { ok: true } : result;
 }

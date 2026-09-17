@@ -202,4 +202,28 @@ export const EN_SETTINGS: Record<string, string> = {
   "Укажите название модели.": "Name the model.",
   "Модель уже есть в таблице.": "The model is already in the table.",
   "Цена должна быть числом от 0.": "A price must be a number from 0 up.",
+  // agent-models.tsx — employees against the models this BB runs
+  "Модели сотрудников": "Employee models",
+  "Сверка профилей с тем, что подключено в этом BB. Модель, которой здесь нет, запуск не начинает: сотрудника видно тут, а причина — в готовности задачи.":
+    "Profiles checked against what this BB has connected. A model that is missing here does not start a launch: the employee shows up here and the job's readiness says why.",
+  "BB не отдал список моделей: сверять не с чем, запуски ничем не ограничены.": "BB returned no model list: there is nothing to check against and no launch is held back.",
+  "Все сотрудники стоят на подключённых моделях.": "Every employee stands on a connected model.",
+  "Замена": "Substitute",
+  "Перевести на доступные модели": "Move to available models",
+  "Переведено сотрудников: {count}. У каждого новая версия профиля.": "Employees moved: {count}. Each has a new profile version.",
+  "Переводить некого.": "Nobody to move.",
+  "Не удалось перевести сотрудников на доступные модели.": "Could not move the employees to available models.",
+  "Не удалось прочитать модели сотрудников.": "Could not read the employees' models.",
+  "Проверяем модели сотрудников…": "Checking the employees' models…",
+  "Модель подключена": "Model connected",
+  "Есть замена": "Substitute available",
+  "Нет модели": "No model",
+  "Без изменений": "Unchanged",
+  "Переведён": "Moved",
+  "Не удалось": "Failed",
+  "Сейчас": "Now",
+  "Должностная инструкция помощника": "Assistant job description",
+  "Подставляется, когда сотрудника добавляют в отдел помощником.": "Used when an employee joins a department as an assistant.",
+  "Помощник готовит материал для сотрудника: читает, ищет, собирает. Решения принимает тот, кому он помогает.":
+    "An assistant prepares material for an employee: reads, searches, collects. The decisions belong to the one they help.",
 };

@@ -9,6 +9,7 @@ import { charterAccepts } from "../src/server/delegation/instructions";
 import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, restoreDepartment } from "../src/server/organization/lifecycle";
 import { adoptStarterRecords, installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "../src/server/organization/starter-kit";
 import { STARTER_KIT } from "../src/shared/starter-kit";
+import { resolveModelChoice } from "../src/server/runtime/model-fallback";
 import { seed } from "./role-types.test";
 
 const NOW = "2026-09-17T12:00:00.000Z";
@@ -67,6 +68,31 @@ describe("starter kit", () => {
     expect(preset("conveyor-scout")).toMatchObject({ providerId: "codex", serviceTier: "fast" });
     expect(preset("conveyor-reviewer")).toMatchObject({ providerId: "codex", reasoningEffort: "high" });
     expect(conveyor.agents.every((agent) => agent.preset?.label.ru && agent.preset.label.en && !/[А-Яа-яЁё]/.test(agent.preset.label.en))).toBe(true);
+  });
+
+  it("puts a conveyor employee on the closest model this BB has", () => {
+    const t = setup();
+    // This BB has no Cursor and no Codex: only Claude models are connected.
+    const claude = [
+      { providerId: "claude-code", model: "claude-opus-5[1m]", isDefault: true },
+      { providerId: "claude-code", model: "claude-sonnet-5", isDefault: false },
+      { providerId: "claude-code", model: "claude-haiku-4-5", isDefault: false },
+    ];
+    const installed = installStarterKit(
+      { ...t.ports, resolveModel: (wish) => resolveModelChoice(wish, claude) },
+      { keys: ["dev-conveyor"], language: "ru" },
+      false,
+    );
+    expect(installed.ok).toBe(true);
+    const coder = t.db
+      .prepare(
+        `SELECT v.provider_id AS providerId, v.model AS model, v.service_tier AS serviceTier
+         FROM agency_agent a JOIN agency_agent_version v ON v.id = a.current_version_id WHERE a.name = ?`,
+      )
+      .get("Кодер") as { providerId: string; model: string; serviceTier: string | null };
+    // Grok is not here: the coder gets a model of the same class, and fast mode does not travel to another CLI.
+    expect(coder).toMatchObject({ providerId: "claude-code", model: "claude-sonnet-5", serviceTier: null });
+    expect(installed.ok && installed.value.installed[0]?.note).toContain("grok-4.6 → claude-sonnet-5");
   });
 
   it("installs only the chosen departments, with default models, and never twice", () => {

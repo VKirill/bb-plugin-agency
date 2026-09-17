@@ -39,7 +39,7 @@ import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, d
 import { installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "./organization/starter-kit";
 import { rulesForLaunch, workRulesView } from "./rules/work-rules";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
-import { rpcContract, type ProviderUsageView } from "../shared/rpc-contract";
+import { rpcContract, type AgentModelsView, type ProviderUsageView } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
 import { createInbox } from "./inbox/store";
 import { receiveNotification } from "./triggers/notify";
@@ -85,6 +85,8 @@ import {
   parseModelPriceOverrides,
   type ModelPriceTable,
 } from "./runtime/dashboard-usage/pricing";
+import { fail, ok } from "../domain/result";
+import { modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
 import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
 import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
 import { DEFAULT_BOARD_POLICY, type BoardPolicy } from "../shared/contracts";
@@ -300,6 +302,56 @@ export function registerAgency(bb: BbPluginApi) {
     },
     now: () => new Date(),
   };
+  /**
+   * Models this BB can actually run on a machine. Asked often (kit install, launch readiness,
+   * the employee card), so the answer lives a minute; an empty catalog means "unknown" and
+   * nothing is blocked because of it.
+   */
+  const modelCatalogCache = new Map<string, { at: number; models: CatalogModel[] }>();
+  const modelCatalog = async (hostId?: string): Promise<CatalogModel[]> => {
+    const key = hostId ?? "";
+    const cached = modelCatalogCache.get(key);
+    if (cached && Date.now() - cached.at < 60_000) return cached.models;
+    const models: CatalogModel[] = [];
+    try {
+      const providers = await bb.sdk.providers.list(
+        hostId ? { hostId, signal: AbortSignal.timeout(12_000) } : { signal: AbortSignal.timeout(12_000) },
+      );
+      for (const provider of providers.filter((item) => item.available)) {
+        try {
+          const options = await bb.sdk.providers.models(
+            hostId
+              ? { hostId, providerId: provider.id, signal: AbortSignal.timeout(12_000) }
+              : { providerId: provider.id, signal: AbortSignal.timeout(12_000) },
+          );
+          for (const model of options.models) {
+            models.push({ providerId: provider.id, model: model.model, isDefault: model.isDefault, displayName: model.displayName });
+          }
+        } catch {
+          // One CLI without a catalog must not hide the models of the others.
+        }
+      }
+    } catch {
+      return [];
+    }
+    modelCatalogCache.set(key, { at: Date.now(), models });
+    return models;
+  };
+
+  /** Before a launch: the machine really has this model, or the reason names the closest one. */
+  const checkModel = async (input: { hostId: string; providerId: string; model: string }) => {
+    const catalog = await modelCatalog(input.hostId);
+    if (!catalog.length) return ok(undefined);
+    const choice = resolveModelChoice({ providerId: input.providerId, model: input.model }, catalog);
+    if (choice.status === "exact") return ok(undefined);
+    const en = agencyLanguage() === "en";
+    const note = modelChoiceNote(choice, en) ?? "";
+    const action = en
+      ? " Open the employee profile and press «Pick an available model», or choose one by hand."
+      : " Откройте профиль сотрудника и нажмите «Подобрать доступную модель» или выберите её вручную.";
+    return fail("model_unavailable", `${note}${action}`);
+  };
+
   const launch = createIsolatedLaunchRpc({
     bb,
     plugins,
@@ -309,6 +361,7 @@ export function registerAgency(bb: BbPluginApi) {
     onChanged,
     send,
     checkHost: (input) => machines.checkLaunch(input),
+    checkModel,
     checkLimits: checkLaunchGate,
     loadCatalogRoles: async () => {
       const resolved = await resolveCatalogRoles();
@@ -475,6 +528,86 @@ export function registerAgency(bb: BbPluginApi) {
       return null;
     }
   };
+  /**
+   * Every employee against the models this BB can run. `apply` rewrites the profiles that can be
+   * fixed: a new version with the closest connected model, so the card never shows a model the
+   * machine does not have.
+   */
+  const agentModelsView = async (apply: boolean, only?: string[]) => {
+    const access = apply ? ownerOnly() : readOnly();
+    if (!access.ok) return access;
+    const binding = listStoredBindings(db).find((row) => !row.archivedAt);
+    const catalog = await modelCatalog(binding?.hostId);
+    const en = agencyLanguage() === "en";
+    const ids = (db.prepare(`SELECT id FROM agency_agent WHERE state <> 'archived' ORDER BY name`).all() as { id: string }[])
+      .map((row) => row.id)
+      .filter((id) => !only?.length || only.includes(id));
+    const rows: AgentModelsView["rows"] = [];
+    for (const id of ids) {
+      const agent = store.getAgent(id);
+      const version = agent ? store.getAgentVersion(agent.currentVersionId) : null;
+      if (!agent || !version) continue;
+      const base = { agentId: agent.id, name: agent.name, providerId: version.providerId, model: version.model };
+      if (!catalog.length) {
+        rows.push({ ...base, status: "exact" as const, suggestedProviderId: null, suggestedModel: null, note: null });
+        continue;
+      }
+      const choice = resolveModelChoice({ providerId: version.providerId, model: version.model }, catalog);
+      if (choice.status === "exact") {
+        rows.push({ ...base, status: "exact" as const, suggestedProviderId: null, suggestedModel: null, note: null });
+        continue;
+      }
+      if (choice.status === "missing") {
+        rows.push({ ...base, status: "missing" as const, suggestedProviderId: null, suggestedModel: null, note: modelChoiceNote(choice, en) });
+        continue;
+      }
+      if (!apply) {
+        rows.push({
+          ...base,
+          status: "substituted" as const,
+          suggestedProviderId: choice.providerId,
+          suggestedModel: choice.model,
+          note: modelChoiceNote(choice, en),
+        });
+        continue;
+      }
+      const saved = store.saveAgentProfile(access.value.ctx, {
+        requestId: crypto.randomUUID(),
+        expectedRevision: agent.revision,
+        agentId: agent.id,
+        name: agent.name,
+        state: agent.state,
+        version: {
+          version: version.version + 1,
+          role: version.role,
+          instructions: version.instructions,
+          providerId: choice.providerId,
+          model: choice.model,
+          ...(version.reasoningEffort ? { reasoningEffort: version.reasoningEffort } : {}),
+          // Fast mode belongs to the CLI it was set for; a new CLI may not have it.
+          ...(version.serviceTier && choice.providerId === version.providerId ? { serviceTier: version.serviceTier } : {}),
+          skillIds: version.skillIds,
+          mcpIds: version.mcpIds,
+          policyVersionId: version.policyVersionId,
+        },
+      });
+      rows.push({
+        ...base,
+        status: saved.ok ? ("repaired" as const) : ("blocked" as const),
+        suggestedProviderId: choice.providerId,
+        suggestedModel: choice.model,
+        note: saved.ok ? modelChoiceNote(choice, en) : saved.error.message,
+      });
+    }
+    if (apply && rows.some((row) => row.status === "repaired")) onChanged();
+    return { ok: true as const, value: { hostId: binding?.hostId ?? null, catalogUnavailable: !catalog.length, rows } };
+  };
+
+  const agentModelHandlers = {
+    agentModels: () => agentModelsView(false),
+    repairAgentModels: ({ agentIds }: { agentIds?: string[] }) => agentModelsView(true, agentIds),
+  };
+
   const organization = {
     starterKit: async (input: { language?: "ru" | "en" }) => {
       const access = readOnly();
@@ -484,10 +617,14 @@ export function registerAgency(bb: BbPluginApi) {
     installStarterKit: async (input: { keys: string[]; language?: "ru" | "en" }) => {
       const access = ownerOnly();
       if (!access.ok) return access;
-      // A starter employee meant for Grok or GPT starts on the role default when that CLI is not connected here.
-      const connected = await connectedProviders();
+      // A starter employee meant for Grok or GPT starts on the closest model this BB has.
+      const binding = listStoredBindings(db).find((row) => !row.archivedAt);
+      const catalog = await modelCatalog(binding?.hostId);
       const result = installStarterKit(
-        { ...starterKitPorts(access.value.ctx), ...(connected ? { providerAvailable: (providerId: string) => connected.has(providerId) } : {}) },
+        {
+          ...starterKitPorts(access.value.ctx),
+          ...(catalog.length ? { resolveModel: (wish: { providerId: string; model: string }) => resolveModelChoice(wish, catalog) } : {}),
+        },
         { keys: input.keys, language: kitLanguage(input.language) },
         agencyLanguage() === "en",
       );
@@ -811,7 +948,7 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets } satisfies Pick<
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
     | "listBudgets"
     | "providerUsage"
@@ -1455,6 +1592,7 @@ export function registerAgency(bb: BbPluginApi) {
     setCliPolicy: machines.setPolicy,
     agencyLanguage: async () => ({ language: agencyLanguage() }),
     modelPrices: async () => pricesView(),
+    ...agentModelHandlers,
     setModelPrices: async ({ rows }) => {
       const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
       applyWorkSettings(next);

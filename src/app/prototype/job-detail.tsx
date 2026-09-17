@@ -10,7 +10,7 @@ import "./job-detail.css";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Markdown, useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
-import { type Agent, type Job, type State, type TaskActivity, type TaskFile, states, stateNames } from "./data";
+import { type Agent, type Job, type MemberRoleType, type State, type TaskActivity, type TaskFile, states, stateNames } from "./data";
 import { runsForJob } from "./run-links";
 import { exampleFiles } from "./demo/files";
 import { FileChip, FilePicker } from "./task-files";
@@ -54,7 +54,7 @@ import { AssigneeField, CONTRACT_HINT, JobBriefFields, JobContractFields, assign
 import { intakeLabel, latestIntake } from "../data/intake";
 import { tr, uiLocale } from "../i18n";
 
-type Props = {agents:Agent[];projects?:{id:string;name:string;members?:readonly string[];hostName?:string|null;archivedAt?:string;recordId?:string;bbProjectId?:string}[];departments?:{id:string;name:string;members?:readonly string[];lead?:string;availability?:"all"|"selected";memberRoles?:Record<string,"executor"|"reviewer">}[];job:Job;jobs:Job[];update:(j:Job)=>void|Promise<boolean>;addJob:(j:Job)=>void|Promise<boolean>;openJob:(id:string)=>void;openAgent?:(id:string)=>void;openDepartment?:(id:string)=>void;openProject?:(id:string)=>void;back:()=>void;notice:(s:string)=>void;openRun:(runId:string)=>void;openUsage?:(recordId:string)=>void;runs?:import("./data").DemoRun[];demoMode?:boolean};
+type Props = {agents:Agent[];projects?:{id:string;name:string;members?:readonly string[];hostName?:string|null;archivedAt?:string;recordId?:string;bbProjectId?:string}[];departments?:{id:string;name:string;members?:readonly string[];lead?:string;availability?:"all"|"selected";memberRoles?:Record<string,MemberRoleType>}[];job:Job;jobs:Job[];update:(j:Job)=>void|Promise<boolean>;addJob:(j:Job)=>void|Promise<boolean>;openJob:(id:string)=>void;openAgent?:(id:string)=>void;openDepartment?:(id:string)=>void;openProject?:(id:string)=>void;back:()=>void;notice:(s:string)=>void;openRun:(runId:string)=>void;openUsage?:(recordId:string)=>void;runs?:import("./data").DemoRun[];demoMode?:boolean};
 const nextState: Partial<Record<State, string>> = {
  backlog:"Поручение ещё не отправлено исполнителю. Проверьте бриф и критерии, затем поставьте в очередь.",queued:"Поручение в очереди. Нажмите «Запустить», чтобы сотрудник начал работу.",
  running:"Исполнитель готовит результат.",review:"Результат ожидает проверки.",waiting_input:"Нужен ответ на вопрос исполнителя.",blocked:"Работа остановлена. Причина — в истории задачи: верните задачу в очередь и запустите снова или отмените.",done:"Результат принят.",canceled:"Задача отменена.",
