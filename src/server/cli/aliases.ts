@@ -46,6 +46,8 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
   if (head === "job" && rest.length === 1 && rest[0] === "search") return "searchJobs";
   if (head === "job" && rest.length === 1 && rest[0] === "archive") return "listArchivedJobs";
   if (head === "agent" && rest.length === 1 && rest[0] === "metrics") return "agentMetrics";
+  if (head === "skills" && rest.length === 1 && rest[0] === "pins") return "getSkillPins";
+  if (head === "skills" && rest.length === 1 && rest[0] === "pin") return "pinSkills";
   if (head === "agent" && rest.length === 1 && rest[0] === "models") return "agentModels";
   if (head === "agent" && rest.length === 1 && rest[0] === "repair-models") return "repairAgentModels";
   if (head === "templates" && rest.length === 1) {

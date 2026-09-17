@@ -321,6 +321,8 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   },
   listBudgets: {},
   agentModels: {},
+  getSkillPins: {},
+  pinSkills: {},
   repairAgentModels: { agentIds: ["agt_…"] },
   providerUsage: {},
   starterKit: { language: "en" },

@@ -100,6 +100,8 @@ export const CLI_OPERATIONS = {
   setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), summary: "Привязать главную задачу к цели (goalId null — отвязать)" },
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
   agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
+  getSkillPins: { input: emptyObjectSchema, summary: "Закреплённые версии навыков против текущих: чем отличаются и что мешает запуску" },
+  pinSkills: { input: emptyObjectSchema, summary: "Закрепить текущие версии навыков; только владелец, не из треда сотрудника" },
   agentModels: { input: emptyObjectSchema, summary: "Модели сотрудников против того, что подключено в этом BB: exact, substituted (есть замена), missing (замены нет)" },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), summary: "Перевести сотрудников на доступные модели: новая версия профиля с ближайшей подключённой моделью" },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },
