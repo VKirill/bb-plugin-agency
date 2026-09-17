@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { BudgetStatusView, ProviderUsageView } from "../../shared/rpc-contract";
 import type { ListDashboardUsageOutput } from "../../shared/contracts/dashboard-usage";
 import {
@@ -24,6 +24,8 @@ import {
   type UsageFilter,
   type UsageGroupBy,
 } from "../data/usage-dashboard";
+import { UsageAreaChart } from "./usage-chart";
+import type { ChartDimension } from "../data/usage-chart";
 import { Button, Empty, PageHead } from "./shared";
 import { tr, uiLocale } from "../i18n";
 
@@ -113,9 +115,8 @@ export function UsageDashboard({
   const view = payload ? filteredUsageView(payload, filter, names) : null;
   const groups = view ? groupUsageRows(view.rows, groupBy) : [];
   const options = usageFilterOptions(payload ? filteredUsageView(payload, EMPTY_USAGE_FILTER, names).rows : []);
-  const maxDay = view?.daySeries.reduce((max, day) => Math.max(max, day.totalTokens), 0) ?? 0;
   const unpriced = view ? modelsWithoutPrice(view.rows) : [];
-  const compactChart = (view?.daySeries.length ?? 0) <= 12;
+  const [chartDimension, setChartDimension] = useState<ChartDimension>("model");
   const filtered = Boolean(filter.projectId || filter.departmentId || filter.model || filter.rootJobId || filter.fromDate || filter.toDate);
 
   return (
@@ -212,36 +213,10 @@ export function UsageDashboard({
             </section>
           )}
 
-          {view.daySeries.length > 0 && (
-            <section aria-label={tr("Расход по дням")} className="space-y-2 rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold">{tr("Расход по дням")}</h2>
-                <p className="text-xs text-muted-foreground">{tr(USAGE_PERIOD_OBSERVED)}</p>
-              </div>
-              <div className="flex h-28 items-end gap-2 border-b border-border pb-px" data-testid="usage-day-chart" role="img" aria-label={tr("Расход по дням")}>
-                {view.daySeries.map((day) => (
-                  <div key={day.date} className="flex min-w-0 max-w-14 flex-1 flex-col items-center justify-end gap-1">
-                    {compactChart && <span className="text-[10px] tabular-nums text-muted-foreground">{formatTokenCount(day.totalTokens, true)}</span>}
-                    <div
-                      className="w-full rounded-t bg-foreground/55"
-                      style={{ height: `${maxDay ? Math.max(6, Math.round((day.totalTokens / maxDay) * 84)) : 6}px` }}
-                      title={`${day.date}: ${formatTokenCount(day.totalTokens, true)}`}
-                    />
-                  </div>
-                ))}
-              </div>
-              {compactChart ? (
-                <div className="flex gap-2">
-                  {view.daySeries.map((day) => (
-                    <span key={day.date} className="min-w-0 max-w-14 flex-1 text-center text-[10px] text-muted-foreground">{day.date.slice(5)}</span>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex items-baseline justify-between text-[11px] text-muted-foreground">
-                  <span>{`${view.daySeries[0]?.date} — ${view.daySeries[view.daySeries.length - 1]?.date}`}</span>
-                  <span>{tr("пик {value}", { value: formatTokenCount(maxDay, true) })}</span>
-                </div>
-              )}
+          {view.days.length > 0 && (
+            <section aria-label={tr("Расход по дням")} className="space-y-3 rounded-lg border border-border p-3">
+              <UsageAreaChart days={view.days} names={names} dimension={chartDimension} onDimension={setChartDimension} />
+              <p className="text-xs text-muted-foreground">{tr(USAGE_PERIOD_OBSERVED)}</p>
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer">{tr("Дни таблицей")}</summary>
                 <div className="mt-2 overflow-x-auto rounded-lg border border-border">
