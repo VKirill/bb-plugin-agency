@@ -1841,7 +1841,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     memberRole,
     saveWorkRules,
     rulesForDepartment: (departmentId: string) => rulesForDepartment(db, departmentId),
-    rulesForLaunch: (departmentId: string, agentId: string) => rulesForLaunch(db, departmentId, agentId),
+    rulesForLaunch: (departmentId: string, agentId: string, hostId?: string) => rulesForLaunch(db, departmentId, agentId, hostId),
     resolveRework: (jobId: string) => resolveRework(db, jobId, new Date().toISOString()),
     scopedJob,
   };

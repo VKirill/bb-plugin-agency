@@ -1,4 +1,5 @@
 import { SkillPinsPanel } from "./skill-pins";
+import { HOST_SANDBOX_RULE_GROUP, WorkRulesEditor } from "./work-rules";
 import { useCallback, useEffect, useState } from 'react';
 import { useRpc, useBbNavigate } from '@get-bb/plugin-sdk/app';
 import type { rpcContract } from '../../shared/rpc-contract';
@@ -8,7 +9,7 @@ import { Switch } from '../../../components/ui/switch';
 import { tr, uiLocale } from '../i18n';
 
 type Machine=MachineInventory['machine'];
-export function MachinesPage() {
+export function MachinesPage({ notice, live = false }: { notice?: (text: string) => void; /** Live data: the machine's sandbox rule is editable. */ live?: boolean } = {}) {
  const rpc=useRpc<typeof rpcContract>();const navigate=useBbNavigate();
  const [machines,setMachines]=useState<Machine[]>([]);const [inventory,setInventory]=useState<Record<string,MachineInventory>>({});
  const [loading,setLoading]=useState(false);const [error,setError]=useState('');const [busy,setBusy]=useState('');
@@ -24,6 +25,7 @@ export function MachinesPage() {
  {!result&&<p className="px-4 py-3 text-xs text-muted-foreground">{tr('Проверяем установленные CLI…')}</p>}
  {result?.providers.map(p=><div key={p.id} className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3"><AgentMark id={p.id} className="size-5"/><div className="min-w-32 flex-1"><span className="text-sm font-medium">{p.name}</span><span className="ml-2 text-xs text-muted-foreground">{p.version||''}</span><p className="mt-1 text-xs text-muted-foreground">{p.installed===false?tr('Не установлен'):p.versionUnsupported?tr('Нужна поддерживаемая версия'):p.available?tr('Доступен в BB'):p.installed?tr('Установлен · провайдер недоступен'):tr('Установка не подтверждена')}</p></div><div className="w-32"><Choice disabled={Boolean(busy)||p.policy==='disabled'} label={tr('Роль {provider} на {host}', { provider: p.name, host: h.name })} value={p.policy==='reserve'?'reserve':'enabled'} onChange={v=>void setPolicy(h.id,p.id,v as CliPolicy)} options={[{value:'enabled',label:'Основной'},{value:'reserve',label:'Резерв'}]}/></div><Switch aria-label={tr('Разрешить {provider} на {host}', { provider: p.name, host: h.name })} checked={p.policy!=='disabled'} disabled={Boolean(busy)} onCheckedChange={checked=>void setPolicy(h.id,p.id,checked?'enabled':'disabled')}/></div>)}
  {result&&<p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{tr('Проверено: {time}. Авторизация и квоты отдельно не проверялись.', { time: new Date(result.checkedAt).toLocaleTimeString(uiLocale()) })}</p>}
+ {live&&<div className="border-t border-border px-4 py-3" data-testid={`host-sandbox-${h.id}`}><WorkRulesEditor scope={`host:${h.id}`} inheritable notice={notice??(()=>undefined)} groups={[HOST_SANDBOX_RULE_GROUP]} saveLabel="Сохранить правило машины" inheritLabel="Как в правилах отдела"/></div>}
  </section>;})}
  <SkillPinsPanel/>
  <p className="text-xs text-muted-foreground">{tr('Разрешения и роль CLI сохраняются на сервере для Агентства. Они не выключают провайдер в других чатах. Автоматическое переключение на резерв появится вместе с исполнением задач.')}</p>

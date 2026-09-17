@@ -33,6 +33,10 @@ describe("agency language", () => {
     setAgencyLanguage("ru");
     expect(languageDirective()).toContain("на русском");
     const text = buildWorkerInstructions({ jobId: "job_1", jobKey: "AG-1", title: "T", departmentName: "D", isLead: false, assigneeType: "executor", members: [] });
-    expect(text).toContain("вы исполнитель AG-1");
+    expect(text).toContain("## Your role: executor of AG-1");
+    expect(text).toContain("in Russian.");
+    setAgencyLanguage("en");
+    expect(buildWorkerInstructions({ jobId: "job_1", jobKey: "AG-1", title: "T", departmentName: "D", isLead: false, assigneeType: "executor", members: [] })).toContain("in English.");
+    setAgencyLanguage("ru");
   });
 });

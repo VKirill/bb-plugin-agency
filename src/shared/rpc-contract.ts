@@ -18,6 +18,7 @@ import {
   artifactSchema,
   artifactVersionSchema,
   bbProjectIdSchema,
+  createCommandSchema,
   contentHashSchema,
   createActivityCommandSchema,
   createAgentVersionCommandSchema,
@@ -231,12 +232,99 @@ export const getJobInputSchema = z
   .strict()
   .refine((value) => Boolean(value.jobId || value.key), "jobId or key is required");
 
+/** A message to the owner from a script, watchdog or employee. */
+export const ownerMessageSchema = z
+  .object({
+    id: z.string(),
+    text: z.string(),
+    level: z.enum(["info", "warning"]),
+    jobId: z.string().nullable(),
+    jobKey: z.string().nullable(),
+    source: z.string(),
+    /** off — Telegram not used; queued; failed: reason. */
+    telegram: z.string(),
+    createdAt: z.string(),
+    readAt: z.string().nullable(),
+  })
+  .strict();
+export type OwnerMessageView = z.infer<typeof ownerMessageSchema>;
+const dedupeKeySchema = z.string().regex(/^[A-Za-z0-9_.:-]{1,120}$/);
+export const notifyOwnerInputSchema = z
+  .object({
+    text: z.string().trim().min(1).max(2000),
+    level: z.enum(["info", "warning"]).optional(),
+    /** Job id or AG-N key the message is about. */
+    jobId: z.string().min(1).max(80).optional(),
+    /** The same key is delivered once: put the date or state into it for recurring messages. */
+    dedupeKey: dedupeKeySchema.optional(),
+  })
+  .strict();
+export const notifyOwnerOutputSchema = z.object({ message: ownerMessageSchema, duplicate: z.boolean() }).strict();
+export const ownerMessagesSchema = z.object({ messages: z.array(ownerMessageSchema), unread: z.number().int() }).strict();
+export const ownerDigestInputSchema = z
+  .object({
+    kind: z.enum(["summary", "watchdog"]),
+    sinceHours: z.number().int().min(1).max(168).optional(),
+    stuckHours: z.number().int().min(1).max(720).optional(),
+    /** Also send it to the owner; a watchdog sends only when something waits. */
+    notify: z.boolean().optional(),
+    dedupeKey: dedupeKeySchema.optional(),
+  })
+  .strict();
+export const ownerDigestSchema = z
+  .object({
+    text: z.string(),
+    level: z.enum(["info", "warning"]),
+    items: z.array(z.object({ key: z.string(), title: z.string(), state: z.string(), since: z.string() }).strict()),
+    counts: z.record(z.string(), z.number()),
+    message: ownerMessageSchema.nullable(),
+    duplicate: z.boolean(),
+  })
+  .strict();
+export const scriptTemplateSchema = z.object({ id: z.string(), title: z.string(), description: z.string(), script: z.string() }).strict();
+
+/** A job on the other end of a dependency, as the job card draws it. */
+export const dependencyLinkSchema = z.object({ jobId: z.string(), key: z.string(), title: z.string(), state: z.string() }).strict();
+export type DependencyLinkRecord = z.infer<typeof dependencyLinkSchema>;
+
+/** Follow-up job the Agency creates by itself when this one is done. */
+export const jobNextStepSchema = z
+  .object({
+    departmentId: opaqueIdSchema,
+    title: z.string().trim().min(1).max(200),
+    brief: z.string().trim().min(1).max(20_000),
+    acceptance: z.string().trim().min(1).max(20_000),
+    /** Who takes it: the department lead (default) or the least loaded member of that role type. */
+    assignment: z.enum(["lead", "executor", "reviewer"]).default("lead"),
+  })
+  .strict();
+export type JobNextStepRecord = z.infer<typeof jobNextStepSchema>;
+
+export const nextStepViewSchema = z
+  .object({
+    step: jobNextStepSchema,
+    createdJobId: z.string().nullable(),
+    /** null while waiting; `created` or the reason it did not run. */
+    outcome: z.string().nullable(),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type NextStepViewRecord = z.infer<typeof nextStepViewSchema>;
+
+export const addJobDependencyRpcSchema = createCommandSchema
+  .extend({ jobId: opaqueIdSchema, dependsOnJobId: opaqueIdSchema, claimedBbProjectId: bbProjectIdSchema.optional() })
+  .strict();
+export const removeJobDependencyRpcSchema = z.object({ jobId: opaqueIdSchema, dependsOnJobId: opaqueIdSchema }).strict();
+export const setJobNextStepRpcSchema = z.object({ jobId: opaqueIdSchema, step: jobNextStepSchema.nullable() }).strict();
+
 export const jobDetailSchema = z
   .object({
     job: jobSchema,
     binding: projectBindingSchema,
     activity: z.array(activitySchema),
     dependencies: z.array(jobDependencySchema),
+    links: z.object({ waitsFor: z.array(dependencyLinkSchema), blocks: z.array(dependencyLinkSchema) }).strict().optional(),
+    nextStep: nextStepViewSchema.nullable().optional(),
     artifacts: z.array(
       z
         .object({
@@ -827,6 +915,11 @@ export const rpcContract = defineRpcContract({
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), output: domainResultSchema(z.object({ total: z.number().int(), jobs: z.array(jobSchema) }).strict()) },
   listSavedViews: { input: z.null(), output: domainResultSchema(z.array(savedViewSchema)) },
   listPlugins: { input: z.null(), output: domainResultSchema(pluginDirectorySchema) },
+  notifyOwner: { input: notifyOwnerInputSchema, output: domainResultSchema(notifyOwnerOutputSchema) },
+  listOwnerMessages: { input: z.object({ limit: z.number().int().min(1).max(500).optional() }).strict(), output: domainResultSchema(ownerMessagesSchema) },
+  markOwnerMessagesRead: { input: z.object({ ids: z.array(z.string().max(80)).max(500).optional() }).strict(), output: domainResultSchema(z.object({ marked: z.number().int() }).strict()) },
+  ownerDigest: { input: ownerDigestInputSchema, output: domainResultSchema(ownerDigestSchema) },
+  listScriptTemplates: { input: z.object({}).strict(), output: domainResultSchema(z.array(scriptTemplateSchema)) },
   saveSavedView: { input: z.object({ id: z.string().optional(), name: z.string().max(80), filters: z.record(z.string(), z.string()) }).strict(), output: domainResultSchema(savedViewSchema) },
   deleteSavedView: { input: z.object({ id: z.string() }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
   saveRuleSchedule: { input: ruleScheduleSchema, output: domainResultSchema(ruleScheduleSchema) },
@@ -856,6 +949,9 @@ export const rpcContract = defineRpcContract({
   listBbCatalog: { input: z.null(), output: domainResultSchema(bbCatalogSchema) },
   listCapabilityCatalog: { input: capabilityCatalogInputSchema, output: domainResultSchema(capabilityCatalogSchema) },
   getJob: { input: getJobInputSchema, output: domainResultSchema(jobDetailSchema) },
+  addJobDependency: { input: addJobDependencyRpcSchema, output: domainResultSchema(jobDependencySchema) },
+  removeJobDependency: { input: removeJobDependencyRpcSchema, output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  setJobNextStep: { input: setJobNextStepRpcSchema, output: domainResultSchema(nextStepViewSchema.nullable()) },
   getAgent: { input: getAgentInputSchema, output: domainResultSchema(agentDetailSchema) },
   getDepartment: { input: getDepartmentInputSchema, output: domainResultSchema(departmentDetailSchema) },
   listActivity: { input: listActivityInputSchema, output: domainResultSchema(z.array(activitySchema)) },

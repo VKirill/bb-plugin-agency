@@ -1,4 +1,5 @@
 import { WAIT_CODES } from "../runtime/launch-queue/service";
+import { buildWorkerInstructions, readJobRoleContext } from "../delegation/instructions";
 import { sandboxEscapeCounts } from "../runtime/sandbox-escape/service";
 import type { PluginDirectory } from "../integrations/plugin-directory";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
@@ -267,6 +268,10 @@ export function createIsolatedLaunchRpc(deps: {
           runs,
           jobInputs: createJobInputPort({ store: deps.store, db: deps.db, files: files.value }),
           ...(deps.plugins ? { pluginTools: pluginToolsFrom(deps.plugins) } : {}),
+          roleInstructions: (jobId) => {
+            const role = readJobRoleContext(deps.db, jobId);
+            return role ? buildWorkerInstructions(role) : null;
+          },
           server: {
             applicable: DEFAULT_APPLICABLE,
             catalogRoles: roles.value,

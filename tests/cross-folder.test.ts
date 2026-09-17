@@ -161,3 +161,11 @@ describe("placement in the job prompt layer", () => {
     expect(s.store.placementForLaunch(parent)).toBeNull();
   });
 });
+
+describe("input copy size", () => {
+  it("fits every version that can be published: no chunked copy is needed", async () => {
+    const { INPUT_COPY_MAX_BYTES } = await import("../src/server/runtime/prepare-run/job-input");
+    const { ARTIFACT_UPLOAD_MAX_BASE64 } = await import("../src/shared/rpc-contract");
+    expect(Math.floor(ARTIFACT_UPLOAD_MAX_BASE64 / 4) * 3).toBeLessThanOrEqual(INPUT_COPY_MAX_BYTES);
+  });
+});

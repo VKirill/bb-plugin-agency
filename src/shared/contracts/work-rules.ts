@@ -19,6 +19,10 @@ export const workRulesSchema = z
     minorDefectsWithoutRound: z.boolean(),
     /** An executor's hand-in creates and queues an independent review subtask by itself. */
     autoReview: z.boolean(),
+    /** Once a day after nightlyRecheckHour a reviewer rechecks the versions accepted since the previous recheck. */
+    nightlyRecheck: z.boolean(),
+    /** Hour of the BB server's clock, 0–23. */
+    nightlyRecheckHour: z.number().int().min(0).max(23),
     /** Launches run with full permissions and without the CLI sandbox. Off by default. */
     runWithoutSandbox: z.boolean(),
     watchQuietMinutes: z.number().int().min(1).max(240),
@@ -51,6 +55,8 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   reworkLimit: 3,
   minorDefectsWithoutRound: false,
   autoReview: false,
+  nightlyRecheck: false,
+  nightlyRecheckHour: 3,
   runWithoutSandbox: false,
   watchQuietMinutes: 10,
   watchStallMinutes: 30,
@@ -76,6 +82,8 @@ export const INHERITED_RULE_KEYS = [
   "reworkLimit",
   "minorDefectsWithoutRound",
   "autoReview",
+  "nightlyRecheck",
+  "nightlyRecheckHour",
   "runWithoutSandbox",
   "watchQuietMinutes",
   "watchStallMinutes",
@@ -90,6 +98,12 @@ export const INHERITED_RULE_KEYS = [
 
 /** Inherited keys an employee may override for their own launches. */
 export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox"] as const satisfies readonly WorkRuleKey[];
+
+/**
+ * Inherited keys a machine may override for every launch on it, e.g. a Linux server
+ * whose sandbox does not let Agency commands through. An employee's own value wins.
+ */
+export const HOST_OVERRIDE_RULE_KEYS = ["runWithoutSandbox"] as const satisfies readonly WorkRuleKey[];
 
 /** Limits of the scope itself. */
 export const LIMIT_RULE_KEYS = ["budgetMonthlyUsd", "concurrencyLimit"] as const satisfies readonly WorkRuleKey[];
@@ -107,6 +121,7 @@ export const workRulesScopeSchema = z.union([
   z.literal("agency"),
   z.string().regex(/^department:[A-Za-z0-9_-]{3,80}$/),
   z.string().regex(/^agent:[A-Za-z0-9_-]{3,80}$/),
+  z.string().regex(/^host:[A-Za-z0-9_-]{3,80}$/),
 ]);
 
 export type WorkRulesScope = z.infer<typeof workRulesScopeSchema>;
@@ -114,6 +129,7 @@ export type WorkRulesScope = z.infer<typeof workRulesScopeSchema>;
 export function allowedRuleKeys(scope: string): readonly WorkRuleKey[] {
   if (scope === "agency") return [...INHERITED_RULE_KEYS, ...LIMIT_RULE_KEYS, ...AGENCY_ONLY_RULE_KEYS];
   if (scope.startsWith("department:")) return [...INHERITED_RULE_KEYS, ...LIMIT_RULE_KEYS];
+  if (scope.startsWith("host:")) return [...HOST_OVERRIDE_RULE_KEYS];
   return [...LIMIT_RULE_KEYS, ...AGENT_OVERRIDE_RULE_KEYS];
 }
 
@@ -133,7 +149,7 @@ export const saveWorkRulesCommandSchema = z
 
 export type SaveWorkRulesCommand = z.infer<typeof saveWorkRulesCommandSchema>;
 
-export const ruleSourceSchema = z.enum(["default", "agency", "department", "agent"]);
+export const ruleSourceSchema = z.enum(["default", "agency", "department", "host", "agent"]);
 export type RuleSource = z.infer<typeof ruleSourceSchema>;
 
 export const workRulesViewSchema = z

@@ -71,4 +71,12 @@ export const EN_PLUGINS: Record<string, string> = {
   "Сотрудник выполнил вне песочницы команд: {count}. Проверьте, что он не выходил за папку задачи.":
     "Commands the employee ran outside the sandbox: {count}. Check that they stayed inside the job's folder.",
   "вне песочницы: {count}": "outside the sandbox: {count}",
+  // Machine sandbox rule
+  "Песочница на этой машине": "Sandbox on this machine",
+  "Сохранить правило машины": "Save machine rule",
+  "Как в правилах отдела": "As in the department rules",
+  "задано для машины": "set for the machine",
+  "Правило для всех запусков на машине. «Как в правилах отдела» — решает отдел; «Да» — без песочницы, например на Linux-сервере, где песочница не пускает команды Агентства; «Нет» — всегда в песочнице.":
+    "A rule for every launch on the machine. “As in the department rules” lets the department decide; “Yes” runs without the sandbox, for example on a Linux server where the sandbox blocks Agency commands; “No” always runs in the sandbox.",
+  "Личное правило сотрудника сильнее правила машины.": "An employee's own rule overrides the machine rule.",
 };

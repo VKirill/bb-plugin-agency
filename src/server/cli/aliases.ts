@@ -14,6 +14,13 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
   if (head === "catalog" && rest.length === 0) return "listBbCatalog";
   if (head === "catalog" && rest[0] === "capabilities" && rest.length === 1) return "listCapabilityCatalog";
   if (head === "workspace" && rest.length === 0) return "listWorkspace";
+  if (head === "notify-owner" && rest.length === 0) return "notifyOwner";
+  if (head === "digest" && rest.length === 0) return "ownerDigest";
+  if (head === "scripts" && rest.length === 0) return "listScriptTemplates";
+  if (head === "owner" && rest.length === 1) {
+    if (rest[0] === "messages") return "listOwnerMessages";
+    if (rest[0] === "read") return "markOwnerMessagesRead";
+  }
   if (head === "usage" && rest.length === 0) return "listDashboardUsage";
   if (head === "rules" && rest.length === 1) {
     if (rest[0] === "get") return "getWorkRules";
@@ -71,6 +78,9 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "update" || rest[0] === "assign") return "updateJob";
     if (rest[0] === "transition") return "transitionJob";
     if (rest[0] === "attach-input") return "attachJobInput";
+    if (rest[0] === "depend") return "addJobDependency";
+    if (rest[0] === "undepend") return "removeJobDependency";
+    if (rest[0] === "next-step") return "setJobNextStep";
     if (rest[0] === "report-needs-input") return "reportNeedsInput";
     if (rest[0] === "answer-needs-input") return "answerNeedsInput";
     if (rest[0] === "attempts") return "listJobAttempts";

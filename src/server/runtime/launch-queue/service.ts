@@ -4,8 +4,8 @@ import type { SqlDatabase } from "../../db/sql";
 import { agencyLanguage } from "../../i18n/language.js";
 
 /**
- * Launch queue. A job whose launch waits for a free slot (concurrency limit) or
- * budget stays in the queue; a sweep launches it as soon as the limits allow,
+ * Launch queue. A job whose launch waits for a free slot (concurrency limit),
+ * budget or the jobs it depends on stays in the queue; a sweep launches it as soon as the limits allow,
  * highest priority first, then oldest request. Any other refusal takes the job
  * out of the queue with the reason in its history: a person decides.
  */
@@ -20,7 +20,7 @@ export const LAUNCH_QUEUE_MIGRATION = `CREATE TABLE agency_launch_queue (
 export const LAUNCH_QUEUE_SWEEP_MS = 15_000;
 
 /** Refusals that mean «wait», not «stop». */
-export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted"]);
+export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted", "dependencies_open"]);
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
@@ -82,7 +82,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     const result = await ports.launch(job, entry.requestedAt);
     if (result.ok) {
       dequeueLaunch(ports.db, job.id);
-      ports.comment(job, en ? "Launched from the queue: a launch slot became free." : "Запущена из очереди: освободился слот запуска.");
+      ports.comment(job, en ? "Launched from the queue: what it waited for is ready." : "Запущена из очереди: то, чего она ждала, готово.");
       launched += 1;
       continue;
     }

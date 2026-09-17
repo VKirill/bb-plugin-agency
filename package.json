@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-agency",
-  "version": "0.1.0-alpha.14",
+  "version": "0.1.0-alpha.15",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || ^24.0.0 || ^26.0.0",

@@ -6,15 +6,18 @@ import { intentsAwaitingApproval, LEGACY_NOTIFY_HINT } from "../data/dispatcher"
 import { AgentMark, Button, PageHead, TabBar, Status, Empty } from "./shared";
 import { tr } from "../i18n";
 import { DispatcherIntentList } from "./dispatcher-intents";
+import { OwnerMessagesList, type OwnerMessagesApi } from "./owner-messages";
 import "./inbox.css";
 
-export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, notice }: {
+export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, messages, notice }: {
   jobs: Job[];
   agents: Agent[];
   readIds: string[];
   setReadIds: (ids: string[]) => void;
   go: (s: string, id?: string) => void;
   dispatcher?: Pick<DispatcherApi, "listActionIntents" | "approveActionIntent" | "claimActionIntent">;
+  /** Messages to the owner from scripts and watchdogs; absent in the demo. */
+  messages?: OwnerMessagesApi;
   notice?: (text: string) => void;
 }) {
   const [tab, setTab] = useState("Нужно ваше решение");
@@ -23,6 +26,7 @@ export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, n
   const updates = jobs.filter((job) => job.state === "done");
   const isDecision = tab === "Нужно ваше решение";
   const isRules = tab === "Согласование";
+  const isMessages = tab === "Сообщения";
   const list = isDecision ? decisions : updates;
 
   useEffect(() => {
@@ -40,17 +44,24 @@ export function InboxPage({ jobs, agents, readIds, setReadIds, go, dispatcher, n
     <div className="agency-inbox space-y-3">
       <PageHead title="Входящие" />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <TabBar value={tab} onChange={setTab} tabs={dispatcher ? ["Нужно ваше решение", "Согласование", "Уведомления"] : ["Нужно ваше решение", "Уведомления"]} />
-        <div className="flex items-center gap-3">
+        <TabBar value={tab} onChange={setTab} tabs={[
+          "Нужно ваше решение",
+          ...(dispatcher ? ["Согласование"] : []),
+          "Уведомления",
+          ...(messages ? ["Сообщения"] : []),
+        ]} />
+        {!isMessages && <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{isRules ? tr("К согласованию: {count}", { count: intents.length }) : isDecision ? tr("К рассмотрению: {count}", { count: decisions.length }) : tr("Непрочитанных: {count}", { count: unread })}</span>
           {!isDecision && !isRules && (
             <Button size="sm" variant="ghost" disabled={!unread} onClick={() => setReadIds([...new Set([...readIds, ...updates.map((job) => job.id)])])}>
               {tr("Прочитать все")}
             </Button>
           )}
-        </div>
+        </div>}
       </div>
-      {isRules && dispatcher ? (
+      {isMessages && messages ? (
+        <OwnerMessagesList api={messages} openJob={(key) => go("jobs", key)} notice={notice} />
+      ) : isRules && dispatcher ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">{tr(LEGACY_NOTIFY_HINT)}</p>
           <DispatcherIntentList

@@ -135,7 +135,7 @@ export function KnowledgeLivePage({
             <div>
               <h2 className="text-base font-semibold">{current.title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{`${scopeLabel(scopeKey(current))} · ${current.source} · ${tr(STATUS_LABEL[current.status])} · ${new Date(current.updatedAt).toLocaleDateString(uiLocale())}`}</p>
-              {current.proposedBy && <p className="text-xs text-muted-foreground">{tr("Предложил сотрудник")}</p>}
+              {current.proposedBy && <p className="text-xs text-muted-foreground">{tr(current.proposedBy === "agency:remarks" ? "Предложило Агентство: замечание повторилось в нескольких задачах" : "Предложил сотрудник")}</p>}
             </div>
             <Button size="sm" variant="ghost" aria-label={tr("Закрыть материал")} onClick={() => setSelected(null)}>{tr("Закрыть")}</Button>
           </div>

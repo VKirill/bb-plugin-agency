@@ -1,4 +1,4 @@
-import { saveKnowledgeInputSchema } from "../../shared/rpc-contract";
+import { addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
 import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
 import { getWorkRulesInputSchema } from "../../shared/rpc-contract";
@@ -100,12 +100,32 @@ export const CLI_OPERATIONS = {
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
   agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },
+  notifyOwner: {
+    input: notifyOwnerInputSchema,
+    summary: "Сообщение владельцу: «Входящие → Сообщения» и Telegram, если включён; dedupeKey доставляет одно сообщение один раз",
+  },
+  listOwnerMessages: { input: z.object({ limit: z.number().int().min(1).max(500).optional() }).strict(), summary: "Сообщения владельцу, новые сверху, и число непрочитанных" },
+  markOwnerMessagesRead: { input: z.object({ ids: z.array(z.string().max(80)).max(500).optional() }).strict(), summary: "Отметить сообщения прочитанными; без ids — все" },
+  ownerDigest: {
+    input: ownerDigestInputSchema,
+    summary: "Сводка (summary: sinceHours) или сторож (watchdog: задачи ждут человека дольше stuckHours); notify:true отправляет владельцу",
+  },
+  listScriptTemplates: { input: emptyObjectSchema, summary: "Шаблоны скриптов для cron/launchd: сводка за день, сторож, регулярная задача из внешних данных" },
   listBudgets: { input: emptyObjectSchema, summary: "Бюджеты в месяц: уровни с лимитом, оценка расхода за календарный месяц (UTC) и процент" },
   saveWorkRules: { input: saveWorkRulesCommandSchema, summary: "Сохранить правила уровня целиком: отсутствующий ключ возвращает значение по умолчанию" },
   readProjectRules: { input: readProjectRulesInputSchema, summary: "Прочитать правила проекта (.bb/AGENTS.md) на машине привязки" },
   saveProjectRules: { input: saveProjectRulesInputSchema, summary: "Сохранить правила проекта, если файл не менялся после чтения (expectedHash)" },
   createJob: { input: createJobRpcSchema, summary: "Создать задачу; state задаёт переход, не create" },
   updateJob: { input: updateJobRpcSchema, summary: "Обновить поля задачи, включая назначение" },
+  addJobDependency: {
+    input: addJobDependencyRpcSchema,
+    summary: "Задача ждёт другую: запуск откладывается, из очереди запуска стартует сама, когда та готова",
+  },
+  removeJobDependency: { input: removeJobDependencyRpcSchema, summary: "Убрать зависимость задачи" },
+  setJobNextStep: {
+    input: setJobNextStepRpcSchema,
+    summary: "Следующий шаг: когда задача готова, Агентство само создаёт задачу отделу рядом с ней, прикладывает принятые версии и ставит в очередь; step null — убрать",
+  },
   transitionJob: { input: transitionJobRpcSchema, summary: "Сменить состояние задачи" },
   createArtifact: { input: createArtifactRpcSchema, summary: "Создать реестровую запись артефакта" },
   publishArtifactVersion: { input: publishArtifactRpcSchema, summary: "Опубликовать версию файла" },

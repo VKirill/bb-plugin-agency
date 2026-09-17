@@ -3,6 +3,7 @@ import {
   DEFAULT_WORK_RULES,
   INHERITED_RULE_KEYS,
   AGENT_OVERRIDE_RULE_KEYS,
+  HOST_OVERRIDE_RULE_KEYS,
   LIMIT_RULE_KEYS,
   allowedRuleKeys,
   storedWorkRulesSchema,
@@ -66,7 +67,12 @@ export function workRulesView(db: SqlDatabase, scope: string): WorkRulesView {
   for (const key of INHERITED_RULE_KEYS) {
     if (department[key] !== undefined) set(key, department[key], "department");
   }
-  const ownSource: RuleSource = scope === "agency" ? "agency" : scope.startsWith("department:") ? "department" : "agent";
+  const ownSource: RuleSource = scope === "agency" ? "agency" : scope.startsWith("department:") ? "department" : scope.startsWith("host:") ? "host" : "agent";
+  if (scope.startsWith("host:")) {
+    for (const key of HOST_OVERRIDE_RULE_KEYS) {
+      if (own.rules[key] !== undefined) set(key, own.rules[key], "host");
+    }
+  }
   if (scope.startsWith("agent:")) {
     for (const key of AGENT_OVERRIDE_RULE_KEYS) {
       if (own.rules[key] !== undefined) set(key, own.rules[key], "agent");
@@ -85,9 +91,15 @@ export function workRulesView(db: SqlDatabase, scope: string): WorkRulesView {
   };
 }
 
-/** Rules of one launch: the department's rules with the employee's own overrides. */
-export function rulesForLaunch(db: SqlDatabase, departmentId: string, agentId: string): WorkRules {
+/** Rules of one launch: the department's rules, then the machine's overrides, then the employee's own. */
+export function rulesForLaunch(db: SqlDatabase, departmentId: string, agentId: string, hostId?: string): WorkRules {
   const rules = { ...rulesForDepartment(db, departmentId) };
+  if (hostId) {
+    const machine = readStoredRules(db, `host:${hostId}`).rules;
+    for (const key of HOST_OVERRIDE_RULE_KEYS) {
+      if (machine[key] !== undefined) (rules as Record<string, unknown>)[key] = machine[key];
+    }
+  }
   const own = readStoredRules(db, `agent:${agentId}`).rules;
   for (const key of AGENT_OVERRIDE_RULE_KEYS) {
     if (own[key] !== undefined) (rules as Record<string, unknown>)[key] = own[key];

@@ -37,6 +37,28 @@ describe("work rule «Запуск без песочницы»", () => {
     }
   });
 
+  it("may be set for a machine: over the department, under the employee", () => {
+    expect(allowedRuleKeys("host:host_ovh01")).toEqual(["runWithoutSandbox"]);
+    const dir = mkdtempSync(join(tmpdir(), "agy-sandbox-host-"));
+    dirs.push(dir);
+    const db = openMigratedDatabase(new Database(join(dir, "agency.sqlite")));
+    try {
+      const now = new Date().toISOString();
+      writeStoredRules(db, "host:host_ovh01", { runWithoutSandbox: true }, 1, now);
+      expect(rulesForLaunch(db, "dep_qa0001", "agt_tester01", "host_ovh01").runWithoutSandbox).toBe(true);
+      expect(rulesForLaunch(db, "dep_qa0001", "agt_tester01", "host_mini01").runWithoutSandbox).toBe(false);
+      writeStoredRules(db, "department:dep_qa0001", { runWithoutSandbox: false }, 1, now);
+      expect(rulesForLaunch(db, "dep_qa0001", "agt_tester01", "host_ovh01").runWithoutSandbox).toBe(true);
+      writeStoredRules(db, "agent:agt_tester01", { runWithoutSandbox: false }, 1, now);
+      expect(rulesForLaunch(db, "dep_qa0001", "agt_tester01", "host_ovh01").runWithoutSandbox).toBe(false);
+      const view = workRulesView(db, "host:host_ovh01");
+      expect(view.sources.runWithoutSandbox).toBe("host");
+      expect(view.effective.runWithoutSandbox).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("sends full permissions with an explicit source only when the rule applies", async () => {
     const contract = {
       snapshotId: "snp_aaaaaaaaaaaaaaaaaaaaaaaa",

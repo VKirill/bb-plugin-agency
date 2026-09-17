@@ -81,6 +81,20 @@ export const boardPolicySchema = z
   .object({
     hideClosedSubtasksAfterHours: z.number().min(0).max(8_760),
     hideClosedMainTasksAfterHours: z.number().min(0).max(8_760),
+    /**
+     * Soft work-in-progress limits of the kanban columns. Over the limit the column
+     * header turns amber; nothing is blocked. Absent or 0 — no limit.
+     */
+    wipLimits: z
+      .object({
+        queued: z.number().int().min(0).max(999),
+        running: z.number().int().min(0).max(999),
+        attention: z.number().int().min(0).max(999),
+        review: z.number().int().min(0).max(999),
+      })
+      .partial()
+      .strict()
+      .optional(),
   })
   .strict();
 

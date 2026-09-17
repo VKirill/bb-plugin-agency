@@ -46,6 +46,11 @@ const DOMAIN_NOTICE: Record<string, string> = {
     "Проверяющий и наблюдатель должны состоять в отделе этой задачи.",
   illegal_transition: "Сейчас это действие недоступно.",
   capability_unavailable: "Задачу из этого правила сейчас запустить нельзя.",
+  dependency_cycle: "Так задачи ждали бы друг друга по кругу. Уберите встречную зависимость.",
+  duplicate_dependency: "Эта зависимость уже есть.",
+  binding_mismatch: "Задача может ждать только задачу из той же папки или из того же дерева задач.",
+  next_step_done: "Следующий шаг уже выполнен и не меняется.",
+  job_closed: "Задача закрыта: следующий шаг не задаётся.",
 };
 
 export function failureNotice(failure: MutationFailure): string {

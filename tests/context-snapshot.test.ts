@@ -540,3 +540,12 @@ describe("compileContextSnapshot placement", () => {
     expect(snapshot.digest).not.toBe(plain.digest);
   });
 });
+
+describe("compileContextSnapshot role", () => {
+  it("puts the role guidance before the brief in the job layer", () => {
+    const snapshot = compileOk(baseInput({ roleInstructions: "## Your role: executor of AG-1\n- Hand in a version." }));
+    const layer = snapshot.prompt.levels.job;
+    expect(layer.indexOf("## Your role: executor of AG-1")).toBeLessThan(layer.indexOf("## Brief"));
+    expect(compileOk().prompt.levels.job).not.toContain("## Brief");
+  });
+});

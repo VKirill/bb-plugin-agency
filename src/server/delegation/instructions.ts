@@ -1,16 +1,17 @@
 import type { SqlDatabase } from "../db/sql";
-import { languageDirective } from "../i18n/language";
+import { agencyLanguage, type AgencyLanguage } from "../i18n/language";
 import { rulesForDepartment } from "../rules/work-rules";
 import type { MembershipRole } from "../../shared/contracts/membership";
 
 /**
- * Thread instructions contributed by the Agency plugin.
+ * Instructions the Agency gives to agents, in English; the work itself is written
+ * in the Agency language.
  *
- * Three audiences, decided from durable data only:
- * - an ordinary chat in a project bound to the Agency: route work — do it here
- *   or delegate it to the department that owns that kind of result;
- * - a department lead running an Agency job: orchestrate, never implement;
- * - an executor running an Agency job: do the job, do not re-delegate it.
+ * - An ordinary chat in a project bound to the Agency gets thread instructions:
+ *   do the work here or delegate it to the department that owns that result.
+ * - An Agency launch gets its role in the launch prompt (isolated launches do not
+ *   receive plugin thread instructions): a lead orchestrates, an executor does the
+ *   job, a reviewer checks someone else's version.
  *
  * The provider sits on the thread-start path, so everything here is synchronous
  * SQLite reads and plain string assembly. BB truncates output above 4096 chars;
@@ -114,19 +115,25 @@ export function departmentPurpose(instructions: string): string {
   return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
+/** Role context of the job a thread was launched for; null for an ordinary chat. */
 export function readWorkerContext(db: SqlDatabase, threadId: string): WorkerContext | null {
+  const attempt = db
+    .prepare(`SELECT job_id FROM agency_run_attempt WHERE thread_id = ? ORDER BY attempt_no DESC LIMIT 1`)
+    .get(threadId) as { job_id: string } | undefined;
+  return attempt ? readJobRoleContext(db, attempt.job_id) : null;
+}
+
+/** Role context of a job: who runs it, the department members and the rules that shape the role. */
+export function readJobRoleContext(db: SqlDatabase, jobId: string): WorkerContext | null {
   const job = db
     .prepare(
       `SELECT j.id, j.key, j.title, j.assigned_agent_id, d.id AS department_id, d.name AS department_name,
               d.lead_agent_id
-       FROM agency_run_attempt r
-       JOIN agency_job j ON j.id = r.job_id
+       FROM agency_job j
        JOIN agency_department d ON d.id = j.department_id
-       WHERE r.thread_id = ?
-       ORDER BY r.attempt_no DESC
-       LIMIT 1`,
+       WHERE j.id = ?`,
     )
-    .get(threadId) as
+    .get(jobId) as
     | {
         id: string;
         key: string;
@@ -260,7 +267,7 @@ function fit(head: string[], list: string[], tail: string[], limit = INSTRUCTION
   const kept: string[] = [];
   let used = fixed;
   for (const [index, line] of list.entries()) {
-    const marker = `- …ещё ${list.length - index}: bb agency workspace --json`;
+    const marker = `- … ${list.length - index} more: bb agency workspace --json`;
     if (used + line.length + 1 + marker.length + 1 > limit) {
       kept.push(marker);
       break;
@@ -271,85 +278,99 @@ function fit(head: string[], list: string[], tail: string[], limit = INSTRUCTION
   return [...head, ...kept, ...tail].join("\n").slice(0, limit);
 }
 
-/** Department rules the lead works by, in the lead's own terms. */
+/** Instructions are English; the work itself is written in the Agency language. */
+export function workLanguageLine(lang: AgencyLanguage = agencyLanguage()): string {
+  const name = lang === "en" ? "English" : "Russian";
+  return `Language: write job titles, briefs, acceptance criteria, reports, job comments and questions to the owner in ${name}.`;
+}
+
+/** Department rules the lead works by. */
 function leadRuleLines(rules: WorkerContext["rules"]): string[] {
   if (!rules) return [];
   return [
-    `Правила отдела: не больше ${rules.reworkLimit} кругов доработки под одной задачей — дальше сервер не даст завести доработку, решение за владельцем (report-needs-input).`,
+    `- Department rules: at most ${rules.reworkLimit} rework rounds per job; after that the server refuses another rework and the decision goes to the owner (report-needs-input).`,
     rules.minorDefectsWithoutRound
-      ? "Мелкие дефекты (уровень «мелочь») новый круг не открывают: перечислите их в итоговом отчёте и собирайте итог."
-      : "Любой открытый дефект, включая мелочь, — подзадача доработки и повторная проверка.",
+      ? "- Minor defects do not open a new round: list them in the final report and assemble the result."
+      : "- Every open defect, minor ones included, gets a rework subtask and another review.",
     rules.reviewRequired
-      ? "Независимая проверка обязательна: результат каждой реализации проверяет проверяющий."
-      : "Независимая проверка не обязательна: небольшую работу можно проверить самому по критерию, крупную — отдать проверяющему.",
+      ? "- Independent review is required: a reviewer checks every implementation."
+      : "- Independent review is optional: check small work yourself against its criteria, hand larger work to a reviewer.",
     ...(rules.autoReview
-      ? ["Автопроверка включена: после сдачи исполнителя Агентство само создаёт подзадачу проверки с приложенной версией и ставит её в очередь (комментарий «Автопроверка: создана AG-N»). Сами проверку по этой версии не создавайте — дождитесь заключения и решите по нему."]
+      ? ["- Auto review is on: when an executor hands in, the Agency creates and queues the review subtask with the version attached (comment \"Автопроверка: создана AG-N\"). Do not create that review yourself; wait for the verdict."]
       : []),
   ];
 }
 
+/**
+ * The role an Agency launch plays in its job. It is compiled into the launch
+ * prompt: plugin thread instructions do not reach isolated launches.
+ */
 export function buildWorkerInstructions(worker: WorkerContext): string {
   if (worker.isLead) {
     const head = [
-      `## Агентство: вы руководитель отдела «${worker.departmentName}» по ${worker.jobKey}`,
-      `Поручение «${worker.title}» (jobId ${worker.jobId}). Ваша работа — оркестрация отдела, а не исполнение.`,
+      `## Your role: lead of the "${worker.departmentName}" department for ${worker.jobKey}`,
+      `Job "${worker.title}" (jobId ${worker.jobId}). You orchestrate the department; you do not implement.`,
     ];
     const line = (member: WorkerMember) => `- ${member.name}${member.role ? ` — ${member.role}` : ""}: ${member.agentId}`;
     const executors = worker.members.filter((member) => member.type === "executor").map(line);
     const reviewers = worker.members.filter((member) => member.type === "reviewer").map(line);
     const list = [
       "",
-      "Исполнители — реализация и доработки:",
-      ...(executors.length ? executors : ["- нет: сообщите владельцу через report-needs-input"]),
-      "Проверяющие — независимая проверка чужих версий:",
-      ...(reviewers.length ? reviewers : ["- нет: проверяйте результат сами по критерию или попросите владельца добавить проверяющего"]),
+      "Executors (implementation and rework):",
+      ...(executors.length ? executors : ["- none: tell the owner with report-needs-input"]),
+      "Reviewers (independent review of other people's versions):",
+      ...(reviewers.length ? reviewers : ["- none: check the result yourself against its criteria or ask the owner for a reviewer"]),
     ];
     const tail = [
       "",
-      "Порядок работы:",
-      `0. Оценка на входе — первым действием: \`bb agency job comment\` с jobId ${worker.jobId}, коротким обоснованием и references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return). Оценка видна в карточке задачи.`,
-      `1. Разбейте поручение на подзадачи с проверяемым результатом: \`bb agency job create\` c parentJobId=${worker.jobId}, departmentId отдела и assignedAgentId участника. key назначит сервер. Работа другого отдела — подзадача в том отделе на его руководителя.`,
-      "   В подзадаче реализации задавайте контракт исполнения `contract`: mayChange (что можно менять), mustNotTouch (что трогать нельзя), checks (проверки перед сдачей). Он закрепляется при запуске.",
-      "2. Реализацию и доработки назначайте исполнителям, проверку — проверяющим. Входы передавайте `bb agency job attach-input`; сервер не даст проверяющему получить на проверку собственную работу. Запуск — `bb agency launch readiness` → `launch prepare`.",
-      "3. Когда подзадача (в том числе в другом отделе) перейдёт в review, waiting_input, blocked, done или canceled, Агентство само пришлёт сообщение в этот тред. Не опрашивайте статус циклом sleep — завершите ход и ждите.",
-      "4. Проверяйте результат подзадачи по её критерию приёмки. Дефект — подзадача доработки и повторная независимая проверка, а не правка своими руками. Принимаете (`bb agency artifact accept`) только версии подзадач, которые поручили сами; сервер не даст принять свою работу.",
+      "How to work:",
+      `0. Intake first: \`bb agency job comment\` on jobId ${worker.jobId} with a short reason and references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return).`,
+      `1. Split the job into subtasks with a checkable result: \`bb agency job create\` with parentJobId=${worker.jobId}, the departmentId and the member's assignedAgentId. The server assigns the key. Work of another department is a subtask in that department for its lead.`,
+      "   Give implementation subtasks a `contract`: mayChange, mustNotTouch, checks. It is frozen at launch. The subtask's bindingId is this job's folder unless the job layer lists other project folders or employee workplaces.",
+      "2. Implementation and rework go to executors, review to reviewers. Pass inputs with `bb agency job attach-input`. Launch with `bb agency launch readiness`, then `launch prepare`.",
+      "   Order: `bb agency job depend` (jobId waits for dependsOnJobId), then `bb agency launch queue` for each subtask; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
+      "3. When a subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Do not poll in a loop: end your turn and wait.",
+      "4. Check each subtask against its acceptance criteria. A defect means a rework subtask and another independent review, not a fix by your own hands. Accept (`bb agency artifact accept`) only versions of subtasks you assigned; the server blocks accepting your own work.",
       ...leadRuleLines(worker.rules),
-      "5. Итог — сводный отчёт .agency/jobs/<ключ главной задачи>/report.md версией артефакта и итоговый комментарий в задачу. Собственный результат не принимайте: приёмка за владельцем. Комментарии — Markdown: первая строка итог, детали списком, без лишних run_/thr_/job_ id.",
-      "6. Поручение не по профилю отдела (см. «Принимаем / Не принимаем» в процессе отдела) — не берите его: `bb agency job comment` «Возврат: почему не наш профиль; какой отдел подходит», затем `bb agency job transition` в blocked. Владелец увидит задачу в «Требуют внимания».",
-      "Подзадача вернулась к вам в blocked с комментарием «Возврат» — переназначьте её по роли, перенесите в подходящий отдел или отмените; зависшую попытку остановите `bb agency launch cancel`.",
+      "5. Finish with a summary report .agency/jobs/<main job key>/report.md published as a version and a final job comment. Do not accept your own result: acceptance belongs to the owner. Comments are Markdown: first line the outcome, details as a list, no run_/thr_/job_ ids unless needed.",
+      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not take it. `bb agency job comment` \"Возврат: why it is not ours; which department fits\", then `bb agency job transition` to blocked.",
+      "A subtask returned to you as blocked with \"Возврат\": reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
+      workLanguageLine(),
     ];
     return fit(head, list, tail);
   }
   const common = [
-    "- Комментарии в задачу — Markdown: первая строка — итог, детали — список (переносы `\\n` в JSON), технические id только по необходимости. Длинное — в отчёт.",
-    "- Не создавайте новых поручений в Агентстве и не перепоручайте эту работу: декомпозиция — задача руководителя отдела.",
-    "- Вопрос владельцу или конфликт инструкций — `bb agency job report-needs-input`, затем завершите ход.",
-    "- Сдача — это версия и итоговый комментарий. Без итогового комментария после публикации задача не уйдёт на проверку.",
-    `- Завершили ход без опубликованной версии или без итогового комментария — Агентство пришлёт напоминание; после ${worker.rules?.completionReminders ?? 2} напоминаний задача уйдёт руководителю как заблокированная.`,
-    `- Агентство следит за попыткой: ${worker.rules?.watchStallMinutes ?? 30} мин без новых событий или ${worker.rules?.watchCeilingHours ?? 2} ч непрерывной работы — задача уйдёт руководителю как заблокированная. Долгую работу делите на этапы и отмечайте их комментариями.`,
-    "- В поручении есть контракт исполнения — работайте в его границах: «Нельзя трогать» не меняйте, все «Проверки» пройдите и перечислите в итоговом комментарии. Нужно выйти за границу — вопрос руководителю комментарием, не решение.",
+    "- Job comments are Markdown: first line the outcome, details as a list (`\\n` line breaks in JSON), technical ids only when needed. Long material goes to the report.",
+    "- Do not create new Agency jobs and do not hand this work on: splitting work is the lead's job.",
+    "- A question for the owner or conflicting instructions: `bb agency job report-needs-input`, then end your turn.",
+    "- Handing in means a published version and a final job comment. Without the final comment after publishing, the job does not go to review.",
+    `- Ending a turn without a published version or a final comment brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
+    `- The Agency watches the attempt: ${worker.rules?.watchStallMinutes ?? 30} min without new events or ${worker.rules?.watchCeilingHours ?? 2} h of continuous work sends the job to the lead as blocked. Split long work into stages and note them in comments.`,
+    "- If the job has an execution contract, stay inside it: leave mustNotTouch alone, run every check and list them in the final comment. Going outside it is a question to the lead, not a decision.",
+    workLanguageLine(),
   ];
   if (worker.assigneeType === "reviewer") {
     return [
-      `## Агентство: вы проверяющий ${worker.jobKey}`,
-      `Тред запущен Агентством для поручения «${worker.title}» отдела «${worker.departmentName}». Ваша работа — независимая проверка чужой версии, а не её исправление.`,
-      "- Проверяйте входные версии этого поручения (`bb agency job get` → inputs, затем `bb agency artifact open` с hash), а не рабочие файлы на слово. Нет входной версии или критерия — возврат руководителю.",
-      "- Проверяемый результат не правьте: дефекты описывайте (критерий → место → как воспроизвести → серьёзность: блокирует / важно / мелочь), исправит исполнитель.",
-      ...(worker.rules?.minorDefectsWithoutRound ? ["- В этом отделе мелочи не открывают новый круг: вердикт «принять с замечаниями», если остались только дефекты уровня «мелочь»."] : []),
-      "- Поручение оказалось проверкой вашей собственной работы или реализацией — не берите: `bb agency job comment` «Возврат: причина», затем `bb agency job transition` в blocked и завершите ход.",
-      "- Сдача: заключение .agency/jobs/<ключ>/report.md (вердикт, таблица критериев, дефекты, команды и вывод) → `bb agency artifact create` и `artifact publish` → итоговый `bb agency job comment` с вердиктом → завершить ход. Результат не принимайте: решение за руководителем или владельцем.",
+      `## Your role: reviewer of ${worker.jobKey}`,
+      `Job "${worker.title}" of the "${worker.departmentName}" department. You review someone else's version independently; you do not fix it.`,
+      "- Review the input versions of this job (`bb agency job get` → inputs, then `bb agency artifact open` with the hash), not working files on trust. No input version or no criteria: return it to the lead.",
+      "- Do not edit the reviewed result. Describe defects (criterion → place → how to reproduce → severity: blocking / important / minor); the executor fixes them.",
+      ...(worker.rules?.minorDefectsWithoutRound ? ["- In this department minor defects do not open a new round: the verdict is \"accept with remarks\" when only minor defects remain."] : []),
+      "- The job turns out to be a review of your own work, or an implementation: do not take it. `bb agency job comment` \"Возврат: reason\", then `bb agency job transition` to blocked and end your turn.",
+      "- Hand in: verdict report .agency/jobs/<key>/report.md (verdict, criteria table, defects, commands and output) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` with the verdict → end your turn. Do not accept the result: the lead or the owner decides.",
       ...common,
     ].join("\n");
   }
   return [
-    `## Агентство: вы исполнитель ${worker.jobKey}`,
-    `Тред запущен Агентством для поручения «${worker.title}» отдела «${worker.departmentName}». Выполняйте работу сами в границах брифа.`,
-    "- Сначала сверьте поручение со своей должностной инструкцией. Не ваш пул работ или нет обязательных входов — не начинайте: `bb agency job comment` «Возврат: причина; кому подходит; чего не хватает», затем `bb agency job transition` в blocked и завершите ход. Руководитель получит сообщение.",
-    "- Сдача работы: отчёт .agency/jobs/<ключ>/report.md (итог, что сделано и где, чем проверено, что не сделано) → `bb agency artifact create` и `artifact publish` → итоговый `bb agency job comment` для руководителя со ссылкой на версию → завершить ход. Слово «готово» в ответе не является приёмкой.",
+    `## Your role: executor of ${worker.jobKey}`,
+    `Job "${worker.title}" of the "${worker.departmentName}" department. Do the work yourself within the brief.`,
+    "- First compare the job with your job description. Not your kind of work, or required inputs are missing: do not start. `bb agency job comment` \"Возврат: reason; who fits; what is missing\", then `bb agency job transition` to blocked and end your turn. The lead is notified.",
+    "- Hand in: report .agency/jobs/<key>/report.md (outcome, what was done and where, how it was checked, what was not done) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` for the lead with a link to the version → end your turn. Saying \"done\" is not acceptance.",
     ...common,
   ].join("\n");
 }
 
+/** Instructions for ordinary BB chats: route work to the Agency or do it in the chat. */
 export function buildSessionInstructions(input: {
   mode: Exclude<DelegationMode, "off">;
   routes: ProjectRoutes;
@@ -359,52 +380,51 @@ export function buildSessionInstructions(input: {
   if (workplaces.length === 0 || departments.length === 0) {
     if (input.totalDepartments === 0) return null;
     return [
-      "## Агентство",
-      `В BB есть Агентство — отделы агентов с руководителями (${input.totalDepartments}). ${workplaces.length === 0 ? "Этот проект к нему не подключён." : "Для этого проекта нет доступных отделов."}`,
-      "Если владелец просит поручить крупную работу команде — скажи, что проект нужно подключить в Агентстве (раздел «Проекты»). Сам поручение не создавай.",
+      "## BB Agency",
+      `This BB has an Agency: departments of AI employees with leads (${input.totalDepartments}). ${workplaces.length === 0 ? "This project is not connected to it." : "No department serves this project."}`,
+      "If the owner asks to hand larger work to a team, say the project has to be connected in the Agency (Projects section). Do not create a job yourself.",
     ].join("\n");
   }
   const suggest = input.mode === "suggest";
   const single = workplaces.length === 1 ? workplaces[0] : null;
   const head = [
-    "## Агентство: куда направить работу",
-    "В BB работает Агентство — постоянные отделы агентов с руководителем, очередью задач и приёмкой результата. Отделы общие: принимают задачи из любого подключённого проекта. Перед работой выбери маршрут:",
-    "- Сделай сам в этом треде: ответ или объяснение, разовая команда, небольшая правка, срочное, настройка самого BB или Агентства.",
-    `- ${suggest ? "Предложи поручить" : "Поручи"} Агентству: многошаговая работа с отдельным результатом (код, текст, исследование, аудит), нужна независимая проверка, работа переживёт этот чат, или владелец просит «поручи/делегируй».`,
-    "- Не уверен — назови владельцу маршрут одной фразой и дождись ответа.",
-    "- Ты дочерний тред или субагент, которому уже поручили часть работы, — выполняй её, не перепоручай.",
+    "## BB Agency: where the work goes",
+    "This BB runs an Agency: standing departments of AI employees, each with a lead, a job queue and acceptance by the owner. Departments are shared and take jobs from any connected project. Pick a route before you start:",
+    "- Do it here: answers and explanations, one-off commands, small edits, urgent fixes, setting up BB or the Agency.",
+    `- ${suggest ? "Propose handing it to" : "Hand it to"} the Agency: multi-step work with its own result (code, text, research, audit), work that needs independent review or outlives this chat, or the owner asks to delegate.`,
+    "- Not sure: name the route to the owner in one sentence and wait.",
+    "- You are a child thread or subagent already given part of a job: do that part, do not delegate it again.",
     "",
     single
-      ? `Работа этого проекта выполняется на машине ${single.hostName ?? single.hostId} в папке ${single.root} (bindingId ${single.bindingId}).`
-      : "Где выполняется работа — выбери место, где лежит папка твоего окружения (сравни с pwd); сотрудник запустится на этой машине:",
-    ...(single
-      ? []
-      : workplaces.map((place) => `- ${place.bindingId}: ${place.hostName ?? place.hostId} — ${place.root}`)),
+      ? `Work of this project runs on ${single.hostName ?? single.hostId} in ${single.root} (bindingId ${single.bindingId}).`
+      : "Where work runs: pick the folder of your environment (compare with pwd); the employee launches on that machine.",
+    ...(single ? [] : workplaces.map((place) => `- ${place.bindingId}: ${place.hostName ?? place.hostId} — ${place.root}`)),
     "",
-    "Отделы — выбирай по сути результата, не по модели:",
+    "Departments (choose by the kind of result, not by model):",
   ];
   const list = departments.map(
     (department) =>
-      `- «${department.name}» — ${department.purpose} Руководитель: ${department.leadName} (${department.leadAgentId}); сотрудников: ${department.memberCount}; departmentId ${department.departmentId}${department.onlyBindingIds ? `; только для ${department.onlyBindingIds.join(", ")}` : ""}`,
+      `- "${department.name}": ${department.purpose} Lead: ${department.leadName} (${department.leadAgentId}); members: ${department.memberCount}; departmentId ${department.departmentId}${department.onlyBindingIds ? `; only for ${department.onlyBindingIds.join(", ")}` : ""}`,
   );
-  const bindingId = single ? single.bindingId : "<bindingId рабочего места>";
+  const bindingId = single ? single.bindingId : "<bindingId of the folder>";
   const tail = [
-    "Подходящего отдела нет — не создавай поручение, скажи владельцу, какого отдела не хватает.",
+    "No department fits: do not create a job; tell the owner which department is missing.",
     "",
-    suggest ? "Как поручить после согласия владельца:" : "Как поручить:",
-    `\`bb agency job create --input-json '{"requestId":"<новый UUID>","bindingId":"${bindingId}","departmentId":"…","assignedAgentId":"<руководитель отдела>","title":"…","brief":"…","acceptance":"…"}'\``,
-    "- key назначит сервер. brief: цель, входы, границы (что не трогать). acceptance: проверяемый критерий результата.",
-    "- Назначай руководителю отдела: он декомпозирует и раздаёт подзадачи. Исполнителей в обход него не назначай.",
-    "- После создания сообщи владельцу ключ AG-N и следующий шаг. Поручённую работу сам не выполняй; запуск не объявляй без квитанции `bb agency launch prepare`.",
-    "- Создать отдел или сотрудника, написать должностную инструкцию — по навыку `agency`.",
+    suggest ? "After the owner agrees, delegate:" : "Delegate:",
+    `\`bb agency job create --input-json '{"requestId":"<new UUID>","bindingId":"${bindingId}","departmentId":"…","assignedAgentId":"<department lead>","title":"…","brief":"…","acceptance":"…"}'\``,
+    "- The server assigns the key. brief: goal, inputs, limits (what not to touch). acceptance: a checkable criterion.",
+    "- Assign the department lead: the lead splits the work and assigns it. Do not assign executors past the lead.",
+    "- Then tell the owner the AG-N key and the next step. Do not do the delegated work yourself; never announce a launch without a `bb agency launch prepare` receipt.",
+    "- Creating departments or employees and writing job descriptions: follow the `agency` skill.",
+    workLanguageLine(),
   ];
   return fit(head, list, tail);
 }
 
-function withLanguage(text: string | null): string | null {
-  return text ? `${text}\n${languageDirective()}` : text;
-}
-
+/**
+ * Thread instructions from the Agency. Only ordinary chats get them: an Agency
+ * launch is isolated, so its role travels in the launch prompt instead.
+ */
 export function buildAgencyInstructions(
   db: SqlDatabase,
   ctx: { threadId: string; projectId: string },
@@ -412,8 +432,7 @@ export function buildAgencyInstructions(
   hostName?: (hostId: string) => string | undefined,
 ): string | null {
   if (mode === "off") return null;
-  const worker = readWorkerContext(db, ctx.threadId);
-  if (worker) return withLanguage(buildWorkerInstructions(worker));
+  if (readWorkerContext(db, ctx.threadId)) return null;
   return buildSessionInstructions({
     mode,
     routes: readProjectRoutes(db, ctx.projectId, hostName),

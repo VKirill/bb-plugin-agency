@@ -26,8 +26,13 @@ import { createSdkSkillCatalogPort } from "./runtime/isolated-sdk";
 import { withCallerThread } from "./api/caller";
 import { attachDashboardUsageCollector, USAGE_CHANGED_CHANNEL } from "./api/dashboard-usage-rpc";
 import { createDashboardUsageReader, dashboardUsageCatalogFromSql } from "./runtime/dashboard-usage";
-import { listStoredBindings } from "./api/catalog";
+import { listStoredBindings, listStoredDepartments } from "./api/catalog";
 import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
+import { acceptedVersions, assertDependenciesDone, sweepNextSteps, type NextStepPorts } from "./flow/service";
+import { recheckJobText, sweepNightlyRecheck, type NightlyRecheckPorts } from "./runtime/nightly-recheck/service";
+import { buildDigest, listOwnerMessages, markOwnerMessagesRead, readOwnerMessage, recordOwnerMessage, scriptTemplates, setTelegramState } from "./owner-messages/service";
+import { serverDay } from "./runtime/nightly-recheck/service";
+import { sweepRemarkPatterns } from "./knowledge/remark-patterns";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
@@ -61,7 +66,7 @@ import { flushParentWakes, recoverParentWakesFromActivities } from "./runtime/pa
 import { bindJobCommentHandler, readCliThreadId } from "./comments/register-glue";
 import { CLI_COMMAND_SPECS, runAgencyCli, type CliOperation } from "./cli";
 import { resolveRpcAccess } from "./api/auth";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { remindIncompleteWorker, type ReminderPorts } from "./runtime/completion-reminder/service";
 import type { Job } from "../shared/contracts";
 import { agencyLanguage, setAgencyLanguage } from "./i18n/language";
@@ -123,6 +128,10 @@ export function registerAgency(bb: BbPluginApi) {
       description: "Главные и самостоятельные задачи. 0 — не скрывать.",
       default: DEFAULT_BOARD_POLICY.hideClosedMainTasksAfterHours,
     },
+    wipLimitQueued: { type: "number", label: "Лимит WIP: «К запуску»", description: "Мягкий лимит колонки канбана: при превышении заголовок подсвечивается, задачи не блокируются. 0 — без лимита.", default: 0 },
+    wipLimitRunning: { type: "number", label: "Лимит WIP: «В работе»", description: "Мягкий лимит колонки канбана. 0 — без лимита.", default: 0 },
+    wipLimitAttention: { type: "number", label: "Лимит WIP: «Нужен ответ»", description: "Мягкий лимит колонки канбана. 0 — без лимита.", default: 0 },
+    wipLimitReview: { type: "number", label: "Лимит WIP: «На проверке»", description: "Мягкий лимит колонки канбана. 0 — без лимита.", default: 0 },
     archiveClosedAfterDays: {
       type: "number",
       label: "Убирать закрытые задачи в архив через, дней",
@@ -133,7 +142,7 @@ export function registerAgency(bb: BbPluginApi) {
       type: "select",
       label: "Язык Агентства / Agency language",
       description:
-        "ru — сотрудники пишут отчёты, комментарии и вопросы на русском, системные сообщения агентам на русском. en — the same in English. Интерфейс Агентства пока на русском.",
+        "На каком языке сотрудники пишут задачи, отчёты, комментарии и вопросы владельцу, и на каком Агентство пишет системные комментарии. Инструкции агентам всегда на английском, язык задаётся в них одной строкой. ru — русский, en — English.",
       options: ["ru", "en"],
       default: "ru",
     },
@@ -155,6 +164,10 @@ export function registerAgency(bb: BbPluginApi) {
     hideClosedSubtasksAfterHours: number;
     hideClosedMainTasksAfterHours: number;
     archiveClosedAfterDays?: number;
+    wipLimitQueued?: number;
+    wipLimitRunning?: number;
+    wipLimitAttention?: number;
+    wipLimitReview?: number;
     modelPricesJson?: string;
     language?: string;
   }) => {
@@ -167,6 +180,12 @@ export function registerAgency(bb: BbPluginApi) {
     boardPolicy = {
       hideClosedSubtasksAfterHours: clampHours(values.hideClosedSubtasksAfterHours, DEFAULT_BOARD_POLICY.hideClosedSubtasksAfterHours),
       hideClosedMainTasksAfterHours: clampHours(values.hideClosedMainTasksAfterHours, DEFAULT_BOARD_POLICY.hideClosedMainTasksAfterHours),
+      wipLimits: {
+        queued: clampWip(values.wipLimitQueued),
+        running: clampWip(values.wipLimitRunning),
+        attention: clampWip(values.wipLimitAttention),
+        review: clampWip(values.wipLimitReview),
+      },
     };
   };
   void workSettings.get().then(applyWorkSettings, () => undefined);
@@ -238,6 +257,12 @@ export function registerAgency(bb: BbPluginApi) {
       return usage.ok ? usage.value.costUsdCents : null;
     },
   };
+  /** Every launch, by hand or from the queue: the jobs it depends on are done, then the limits. */
+  const checkLaunchGate = async (job: Job) => {
+    const dependencies = assertDependenciesDone(db, job, agencyLanguage() === "en");
+    if (!dependencies.ok) return dependencies;
+    return checkLaunchLimits(limitDeps, job);
+  };
   const catalogRolesFile = join(bb.server.experimental_dataDir, ISOLATED_CATALOG_ROLES_FILENAME);
   const resolveCatalogRoles = async () => {
     const settings = await catalogRolesSettings.get();
@@ -269,7 +294,7 @@ export function registerAgency(bb: BbPluginApi) {
     onChanged,
     send,
     checkHost: (input) => machines.checkLaunch(input),
-    checkLimits: (job) => checkLaunchLimits(limitDeps, job),
+    checkLimits: checkLaunchGate,
     loadCatalogRoles: async () => {
       const resolved = await resolveCatalogRoles();
       if (!resolved.ok) return resolved;
@@ -364,7 +389,68 @@ export function registerAgency(bb: BbPluginApi) {
     return access;
   };
   const readOnly = () => resolveRpcAccess(db);
+  /** Stores a message to the owner and hands it to Telegram when the owner turned it on. */
+  const sendOwnerMessage = async (input: { text: string; level?: "info" | "warning"; jobId?: string; dedupeKey?: string }, source: string) => {
+    const job = input.jobId ? store.getJob(input.jobId) ?? store.getJobByKey(input.jobId) : undefined;
+    if (input.jobId && !job) return { ok: false as const, error: { code: "not_found", message: `job ${input.jobId} not found` } };
+    const recorded = recordOwnerMessage(db, { ...input, jobId: job?.id ?? null }, source, new Date().toISOString());
+    if (!recorded.ok || recorded.value.duplicate) return recorded;
+    const id = recorded.value.message.id;
+    try {
+      const pref = await telegram.preferences();
+      if (pref.enabled && pref.notifications && pref.projectId) {
+        await telegram.enqueue({ deliveryId: `owner:${id}`, projectId: pref.projectId, jobId: job?.key ?? "owner", title: input.text.trim().slice(0, 500), kind: "notification" });
+        setTelegramState(db, id, "queued");
+      }
+    } catch (error) {
+      setTelegramState(db, id, `failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    onChanged();
+    return { ok: true as const, value: { message: readOwnerMessage(db, id)!, duplicate: false } };
+  };
   const organization = {
+    notifyOwner: async (input: { text: string; level?: "info" | "warning"; jobId?: string; dedupeKey?: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const caller = access.value.ctx.caller;
+      return sendOwnerMessage(input, caller ? `employee:${caller.agentId ?? caller.threadId}` : "owner");
+    },
+    listOwnerMessages: async (input: { limit?: number }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listOwnerMessages(db, input.limit ?? 100) };
+    },
+    markOwnerMessagesRead: async (input: { ids?: string[] }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const marked = markOwnerMessagesRead(db, input.ids, new Date().toISOString());
+      if (marked) onChanged();
+      return { ok: true as const, value: { marked } };
+    },
+    ownerDigest: async (input: { kind: "summary" | "watchdog"; sinceHours?: number; stuckHours?: number; notify?: boolean; dedupeKey?: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const now = new Date();
+      const sinceHours = input.sinceHours ?? 24;
+      const stuckHours = input.stuckHours ?? 24;
+      const digest = buildDigest(db, { kind: input.kind, sinceHours, stuckHours }, now, agencyLanguage() === "en");
+      const send = input.notify && (input.kind === "summary" || digest.items.length > 0);
+      if (!send) return { ok: true as const, value: { ...digest, message: null, duplicate: false } };
+      // A watchdog repeats only when what waits changes; a summary goes once per day and window.
+      const dedupeKey =
+        input.dedupeKey ??
+        (input.kind === "watchdog"
+          ? `watchdog:${createHash("sha256").update(digest.items.map((item) => `${item.key}:${item.state}:${item.since}`).join("|")).digest("hex").slice(0, 32)}`
+          : `summary:${serverDay(now)}:${sinceHours}`);
+      const sent = await sendOwnerMessage({ text: digest.text, level: digest.level, dedupeKey }, access.value.ctx.caller ? "employee-digest" : `digest:${input.kind}`);
+      if (!sent.ok) return sent;
+      return { ok: true as const, value: { ...digest, message: sent.value.message, duplicate: sent.value.duplicate } };
+    },
+    listScriptTemplates: async () => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: scriptTemplates(agencyLanguage() === "en") };
+    },
     listBackups: async () => {
       const access = ownerOnly();
       if (!access.ok) return access;
@@ -581,6 +667,11 @@ export function registerAgency(bb: BbPluginApi) {
     | "listArchivedJobs"
     | "listSavedViews"
     | "listPlugins"
+    | "notifyOwner"
+    | "listOwnerMessages"
+    | "markOwnerMessagesRead"
+    | "ownerDigest"
+    | "listScriptTemplates"
     | "saveSavedView"
     | "deleteSavedView"
     | "saveRuleSchedule"
@@ -736,7 +827,7 @@ export function registerAgency(bb: BbPluginApi) {
       const result = await sweepLaunchQueue({
         db,
         getJob: (jobId) => store.getJob(jobId),
-        checkLimits: (job) => checkLaunchLimits(limitDeps, job),
+        checkLimits: checkLaunchGate,
         launch: async (job, requestedAt) => {
           const prepared = (await launch.prepareLaunch({
             requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `${job.id}:${requestedAt}:${job.revision}`),
@@ -790,6 +881,109 @@ export function registerAgency(bb: BbPluginApi) {
     );
     if (grew.length) onChanged();
   };
+  const nextStepPorts = (): NextStepPorts => ({
+    db,
+    getJob: (jobId) => store.getJob(jobId),
+    createJob: (source, step) =>
+      store.createJob(
+        { actor: { kind: "system" }, allowedBindingIds: listStoredBindings(db).map((row) => row.id) },
+        {
+          requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `next-step:${source.id}`),
+          bindingId: source.bindingId,
+          departmentId: step.departmentId,
+          title: step.title,
+          brief: step.brief,
+          acceptance: step.acceptance,
+          parentJobId: source.parentJobId,
+          assignedAgentId: null,
+          assignment: step.assignment,
+          priority: source.priority,
+          dueAt: null,
+        },
+      ),
+    attachAccepted: async (target, source) => {
+      let attached = 0;
+      for (const version of acceptedVersions(db, source.id)) {
+        const live = store.getJob(target.id) ?? target;
+        const result = (await domain.attachJobInput({
+          requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `next-step-input:${target.id}:${version.artifactId}:${version.version}`),
+          expectedRevision: live.revision,
+          targetJobId: target.id,
+          sourceJobId: source.id,
+          artifactId: version.artifactId,
+          version: version.version,
+          hash: version.hash,
+        })) as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
+        if (!result.ok) return result;
+        attached += 1;
+      }
+      return { ok: true, value: attached };
+    },
+    queue: (job) => queueJobForLaunch(job, uuidV5(LAUNCH_QUEUE_NAMESPACE, `next-step-queue:${job.id}`)),
+    comment: (job, text) => {
+      systemComment(job, text);
+    },
+    now: () => new Date().toISOString(),
+    en: () => agencyLanguage() === "en",
+  });
+  const nightlyRecheckPorts = (): NightlyRecheckPorts => ({
+    db,
+    departments: () => listStoredDepartments(db).map((department) => ({ id: department.id, name: department.name })),
+    rules: (departmentId) => store.rulesForDepartment(departmentId),
+    createReview: ({ departmentId, bindingId, day, versions }) => {
+      const text = recheckJobText(day, versions, agencyLanguage() === "en");
+      const create = (assignment: "reviewer" | "lead") =>
+        store.createJob(
+          { actor: { kind: "system" }, allowedBindingIds: [bindingId] },
+          {
+            requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `nightly-recheck:${departmentId}:${bindingId}:${day}:${assignment}`),
+            bindingId,
+            departmentId,
+            title: text.title,
+            brief: text.brief,
+            acceptance: text.acceptance,
+            parentJobId: null,
+            assignedAgentId: null,
+            assignment,
+            priority: "normal",
+            dueAt: null,
+          },
+        );
+      // A department without reviewers rechecks through its lead.
+      const review = create("reviewer");
+      return review.ok ? review : create("lead");
+    },
+    attach: async (review, version) => {
+      const live = store.getJob(review.id) ?? review;
+      return (await domain.attachJobInput({
+        requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `nightly-recheck-input:${review.id}:${version.artifactId}:${version.version}`),
+        expectedRevision: live.revision,
+        targetJobId: review.id,
+        sourceJobId: version.jobId,
+        artifactId: version.artifactId,
+        version: version.version,
+        hash: version.hash,
+      })) as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
+    },
+    queue: (review) => queueJobForLaunch(store.getJob(review.id) ?? review, uuidV5(LAUNCH_QUEUE_NAMESPACE, `nightly-recheck-queue:${review.id}`)),
+    comment: (job, text) => {
+      systemComment(job, text);
+    },
+    now: () => new Date(),
+    en: () => agencyLanguage() === "en",
+  });
+  // Repeated remarks are compared hourly: the texts change slowly and the pass reads a month of comments.
+  let remarksCheckedAt = 0;
+  const runRemarkPatterns = () => {
+    if (Date.now() - remarksCheckedAt < 60 * 60 * 1000) return 0;
+    remarksCheckedAt = Date.now();
+    try {
+      return sweepRemarkPatterns(db, new Date(), agencyLanguage() === "en").length;
+    } catch (error) {
+      bb.log.warn(`Repeated remarks: ${String(error)}`);
+      return 0;
+    }
+  };
   const runDispatcher = async () => {
     void plugins.list().catch(() => undefined);
     void scanEscapes().catch((error) => bb.log.warn(`Sandbox escape scan: ${String(error)}`));
@@ -839,6 +1033,17 @@ export function registerAgency(bb: BbPluginApi) {
         now: () => new Date(),
       });
       if (escalated > 0) changed = true;
+      const nextJobs = await sweepNextSteps(nextStepPorts()).catch((error) => {
+        bb.log.warn(`Next steps: ${String(error)}`);
+        return [] as string[];
+      });
+      if (nextJobs.length > 0) changed = true;
+      const rechecks = await sweepNightlyRecheck(nightlyRecheckPorts()).catch((error) => {
+        bb.log.warn(`Nightly recheck: ${String(error)}`);
+        return [] as string[];
+      });
+      if (rechecks.length > 0) changed = true;
+      if (runRemarkPatterns() > 0) changed = true;
       if (changed) onChanged();
       await sweepTelegramOutbox({
         db,
@@ -1077,6 +1282,10 @@ export function registerAgency(bb: BbPluginApi) {
         argv,
       ),
   });
+}
+
+function clampWip(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(999, Math.max(0, Math.round(value))) : 0;
 }
 
 function clampHours(value: unknown, fallback: number): number {

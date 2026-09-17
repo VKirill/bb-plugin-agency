@@ -1,3 +1,5 @@
+import { dependencyLinks, readNextStep, removeJobDependency, saveNextStep } from "../flow/service";
+import { agencyLanguage } from "../i18n/language";
 import { jobGoals } from "../organization/goals";
 import { departmentParents, openEscalations } from "../organization/hierarchy";
 import { createProjectSections } from "./project-sections";
@@ -51,6 +53,9 @@ type DomainMethod =
   | "listBbCatalog"
   | "listCapabilityCatalog"
   | "getJob"
+  | "addJobDependency"
+  | "removeJobDependency"
+  | "setJobNextStep"
   | "getAgent"
   | "getDepartment"
   | "listActivity"
@@ -251,12 +256,34 @@ export function createDomainRpc(deps: {
           binding: scoped.value.binding,
           activity: store.listActivity(job.id),
           dependencies: store.listDependencies(job.id),
+          links: dependencyLinks(db, job.id),
+          nextStep: readNextStep(db, job.id),
           artifacts: artifactIds.map((artifactId) => ({
             artifact: { id: artifactId, jobId: job.id },
             versions: store.listArtifactVersions(artifactId, job.id),
           })),
           needsInput: readNeedsInputRecord(db, job.id),
         });
+      }),
+
+    addJobDependency: (input) => withAccess((access) => mutated(store.addJobDependency(access.ctx, input))),
+
+    removeJobDependency: (input) =>
+      withAccess((access) => {
+        const scoped = store.scopedJob(access.ctx, input.jobId);
+        if (!scoped.ok) return scoped;
+        return mutated(ok({ removed: removeJobDependency(db, input.jobId, input.dependsOnJobId) }));
+      }),
+
+    setJobNextStep: (input) =>
+      withAccess((access) => {
+        const scoped = store.scopedJob(access.ctx, input.jobId);
+        if (!scoped.ok) return scoped;
+        const en = agencyLanguage() === "en";
+        if (input.step && !store.getDepartment(input.step.departmentId)) {
+          return fail("not_found", en ? `department ${input.step.departmentId} not found` : `Отдел ${input.step.departmentId} не найден.`);
+        }
+        return mutated(saveNextStep(db, scoped.value.job, input.step, nowUtc(access.ctx), en));
       }),
 
     getAgent: (input) =>

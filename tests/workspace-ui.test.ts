@@ -508,6 +508,19 @@ describe("workspace view models", () => {
       launchAllowedForAssigned: false,
       reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",
     }, null)).toBe(PRODUCT_HANDSHAKE_UNREADY);
+    expect(launchReadinessNotice({
+      handshakeReady: true,
+      executionAvailable: true,
+      isolationReady: true,
+      isolatedSpawnFields: true,
+      sdkTypedSpawnReady: true,
+      provenIsolationProviders: ["claude-code"],
+      assignedProvider: { jobId: "job_a", agentId: "agt_a", agentVersionId: "agv_a", providerId: "claude-code", source: "live_assigned_agent_version" },
+      launchAllowedForAssigned: false,
+      reasonCode: "launch_not_authorized",
+      reason: "Waits for jobs to be done: AG-11. Put it in the launch queue: it starts by itself when they are done.",
+      waitable: true,
+    }, "claude-code")).toBe("Waits for jobs to be done: AG-11. Put it in the launch queue: it starts by itself when they are done.");
   });
 
   it("selects live job placement and assignee by opaque ids after a name/label mismatch", async () => {

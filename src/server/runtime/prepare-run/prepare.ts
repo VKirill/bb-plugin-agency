@@ -57,6 +57,8 @@ export type PrepareRunDeps = {
   server: VerifiedPrepareConfig;
   ruleFiles?: ProjectRulesFilePorts;
   jobInputs?: JobInputPort;
+  /** The launch's role guidance in its job (lead, executor or reviewer). */
+  roleInstructions?: (jobId: string) => string | null;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
 };
@@ -150,7 +152,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       const roles = selectCatalogRoles(listed.value, agentVersion.skillIds, deps.server.catalogRoles);
       if (!roles.ok) return roles;
 
-      const withoutSandbox = deps.store.rulesForLaunch?.(job.departmentId, agent.id).runWithoutSandbox === true;
+      const withoutSandbox = deps.store.rulesForLaunch?.(job.departmentId, agent.id, binding.hostId).runWithoutSandbox === true;
       if (withoutSandbox && !handshake.value.extensions?.permissionMode) {
         return fail("sandbox_mode_unsupported", "Эта версия BB не принимает режим прав при запуске: правило «Запуск без песочницы» не выполняется. Выключите правило или обновите BB.");
       }
@@ -227,6 +229,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         ...(pluginGrants.length ? { pluginGrants } : {}),
         placement: deps.store.placementForLaunch?.(job) ?? null,
         permissionMode: withoutSandbox ? "full" : null,
+        roleInstructions: deps.roleInstructions?.(job.id) ?? null,
       });
       if (!compiled.ok) return fail(compiled.error.code, compiled.error.message);
 

@@ -12,12 +12,12 @@ export type { IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
  * or the department charter, so it cannot tell its own work from misrouted work.
  */
 const WORKER_PROMPT_LAYERS = [
-  ["agency", "Правила Агентства"],
-  ["project", "Проект"],
-  ["department", "Отдел: процесс и зона ответственности"],
-  ["agent", "Ваша должность и инструкция"],
-  ["job", "Поручение"],
-  ["handoff", "Передача от предыдущей попытки"],
+  ["agency", "Agency rules"],
+  ["project", "Project"],
+  ["department", "Department: process and scope"],
+  ["agent", "Your position and job description"],
+  ["job", "Job"],
+  ["handoff", "Handoff from the previous attempt"],
 ] as const;
 
 /** The first line names the job: BB titles the hidden thread from the start of the prompt. */
@@ -31,7 +31,7 @@ export function composeWorkerPrompt(
   });
   return [
     ...(job ? [`${job.key}: ${job.title}`] : []),
-    "Вы сотрудник Агентства. Слои ниже дополняют друг друга: нижний слой не отменяет верхний.",
+    "You are an employee of the BB Agency. The layers below add to each other: a lower layer does not cancel a higher one.",
     ...sections,
   ].join("\n\n");
 }

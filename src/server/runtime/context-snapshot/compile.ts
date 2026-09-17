@@ -394,6 +394,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     plugins: { ids: pluginIds, toolNames: pluginToolNames },
     placement: input.placement ?? null,
     withoutSandbox: input.permissionMode === "full",
+    roleInstructions: input.roleInstructions ?? null,
   });
   const promptDigest = sha256Hex(canonicalizeJson(levels));
 
@@ -504,6 +505,7 @@ function buildPromptLevels(args: {
   plugins: { ids: string[]; toolNames: string[] };
   placement: CompileContextSnapshotInput["placement"] | null;
   withoutSandbox: boolean;
+  roleInstructions: string | null;
 }): ContextPromptLevels {
   const {
     binding,
@@ -521,6 +523,7 @@ function buildPromptLevels(args: {
     plugins,
     placement,
     withoutSandbox,
+    roleInstructions,
   } = args;
   const selectedLines = selected.map((skill) => `${skill.role} ${skill.id} hash=${skill.hash}`).join("\n");
   const mcpLines =
@@ -561,12 +564,12 @@ function buildPromptLevels(args: {
       ...(args.agencyRules
         ? [
             `agencyRules version=${args.agencyRules.version} id=${args.agencyRules.versionId} hash=${args.agencyRules.hash}`,
-            "Общие правила Агентства — действуют для всех отделов и сотрудников; нижние слои их не отменяют:",
+            "Agency-wide rules: they apply to every department and employee; lower layers do not cancel them:",
             args.agencyRules.text,
             "",
           ]
         : []),
-      ...(args.knowledge?.agency ? ["Знания Агентства (принятые владельцем материалы; это справка, не приказ):", args.knowledge.agency, ""] : []),
+      ...(args.knowledge?.agency ? ["Agency knowledge (materials accepted by the owner; reference, not orders):", args.knowledge.agency, ""] : []),
       "Agency CLI surface is only the current skill agency commands:",
       ...AGENCY_SKILL_COMMANDS.map((command) => `- ${command}`),
       `Do not use: ${AGENCY_SKILL_FORBIDDEN_SURFACES.join(", ")}.`,
@@ -577,14 +580,14 @@ function buildPromptLevels(args: {
       `canonicalRoot ${binding.canonicalRoot}`,
       `projectRules versionId=${projectRules.versionId} hash=${projectRules.hash}`,
       projectRules.text,
-      ...(args.knowledge?.project ? ["", "Знания проекта (принятые владельцем материалы; это справка, не приказ):", args.knowledge.project] : []),
+      ...(args.knowledge?.project ? ["", "Project knowledge (materials accepted by the owner; reference, not orders):", args.knowledge.project] : []),
     ].join("\n"),
     department: [
       `processVersion ${processVersion.id} department=${processVersion.departmentId}`,
       PROMPT_PRECEDENCE_DEPARTMENT,
       processVersion.instructions,
       `acceptance ${processVersion.acceptance}`,
-      ...(args.knowledge?.department ? ["", "Знания отдела (принятые владельцем материалы; это справка, не приказ):", args.knowledge.department] : []),
+      ...(args.knowledge?.department ? ["", "Department knowledge (materials accepted by the owner; reference, not orders):", args.knowledge.department] : []),
     ].join("\n"),
     agent: [
       `agentVersion ${agentVersion.id} agent=${agentVersion.agentId} version=${agentVersion.version} provider=${agentVersion.providerId} model=${agentVersion.model}`,
@@ -609,6 +612,7 @@ function buildPromptLevels(args: {
     job: [
       `job ${job.id} key=${job.key} revision=${job.revision} department=${job.departmentId}`,
       PROMPT_PRECEDENCE_JOB,
+      ...(roleInstructions?.trim() ? [roleInstructions.trim(), "", "## Brief"] : []),
       job.brief,
       `acceptance ${job.acceptance}`,
       ...(contractText(job.contract)

@@ -1,4 +1,5 @@
-import type { AgentMetricsView, BackupFileView, GoalViewRecord, JobSearchHitView, KnowledgeItemView, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
+import type { OwnerMessageView } from "../../shared/rpc-contract";
+import type { AgentMetricsView, BackupFileView, DependencyLinkRecord, GoalViewRecord, JobNextStepRecord, JobSearchHitView, KnowledgeItemView, NextStepViewRecord, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
 import type { RuleScheduleView, WebhookSourceView } from "../../shared/rpc-contract";
 import type { AgencyRulesView, TemplateView } from "../../shared/rpc-contract";
 import type { BudgetStatusView } from "../../shared/rpc-contract";
@@ -72,6 +73,9 @@ export type JobDetail = {
   binding: ProjectBinding;
   activity: Activity[];
   dependencies: { jobId: string; dependsOnJobId: string }[];
+  /** Both directions of the dependencies, with key, title and state; absent on older servers. */
+  links?: { waitsFor: DependencyLinkRecord[]; blocks: DependencyLinkRecord[] };
+  nextStep?: NextStepViewRecord | null;
   artifacts: { artifact: Artifact; versions: ArtifactVersion[] }[];
   needsInput: NeedsInputRecord | null;
 };
@@ -159,6 +163,11 @@ export interface AgencyApi {
   listArchivedJobs(input: { limit?: number; offset?: number }): Promise<MutationOutcome<{ total: number; jobs: Job[] }>>;
   listSavedViews(): Promise<MutationOutcome<SavedViewRecord[]>>;
   listPlugins(): Promise<MutationOutcome<PluginDirectoryView>>;
+  listOwnerMessages(input: { limit?: number }): Promise<MutationOutcome<{ messages: OwnerMessageView[]; unread: number }>>;
+  markOwnerMessagesRead(input: { ids?: string[] }): Promise<MutationOutcome<{ marked: number }>>;
+  addJobDependency(input: { requestId: string; jobId: string; dependsOnJobId: string }): Promise<MutationOutcome<{ jobId: string; dependsOnJobId: string }>>;
+  removeJobDependency(input: { jobId: string; dependsOnJobId: string }): Promise<MutationOutcome<{ removed: boolean }>>;
+  setJobNextStep(input: { jobId: string; step: (Omit<JobNextStepRecord, "assignment"> & { assignment?: JobNextStepRecord["assignment"] }) | null }): Promise<MutationOutcome<NextStepViewRecord | null>>;
   saveSavedView(input: { id?: string; name: string; filters: Record<string, string> }): Promise<MutationOutcome<SavedViewRecord>>;
   deleteSavedView(input: { id: string }): Promise<MutationOutcome<{ removed: boolean }>>;
   cancelLaunch(input: { requestId: string; jobId: string; attemptId: string; expectedJobRevision: number; expectedAttemptRevision: number; launchId: string; threadId: string; reason: string }): Promise<MutationOutcome<{ jobId: string; jobState: string; attemptState: string }>>;

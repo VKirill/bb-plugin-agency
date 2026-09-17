@@ -163,4 +163,12 @@ export const EN_SETTINGS: Record<string, string> = {
   "Эскалировать в вышестоящий отдел через": "Escalate to the parent department after",
   "Главная задача отдела ждёт решения дольше этого срока — она эскалируется в отдел, которому подчиняется этот: пометка на доске и комментарий в истории.": "When a main job of the department waits for a decision longer than this, it is escalated to the department this one reports to: a mark on the board and a comment in the history.",
   "Работает только у подчинённых отделов. 0 — не эскалировать.": "Applies only to departments that report to another. 0 turns escalation off.",
+  // work-rules.tsx: nightly recheck
+  "Перепроверять принятое за день": "Recheck what was accepted each day",
+  "Включено — раз в сутки Агентство собирает версии отдела, принятые после прошлой перепроверки, и ставит проверяющему задачу перепроверить их: по одной на папку проекта, до 20 версий за ночь.":
+    "On — once a day the Agency collects the department's versions accepted since the previous recheck and gives a reviewer a job to recheck them: one per project folder, up to 20 versions a night.",
+  "Приёмка остаётся в силе. Найденные дефекты попадают в отчёт перепроверки, решение за владельцем. Без проверяющих в отделе задачу получает руководитель.":
+    "The acceptance stays. Defects found go into the recheck report and the owner decides. A department without reviewers gives the job to its lead.",
+  "Час перепроверки": "Recheck hour",
+  "Час по часам машины BB, с которого запускается перепроверка этих суток. 3 — в три часа ночи.": "Hour on the BB machine's clock from which the day's recheck starts. 3 means 3 a.m.",
 };

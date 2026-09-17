@@ -89,13 +89,14 @@ describe("delegation instructions for ordinary sessions", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const seeded = seedAgency(db);
     const text = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate");
-    expect(text).toContain("## Агентство: куда направить работу");
-    expect(text).toContain("«Программисты» — Разрабатывает и проверяет код плагинов.");
-    expect(text).toContain(`Руководитель: Fable (${seeded.lead.id})`);
+    expect(text).toContain("## BB Agency: where the work goes");
+    expect(text).toContain('"Программисты": Разрабатывает и проверяет код плагинов.');
+    expect(text).toContain(`Lead: Fable (${seeded.lead.id})`);
     expect(text).toContain(`departmentId ${seeded.departmentId}`);
     expect(text).toContain(`"bindingId":"${seeded.bindingId}"`);
-    expect(text).toContain("key назначит сервер");
-    expect(text).toContain("не перепоручай");
+    expect(text).toContain("The server assigns the key");
+    expect(text).toContain("do not delegate it again");
+    expect(text).toContain("Language: write job titles, briefs, acceptance criteria");
     db.close();
   });
 
@@ -103,8 +104,8 @@ describe("delegation instructions for ordinary sessions", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     seedAgency(db);
     const suggest = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "suggest");
-    expect(suggest).toContain("Предложи поручить");
-    expect(suggest).toContain("после согласия владельца");
+    expect(suggest).toContain("Propose handing it to");
+    expect(suggest).toContain("After the owner agrees");
     expect(buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "off")).toBeNull();
     db.close();
   });
@@ -116,8 +117,8 @@ describe("delegation instructions for ordinary sessions", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     seedAgency(db);
     const note = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_other" }, "delegate");
-    expect(note).toContain("не подключён");
-    expect(note).toContain("Сам поручение не создавай");
+    expect(note).toContain("not connected");
+    expect(note).toContain("Do not create a job yourself");
     expect(readProjectRoutes(db, "proj_other")).toEqual({ workplaces: [], departments: [] });
     db.close();
   });
@@ -137,8 +138,8 @@ describe("delegation instructions for ordinary sessions", () => {
       totalDepartments: 80,
     }) as string;
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_LIMIT);
-    expect(text).toContain("…ещё");
-    expect(text.trimEnd().endsWith("по навыку `agency`.")).toBe(true);
+    expect(text).toContain("more: bb agency workspace --json");
+    expect(text.trimEnd()).toMatch(/Language: write job titles.*in Russian\.$/);
   });
 
   it("offers departments open to all projects without a link and hides disconnected projects", () => {
@@ -169,9 +170,9 @@ describe("delegation instructions for ordinary sessions", () => {
     expect(limited.ok).toBe(true);
 
     const text = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate", () => "Mac mini") as string;
-    expect(text).toContain("«Копирайтинг» — Принимает: Тексты лендингов.");
+    expect(text).toContain('"Копирайтинг": Принимает: Тексты лендингов.');
     expect(text).not.toContain("Закрытый отдел");
-    expect(text).toContain("на машине Mac mini в папке /work/plugins");
+    expect(text).toContain("runs on Mac mini in /work/plugins");
 
     const binding = store.getBinding(seeded.bindingId);
     const archived = store.archiveProjectBinding({ actor: { kind: "system" }, allowedBindingIds: [seeded.bindingId] }, {
@@ -180,7 +181,7 @@ describe("delegation instructions for ordinary sessions", () => {
       bindingId: seeded.bindingId,
     });
     expect(archived.ok).toBe(true);
-    expect(buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate")).toContain("не подключён");
+    expect(buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate")).toContain("not connected");
     db.close();
   });
 
@@ -224,13 +225,13 @@ describe("instructions inside Agency job threads", () => {
       assigneeType: "lead",
       members,
     });
-    expect(text).toContain("вы руководитель отдела «Программисты» по AG-2201");
+    expect(text).toContain('## Your role: lead of the "Программисты" department for AG-2201');
     expect(text).toContain("parentJobId=job_root0001");
-    expect(text).toContain("Исполнители — реализация и доработки:\n- Sonnet — Разработчик: agt_dev00001");
-    expect(text).toContain("Проверяющие — независимая проверка чужих версий:\n- Opus — Проверяющий кода: agt_qa000001");
+    expect(text).toContain("Executors (implementation and rework):\n- Sonnet — Разработчик: agt_dev00001");
+    expect(text).toContain("Reviewers (independent review of other people's versions):\n- Opus — Проверяющий кода: agt_qa000001");
     expect(text).not.toContain("agt_lead0001");
-    expect(text).toContain("Агентство само пришлёт сообщение");
-    expect(text).toContain("Поручение не по профилю отдела");
+    expect(text).toContain("the Agency messages this thread");
+    expect(text).toContain("A job outside the department's scope");
     expect(text).toContain("bb agency launch cancel");
   });
 
@@ -244,11 +245,11 @@ describe("instructions inside Agency job threads", () => {
       assigneeType: "executor",
       members,
     });
-    expect(text).toContain("вы исполнитель AG-2202");
-    expect(text).toContain("не перепоручайте");
+    expect(text).toContain("## Your role: executor of AG-2202");
+    expect(text).toContain("do not hand this work on");
     expect(text).toContain("report-needs-input");
-    expect(text).toContain("«Возврат: причина; кому подходит; чего не хватает»");
-    expect(text).toContain("transition` в blocked");
+    expect(text).toContain('"Возврат: reason; who fits; what is missing"');
+    expect(text).toContain("transition` to blocked");
   });
 
   it("gives a reviewer the checking protocol instead of the executor one", () => {
@@ -261,10 +262,10 @@ describe("instructions inside Agency job threads", () => {
       assigneeType: "reviewer",
       members,
     });
-    expect(text).toContain("вы проверяющий AG-2203");
-    expect(text).toContain("Проверяемый результат не правьте");
-    expect(text).toContain("проверкой вашей собственной работы");
-    expect(text).not.toContain("вы исполнитель");
+    expect(text).toContain("## Your role: reviewer of AG-2203");
+    expect(text).toContain("Do not edit the reviewed result");
+    expect(text).toContain("a review of your own work");
+    expect(text).not.toContain("executor of");
   });
 
   it("finds the accepted-work section in English charters too", () => {
@@ -285,5 +286,14 @@ describe("plugin registration", () => {
     } finally {
       await harness.lifecycle.dispose();
     }
+  });
+});
+
+describe("role in the launch prompt", () => {
+  it("does not give an Agency launch thread the chat routing text", async () => {
+    const { readJobRoleContext } = await import("../src/server/delegation/instructions");
+    const db = openMigratedDatabase(new Database(":memory:"));
+    expect(readJobRoleContext(db, "job_missing01")).toBeNull();
+    db.close();
   });
 });

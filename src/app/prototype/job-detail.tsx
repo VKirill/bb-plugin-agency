@@ -43,6 +43,8 @@ import { attemptsLabel, HOST_UNKNOWN, isolationLabel, jobHostLabel, JOB_ENVIRONM
 import { jobEditCommit, jobEditDraftFrom, type JobEditDraft } from "../data/job-edit-draft";
 import { shortAgentName } from "../data/agent-name";
 import { JobTreePanel } from "./job-tree";
+import { JobFlowDialog, JobFlowSection, type JobFlowLinks } from "./job-flow";
+import type { NextStepViewRecord } from "../../shared/rpc-contract";
 import { attemptStatusEqual, type AttemptStatus } from "../data/job-team";
 import { childProgressLabel, jobParentBreadcrumb, MAIN_JOB_LABEL, type JobDependencyEdge } from "../data/job-tree";
 import { compareJobKeys, displayJobTitle, isClosedJob } from "../data/job-board";
@@ -62,6 +64,7 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
  const [detailsOpen,setDetailsOpen]=useState(false);
  const [treeOpen,setTreeOpen]=useState(false);
  const [dependencies,setDependencies]=useState<JobDependencyEdge[]>([]);
+ const [flowLinks,setFlowLinks]=useState<JobFlowLinks>({waitsFor:[],blocks:[]});const [nextStep,setNextStep]=useState<NextStepViewRecord|null>(null);const [flowOpen,setFlowOpen]=useState(false);
  const [attemptStatus,setAttemptStatus]=useState<AttemptStatus>({kind:"unknown"});
  const [launchReady,setLaunchReady]=useState(false);
  const onAttemptStatus=useCallback((next:AttemptStatus)=>{
@@ -169,6 +172,8 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
   setRemoteActivity(mapActivity(envelope.value.activity??[],agents));
   setAcceptedArtifactId([...(envelope.value.activity??[])].reverse().find((row)=>row.kind==="artifact_accepted")?.references.find((ref)=>ref.type==="artifact")?.id??null);
   setDependencies(envelope.value.dependencies??[]);
+  setFlowLinks(envelope.value.links??{waitsFor:[],blocks:[]});
+  setNextStep(envelope.value.nextStep??null);
   const applied=nextNeedsInputFromDetail(needsInputRef.current,envelope.value.needsInput??null);
   needsInputRef.current=applied.record;
   setNeedsInput(applied.record);
@@ -386,6 +391,7 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
    {/* A main job is read through its subtasks first; a subtask shows its siblings; the brief follows. */}
    {children.length>0&&<SubtaskSection title="Подзадачи" subtasks={children} openJob={openJob} onAdd={jobClosed?undefined:()=>setChildForm(true)}/>}
    {parentJob&&siblings.length>0&&<SubtaskSection title="Подзадачи главной задачи" parent={parentJob} subtasks={siblings} currentId={job.id} openJob={openJob}/>}
+   {!demoMode&&<JobFlowSection job={job} jobs={jobs} links={flowLinks} nextStep={nextStep} departments={departments} openJob={openJob} onEdit={job.recordId?()=>setFlowOpen(true):undefined}/>}
    <section className="agency-task-section" aria-label={tr("Описание и критерии")}><h2 className="mb-3 text-sm font-medium">{tr("Описание и критерии")}</h2>{(()=>{const names={agents,departments,projects,jobs};const body=<div className="agency-prose text-sm text-foreground"><Markdown content={humanizeIds(brief.brief,names)}/>{brief.acceptance&&<><h3 className="mb-1.5 mt-4 text-[13px] font-semibold">{tr("Критерии приёмки")}</h3><Markdown content={humanizeIds(brief.acceptance,names)}/></>}</div>;return job.state==="backlog"?body:<CollapsibleText lines={14}>{body}</CollapsibleText>;})()}{job.contract&&<JobContractView contract={job.contract}/>}</section>
    {children.length===0&&!job.parentId&&!jobClosed&&<SubtaskSection title="Подзадачи" subtasks={[]} openJob={openJob} onAdd={()=>setChildForm(true)}/>}
    <section className="agency-task-section" aria-label={tr("История задачи")}><div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-sm font-medium">{tr("История и обсуждение")}</h2><div className="w-40"><Choice label="Фильтр истории" value={filter} onChange={setFilter} options={[{value:"all",label:"Всё"},{value:"comment",label:"Комментарии"},{value:"event",label:"События"}]}/></div></div>
@@ -461,10 +467,12 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
       :<Button size="sm" variant="outline" onClick={openPlacement}>{tr("Изменить")}</Button>}
     </div>
    </Field>
+   {!demoMode&&job.recordId&&<Field label="Порядок работы" hint="Сохраняется сразу, в отдельном окне."><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm">{flowLinks.waitsFor.length||nextStep?tr("ждёт задач: {count} · следующий шаг: {step}",{count:flowLinks.waitsFor.length,step:nextStep?nextStep.step.title:tr("нет")}):tr("ни от чего не зависит, следующего шага нет")}</span><Button size="sm" variant="outline" onClick={()=>setFlowOpen(true)}>{tr("Изменить")}</Button></div></Field>}
    <div className="agency-edit-team">
     <JobTeamBlock job={job} agents={agents} projects={projects} departments={departments} attempt={attemptStatus} demoMode={demoMode} openAgent={openAgent} onPersistRoles={demoMode?undefined:(next)=>update({...job,...next})}/>
    </div>
   </JobEditDialog>
+  {flowOpen&&job.recordId&&<JobFlowDialog open onOpenChange={setFlowOpen} job={job} jobs={jobs} links={flowLinks} nextStep={nextStep} departments={departmentsForBinding(departments,placementLinks,liveBinding)} api={api} notice={notice} onChanged={()=>{void refreshLive();}}/>}
   <Dialog open={placing} onOpenChange={setPlacing}><DialogContent><DialogHeader><DialogTitle>{tr("Проект и отдел")}</DialogTitle><DialogDescription>{tr("Отдел должен быть доступен выбранному проекту: общий отдел доступен везде, ограниченный — только в своих проектах.")}</DialogDescription></DialogHeader><Choice label="Проект задачи" value={draftBinding} onChange={changeDraftBinding} options={projects.filter(item=>!item.archivedAt||item.id===liveBinding).map(item=>({value:item.id,label:item.name}))}/>{draftDepartments.length?<Choice label="Отдел задачи" value={draftDepartment} onChange={setDraftDepartment} options={draftDepartments.map(item=>({value:item.id,label:item.name}))}/>:<p className="text-xs text-muted-foreground">{draftBinding?tr(JOB_CREATE_NO_DEPARTMENTS):tr("Сначала выберите проект.")}</p>}<DialogFooter><Button variant="outline" onClick={()=>setPlacing(false)}>{tr("Отмена")}</Button><Button disabled={!canConfirmPlacement(draftBinding,draftDepartment,placementLinks,departments)} onClick={confirmPlacement}>{tr("Сохранить пару")}</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={childForm} onOpenChange={open=>{if(!childPending)setChildForm(open);}}><DialogContent><DialogHeader><DialogTitle>{tr("Новая подзадача")}</DialogTitle><DialogDescription>{tr("Подзадача {id}. Работу другого отдела ставят подзадачей в тот отдел. Ключ назначит сервер.",{id:job.id})}</DialogDescription></DialogHeader>
    <div className="max-h-[65dvh] space-y-3 overflow-y-auto pr-1">

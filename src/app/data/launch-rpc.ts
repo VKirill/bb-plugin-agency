@@ -366,6 +366,8 @@ export function launchReadinessNotice(
 ): string | null {
   if (jobLaunchAllowedFromReadiness(readiness) && readinessAllowsProvider(readiness, providerId)) return null;
   if (readiness?.reasonCode === "ok") return null;
+  // Waiting for dependencies, a slot or budget: the Agency wrote the reason for people, in its own language.
+  if (readiness?.waitable && readiness.reason?.trim()) return readiness.reason;
   if (!providerId) {
     return productLaunchCopy({
       reasonCode: readiness?.reasonCode,

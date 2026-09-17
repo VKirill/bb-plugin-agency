@@ -146,8 +146,12 @@ async function openPinnedVersion(input: {
   return ok({ ...pinned, accepted, bytes: opened.value.bytes });
 }
 
-/** Host file RPC carries at most 8 MiB of base64: about 6 MiB of bytes. */
-const INPUT_COPY_MAX_BYTES = 6 * 1024 * 1024;
+/**
+ * Host file RPC carries at most 8 MiB of base64: 6 MiB of bytes. Publishing has the
+ * same cap (ARTIFACT_UPLOAD_MAX_BASE64), so every published version fits one copy and
+ * no chunked transfer is needed; this guard only protects against a future larger cap.
+ */
+export const INPUT_COPY_MAX_BYTES = 6 * 1024 * 1024;
 
 /**
  * An input from another folder of the same job tree is copied next to the target job, so the

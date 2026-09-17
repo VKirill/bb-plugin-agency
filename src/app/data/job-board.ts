@@ -124,3 +124,11 @@ export function orderByFamily(jobs: readonly Job[], all: readonly Job[] = jobs):
     return compareJobKeys(rootA, rootB) || depth(a) - depth(b) || compareJobKeys(a.id, b.id);
   });
 }
+
+export type KanbanWipColumn = "queued" | "running" | "attention" | "review";
+
+/** A column over its soft WIP limit: the limit, or null when there is none or it holds. */
+export function wipOverLimit(policy: BoardPolicy, column: string, count: number): number | null {
+  const limit = policy.wipLimits?.[column as KanbanWipColumn];
+  return limit && count > limit ? limit : null;
+}

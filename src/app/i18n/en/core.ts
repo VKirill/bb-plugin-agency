@@ -312,4 +312,17 @@ export const EN_CORE: Record<string, string> = {
   "Например: Разработка": "For example: Development",
   "Ничего не найдено. Измените фильтры.": "Nothing found. Change the filters.",
   "Как это работает: {title}": "How it works: {title}",
+  // owner-messages.tsx: messages to the owner
+  "Сообщения": "Messages",
+  "скрипт или команда владельца": "owner's script or command",
+  "сотрудник Агентства": "Agency employee",
+  "сторож": "watchdog",
+  "сводка": "summary",
+  "Читаем сообщения…": "Reading messages…",
+  "отправлено в Telegram": "sent to Telegram",
+  "Telegram: не отправлено": "Telegram: not sent",
+  "Открыть {key}": "Open {key}",
+  "Сообщений нет": "No messages",
+  "Сюда пишут скрипты и сторожа через bb agency notify-owner и bb agency digest. Готовые шаблоны: bb agency scripts.":
+    "Scripts and watchdogs write here with bb agency notify-owner and bb agency digest. Ready templates: bb agency scripts.",
 };

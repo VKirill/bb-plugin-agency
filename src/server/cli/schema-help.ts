@@ -12,11 +12,14 @@ bb agency policy create --input-json '<payload>' [--json]
 bb agency agent create|get|save ...
 bb agency department create|get|save|membership ...
 bb agency project bind|get|link-department ...
-bb agency job create|get|update|assign|transition|attach-input|report-needs-input|answer-needs-input|attempts|comment ...
+bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|attempts|comment ...
 bb agency artifact create|publish|open|accept|versions ...
 bb agency launch prepare|get|reconcile|cancel|interpret-completion|readiness|attempts ...
 bb agency status [--json]
 bb agency notify <project-id> <event-id> <topic> <reference> [--json]
+bb agency notify-owner --input-json '{"text":"…","jobId":"AG-12"}'
+bb agency digest --input-json '{"kind":"summary|watchdog","notify":true}'
+bb agency scripts | owner messages|read
 bb agency event definition-save|definition-list|source-save|source-list|ingest --input-json '...' [--json]
 bb agency rule save|list --input-json '...' [--json]
 bb agency dispatch tick --input-json '...' [--json]
@@ -42,13 +45,17 @@ export const CLI_COMMAND_SPECS = [
   { name: "agent", summary: "Сотрудник", usage: "bb agency agent create|get|save" },
   { name: "department", summary: "Отдел и membership", usage: "bb agency department create|get|save|membership" },
   { name: "project", summary: "Привязка существующего каталога", usage: "bb agency project bind|get|link-department" },
-  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|report-needs-input|answer-needs-input|attempts|comment|usage|return" },
+  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|attempts|comment|usage|return" },
   { name: "rules", summary: "Правила работы: лимиты, пороги, модели по умолчанию", usage: "bb agency rules get|save --input-json '<payload>'" },
   { name: "usage", summary: "Токены и оценка стоимости; rootJobId — задача с подзадачами", usage: "bb agency usage --input-json '{\"rootJobId\":\"<jobId>\"}'" },
   { name: "artifact", summary: "Версии файлов", usage: "bb agency artifact create|publish|open|accept|versions" },
   { name: "launch", summary: "prepare/get/reconcile/cancel; готовность — launch readiness этого instance", usage: "bb agency launch prepare|get|reconcile|cancel|readiness" },
   { name: "status", summary: "runtime + requires_readiness; не grant, смотри launch readiness с jobId", usage: "bb agency status [--json]" },
   { name: "notify", summary: "Сохранить уведомление без запуска", usage: "bb agency notify <project-id> <event-id> <topic> <reference> [--json]" },
+  { name: "notify-owner", summary: "Сообщение владельцу во «Входящие» и Telegram", usage: "bb agency notify-owner --input-json '{\"text\":\"…\",\"level\":\"warning\",\"jobId\":\"AG-12\",\"dedupeKey\":\"…\"}'" },
+  { name: "digest", summary: "Сводка или сторож; notify:true отправляет владельцу", usage: "bb agency digest --input-json '{\"kind\":\"summary\",\"sinceHours\":24,\"notify\":true}'" },
+  { name: "scripts", summary: "Шаблоны скриптов для cron и launchd", usage: "bb agency scripts" },
+  { name: "owner", summary: "Сообщения владельцу", usage: "bb agency owner messages|read" },
   { name: "event", summary: "Definition/source/typed ingest; не replay notify", usage: "bb agency event definition-save|definition-list|source-save|source-list|ingest" },
   { name: "rule", summary: "Версия правила", usage: "bb agency rule save|list --input-json '...' [--json]" },
   { name: "dispatch", summary: "Tick inbox→intent; live off", usage: "bb agency dispatch tick --input-json '<payload>'" },

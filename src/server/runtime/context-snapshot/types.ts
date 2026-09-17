@@ -78,6 +78,8 @@ export type CompileContextSnapshotInput = {
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
   /** Accepted knowledge by scope, already cut to the launch limit. */
   knowledge?: { agency: string; project: string; department: string; ids: { id: string; hash: string }[] } | null;
+  /** The launch's role in its job (lead, executor, reviewer): English guidance for the job layer. */
+  roleInstructions?: string | null;
   /** "full" when the work rule «Запуск без песочницы» applies to this launch. */
   permissionMode?: "full" | null;
   /** Other folders of the project, workplaces and the main job's folder; absent when there are none. */

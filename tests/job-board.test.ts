@@ -82,3 +82,17 @@ describe("board order and titles", () => {
     expect(displayJobTitle(job("AG-1", "done", { title: "Проверить AG-1" }))).toBe("Проверить AG-1");
   });
 });
+
+describe("soft WIP limits", () => {
+  it("flags a kanban column only over its limit, never blocks", async () => {
+    const { wipOverLimit } = await import("../src/app/data/job-board");
+    const { boardPolicySchema, DEFAULT_BOARD_POLICY } = await import("../src/shared/contracts/job");
+    const policy = boardPolicySchema.parse({ ...DEFAULT_BOARD_POLICY, wipLimits: { running: 3, review: 0 } });
+    expect(wipOverLimit(policy, "running", 3)).toBeNull();
+    expect(wipOverLimit(policy, "running", 4)).toBe(3);
+    expect(wipOverLimit(policy, "review", 40)).toBeNull();
+    expect(wipOverLimit(policy, "done", 40)).toBeNull();
+    expect(wipOverLimit(DEFAULT_BOARD_POLICY, "running", 40)).toBeNull();
+    expect(boardPolicySchema.safeParse({ ...DEFAULT_BOARD_POLICY, wipLimits: { done: 2 } }).success).toBe(false);
+  });
+});
