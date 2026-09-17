@@ -168,7 +168,7 @@ function SourceForms({
 }) {
   const [project, setProject] = useState(() => resolveCatalogBindingId(projects, projectId));
   const [topic, setTopic] = useState("research.delivered");
-  const [label, setLabel] = useState("Исследование доставлено");
+  const [label, setLabel] = useState(() => tr("Исследование доставлено"));
   const [namespace, setNamespace] = useState<"bb" | "agency" | "integration">("agency");
   const [sourceKind, setSourceKind] = useState<"notify" | "webhook" | "cron" | "bb_lifecycle">("notify");
   const [sourceEnabled, setSourceEnabled] = useState(true);
@@ -345,9 +345,9 @@ function RuleForms({
   const [mode, setMode] = useState<"disabled" | "observe" | "approve" | "auto">("observe");
   const [actionKind, setActionKind] = useState<"observe" | "prepare_job">("observe");
   const [departmentId, setDepartmentId] = useState("");
-  const [title, setTitle] = useState("Разобрать поставку");
-  const [brief, setBrief] = useState("Проверьте поставленный материал.");
-  const [acceptance, setAcceptance] = useState("Есть вывод и ссылка на источник.");
+  const [title, setTitle] = useState(() => tr("Разобрать поставку"));
+  const [brief, setBrief] = useState(() => tr("Проверьте поставленный материал."));
+  const [acceptance, setAcceptance] = useState(() => tr("Есть вывод и ссылка на источник."));
   const [expression, setExpression] = useState("0 9 * * 1");
   const [timezone, setTimezone] = useState(localTimezone);
   const [misfire, setMisfire] = useState<"skip" | "last" | "catch_up">("skip");

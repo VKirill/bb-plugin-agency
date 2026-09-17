@@ -153,4 +153,18 @@ export const EN_INSIGHTS: Record<string, string> = {
   "Принятые материалы приходят в каждый запуск своей области: всего Агентства, отдела или проекта.":
     "Accepted materials reach every launch in their scope: the whole Agency, a department or a project.",
   "Как материал доходит до запуска": "How material reaches a launch",
+
+  // Labels translated inside components and helpers
+  "Показатели": "Metrics",
+  "Сохранить лимиты": "Save limits",
+  "Сохранить правила": "Save rules",
+  "отдела": "the department",
+  "сотрудника": "the employee",
+  "Выберите": "Select",
+
+  // dispatcher-automations.tsx: starting values of a new rule form
+  "Исследование доставлено": "Research delivered",
+  "Разобрать поставку": "Review the delivery",
+  "Проверьте поставленный материал.": "Check the delivered material.",
+  "Есть вывод и ссылка на источник.": "There is a conclusion and a link to the source.",
 };
