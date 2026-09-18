@@ -321,6 +321,8 @@ export const EN_SETTINGS: Record<string, string> = {
     "An answer below the confidence threshold is not applied, and silence or an error means “don't know”: the Agency keeps working by its own rules.",
   "Спрашивать оценщика":
     "Ask the decision model",
+  "Модель решений, например typesafe/jev-1.13.": "A decisions model, e.g. typesafe/jev-1.13.",
+  "Любая обычная модель, например openai/gpt-5-nano.": "Any ordinary model, e.g. openai/gpt-5-nano.",
   "Куда обращаться":
     "Where to call",
   "Адрес":

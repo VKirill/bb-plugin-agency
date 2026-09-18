@@ -7,10 +7,15 @@
  * решения есть порог уверенности, ниже которого ответ не применяется, а уходит человеку.
  */
 
-/** Вопрос, на который оценщик отвечает типом, а не текстом. */
+/**
+ * Вопрос, на который оценщик отвечает типом, а не текстом.
+ *
+ * `descriptions` и `ladder` нужны модели решений: у неё вариант выбора описывается словами, а
+ * шкала — ступенями. Обычной модели они тоже не мешают — попадают в текст вопроса.
+ */
 export type DecisionQuestion =
-  | { id: string; kind: "choice"; prompt: string; choices: readonly string[] }
-  | { id: string; kind: "score"; prompt: string; min: number; max: number }
+  | { id: string; kind: "choice"; prompt: string; choices: readonly string[]; descriptions?: Readonly<Record<string, string>> }
+  | { id: string; kind: "score"; prompt: string; min: number; max: number; ladder?: readonly string[] }
   | { id: string; kind: "bool"; prompt: string };
 
 export type DecisionAnswer = {
@@ -27,8 +32,12 @@ export type DecisionRequest = {
   questions: readonly DecisionQuestion[];
 };
 
-/** Куда ходим за решением. `typesafe` — родной API System One, он не в формате чата. */
-export const DECISION_ENDPOINT_KINDS = ["openrouter", "typesafe", "custom"] as const;
+/**
+ * Куда ходим за решением. Модель решений живёт не на чат-эндпоинте: у OpenRouter это
+ * `/api/alpha/decisions`, у TypeSafe — `/v1/systemone`, и тело у них одинаковое. Обычная модель
+ * отвечает через чат с JSON-схемой.
+ */
+export const DECISION_ENDPOINT_KINDS = ["openrouter", "openrouter-decisions", "typesafe", "custom"] as const;
 export type DecisionEndpointKind = (typeof DECISION_ENDPOINT_KINDS)[number];
 
 /** Откуда берётся ключ. Сам ключ Агентство у себя не хранит — только имя. */
@@ -52,7 +61,7 @@ export type DecisionSettings = {
 
 export const DEFAULT_DECISION_SETTINGS: DecisionSettings = {
   enabled: false,
-  endpointKind: "openrouter",
+  endpointKind: "openrouter-decisions",
   baseUrl: "",
   // Jev отвечает решениями и ничего не пишет словами: это ровно наш случай.
   model: "typesafe/jev-1.13",
@@ -65,9 +74,13 @@ export const DEFAULT_DECISION_SETTINGS: DecisionSettings = {
 
 export const DECISION_BASE_URLS: Record<DecisionEndpointKind, string> = {
   openrouter: "https://openrouter.ai/api/v1",
+  "openrouter-decisions": "https://openrouter.ai/api/alpha",
   typesafe: "https://api.typesafe.ai/v1",
   custom: "",
 };
+
+/** Подключения, где вопросы уходят картой и возвращаются ответами с вероятностями. */
+export const DECISION_NATIVE_KINDS: readonly DecisionEndpointKind[] = ["openrouter-decisions", "typesafe"];
 
 /**
  * Точки, где Агентство спрашивает оценщика. Каждая включается отдельно: владелец видит, что

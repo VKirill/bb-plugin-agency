@@ -156,13 +156,21 @@ export function DecisionsPanel({ notice }: { notice: (text: string) => void }) {
                 value={draft.endpointKind}
                 onChange={(value) => setDraft({ ...draft, endpointKind: value as Draft["endpointKind"] })}
                 options={[
-                  { value: "openrouter", label: "OpenRouter" },
+                  { value: "openrouter-decisions", label: "OpenRouter — модель решений" },
+                  { value: "openrouter", label: "OpenRouter — обычная модель" },
                   { value: "typesafe", label: "TypeSafe System One" },
                   { value: "custom", label: "Свой адрес" },
                 ]}
               />
             </Field>
-            <TextField label="Модель" value={draft.model} onChange={(model) => setDraft({ ...draft, model })} placeholder="typesafe/jev-1.13" maxLength={120} />
+            <TextField
+              label="Модель"
+              value={draft.model}
+              onChange={(model) => setDraft({ ...draft, model })}
+              placeholder="typesafe/jev-1.13"
+              maxLength={120}
+              hint={draft.endpointKind === "openrouter-decisions" ? "Модель решений, например typesafe/jev-1.13." : draft.endpointKind === "openrouter" ? "Любая обычная модель, например openai/gpt-5-nano." : undefined}
+            />
           </div>
 
           {draft.endpointKind === "custom" && (

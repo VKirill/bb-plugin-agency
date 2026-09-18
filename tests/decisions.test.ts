@@ -12,6 +12,8 @@ import { seed } from "./role-types.test";
 
 const NOW = "2026-09-20T10:00:00.000Z";
 const ON: DecisionSettings = { ...DEFAULT_DECISION_SETTINGS, enabled: true, revision: 1 };
+/** Обычная модель через чат: у неё другой эндпоинт и другая форма ответа. */
+const CHAT: DecisionSettings = { ...ON, endpointKind: "openrouter" };
 
 /** Ответ модели в чат-форме: content с JSON по нашей схеме. */
 function chatReply(answers: Record<string, { value: unknown; confidence: number }>) {
@@ -58,7 +60,7 @@ describe("asking the decision model", () => {
   it("sends the chat shape and returns typed answers with their confidence", async () => {
     const fetchMock = vi.fn(async () => chatReply({ keep: { value: true, confidence: 0.91 }, kind: { value: "lesson", confidence: 0.8 } }));
     const outcome = await askDecisions(
-      ON,
+      CHAT,
       {
         state: "Запись отдела.",
         questions: [
@@ -81,24 +83,53 @@ describe("asking the decision model", () => {
     expect(body.response_format.json_schema.schema.properties.kind.properties.value.enum).toEqual(["lesson", "fact"]);
   });
 
-  it("sends the native shape to System One, where questions are not a chat", async () => {
+  it("sends the decisions shape where a model of decisions lives, not the chat endpoint", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ answers: [{ id: "keep", value: false, confidence: 0.99 }] }),
+      json: async () => ({
+        answers: {
+          keep: { type: "noul", noul: 0.23 },
+          kind: { type: "choice", choice: "lesson", probabilities: { lesson: 0.9, fact: 0.1 }, confidence: 0.9 },
+          importance: { type: "score", score: 0.5, confidence: 0.4 },
+        },
+      }),
     }) as unknown as Response);
     const outcome = await askDecisions(
-      { ...ON, endpointKind: "typesafe" },
-      { state: "Запись.", questions: [{ id: "keep", kind: "bool", prompt: "Хранить?" }] },
+      { ...ON, endpointKind: "openrouter-decisions" },
+      {
+        state: "Запись.",
+        questions: [
+          { id: "keep", kind: "bool", prompt: "Хранить?" },
+          { id: "kind", kind: "choice", prompt: "Вид?", choices: ["lesson", "fact"], descriptions: { lesson: "вывод из задачи" } },
+          { id: "importance", kind: "score", prompt: "Насколько важно?", min: 0, max: 100 },
+        ],
+      },
       { fetch: fetchMock as unknown as typeof fetch, key: "test-key" },
     );
-    expect(outcome.ok && outcome.answers[0]).toEqual({ id: "keep", value: false, confidence: 0.99 });
+    // Вероятность «да» 0.23 читается как «нет» с уверенностью 0.77: отдельного поля уверенности у noul нет.
+    expect(outcome.ok && outcome.answers).toEqual([
+      { id: "keep", value: false, confidence: 0.77 },
+      { id: "kind", value: "lesson", confidence: 0.9 },
+      // Шкала приходит долей 0–1 и разворачивается в наши границы.
+      { id: "importance", value: 50, confidence: 0.4 },
+    ]);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(url).toBe("https://openrouter.ai/api/alpha/decisions");
     const body = JSON.parse(String(init.body));
     expect(body.state).toBe("Запись.");
-    expect(body.questions).toEqual([{ id: "keep", type: "bool", prompt: "Хранить?" }]);
     expect(body.messages).toBeUndefined();
+    expect(body.questions.keep).toEqual({ type: "noul", instructions: "Хранить?" });
+    expect(body.questions.kind).toEqual({ type: "choice", instructions: "Вид?", criteria: { lesson: "вывод из задачи", fact: "fact" } });
+    expect(body.questions.importance.criteria).toHaveLength(3);
+  });
+
+  it("names what a status code means instead of leaving a bare number", async () => {
+    const question = { state: "x", questions: [{ id: "keep", kind: "bool" as const, prompt: "Хранить?" }] };
+    const wrongKey = await askDecisions(ON, question, { key: "k", fetch: (async () => ({ ok: false, status: 401, json: async () => ({}) })) as unknown as typeof fetch });
+    expect(wrongKey.ok === false && wrongKey.detail).toContain("ключ не подходит");
+    const wrongEndpoint = await askDecisions(ON, question, { key: "k", fetch: (async () => ({ ok: false, status: 400, json: async () => ({}) })) as unknown as typeof fetch });
+    expect(wrongEndpoint.ok === false && wrongEndpoint.detail).toContain("не то подключение");
   });
 
   it("treats a refusal, a broken answer and being switched off the same way: as «don't know»", async () => {
@@ -125,7 +156,7 @@ describe("the memory gatekeeper", () => {
   const draft = { title: "Урок из AG-12", summary: "Возвращали за тесты.", body: "Тело урока." };
 
   it("stops a record with a secret and names the reason", async () => {
-    const verdict = await askMemoryGate(ON, draft, [], {
+    const verdict = await askMemoryGate(CHAT, draft, [], {
       key: "k",
       fetch: (async () =>
         chatReply({
@@ -141,7 +172,7 @@ describe("the memory gatekeeper", () => {
   });
 
   it("ignores an answer it is not sure about", async () => {
-    const verdict = await askMemoryGate(ON, draft, [], {
+    const verdict = await askMemoryGate(CHAT, draft, [], {
       key: "k",
       fetch: (async () =>
         chatReply({
@@ -160,7 +191,7 @@ describe("the memory gatekeeper", () => {
 
   it("stays out of the way when the owner did not switch its point on", async () => {
     const fetchMock = vi.fn();
-    expect(await askMemoryGate({ ...ON, points: [] }, draft, [], { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
+    expect(await askMemoryGate({ ...CHAT, points: [] }, draft, [], { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -198,7 +229,7 @@ describe("the launch briefing", () => {
   const job = { key: "AG-31", title: "Статья про кокон", brief: "Написать статью по нашему методу.", acceptance: "Статья прошла вычитку." };
   const lesson = (id: string, title: string) =>
     ({ id, title, summary: `${title}.`, body: "Тело.", kind: "lesson", importance: 50, pinned: false, writeReason: "", readCount: 0, lastReadAt: null, source: "Тест", scopeKind: "department", scopeId: "dep_1", status: "accepted", proposedBy: null, revision: 1, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }) as never;
-  const ready = { ...ON, points: [BRIEFING_POINT] };
+  const ready = { ...CHAT, points: [BRIEFING_POINT] };
 
   it("names the skills and records the model picked, and leaves the rest out", async () => {
     const briefing = await askBriefing(
@@ -263,7 +294,7 @@ describe("the launch briefing", () => {
 
   it("does not ask at all when the point is off or there is nothing to pick from", async () => {
     const fetchMock = vi.fn();
-    expect(await askBriefing({ ...ON, points: [] }, { job, skills: [{ id: "s", name: "ru-text" }], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
+    expect(await askBriefing({ ...CHAT, points: [] }, { job, skills: [{ id: "s", name: "ru-text" }], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
     expect(await askBriefing(ready, { job, skills: [], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });

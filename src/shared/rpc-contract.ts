@@ -314,7 +314,7 @@ export type AgentModelsView = z.infer<typeof agentModelsViewSchema>;
 export const decisionSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    endpointKind: z.enum(["openrouter", "typesafe", "custom"]),
+    endpointKind: z.enum(["openrouter", "openrouter-decisions", "typesafe", "custom"]),
     baseUrl: z.string(),
     model: z.string(),
     keySource: z.enum(["env-catalog", "machine-env"]),
@@ -340,7 +340,7 @@ export const saveDecisionSettingsInputSchema = z
   .object({
     expectedRevision: z.number().int().min(0),
     enabled: z.boolean(),
-    endpointKind: z.enum(["openrouter", "typesafe", "custom"]),
+    endpointKind: z.enum(["openrouter", "openrouter-decisions", "typesafe", "custom"]),
     baseUrl: z.string().max(300).optional(),
     model: z.string().max(120),
     keySource: z.enum(["env-catalog", "machine-env"]),
