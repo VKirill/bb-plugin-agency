@@ -10,7 +10,7 @@ job description, a role, a department, a permission policy and a work history. A
 job has a life of its own: it is assigned, launched, comes back with a question,
 publishes a file version and goes through review.
 
-> **Status:** `0.1.0-alpha.15`, a working alpha. Durable data, managed launches,
+> **Status:** `0.1.0-alpha.16`, a working alpha. Durable data, managed launches,
 > work rules, limits and budgets, the launch queue, schedules and webhooks,
 > knowledge, goals and backups work. An employee runs on any CLI connected in BB:
 > Claude Code, Codex, Cursor, OpenCode and Antigravity are verified end to end;
@@ -113,6 +113,56 @@ department, the employee and the job. A job's text never widens the allowlist. A
 unknown capability blocks the launch. Secret values are stored neither in the
 database, nor in Git, nor in notifications — only reference names.
 
+### Memory
+
+Four levels, each leaning on the one below it. A launch gets the summary and the
+index lines; the bodies behind them are read on demand, and the raw exchange stays
+in the database.
+
+| Level | What it is | Where it lives | What reaches a launch |
+| --- | --- | --- | --- |
+| Work | briefs, comments, questions, published versions, attempts | `agency_job`, `agency_activity`, `agency_artifact_version` | only this job's own text and its pinned inputs |
+| Records | knowledge items: fact, decision, procedure, preference, reference, lesson — scoped to the Agency, a department or a project | `agency_knowledge` | one index line per record: kind, title, summary, id |
+| Shape | work profiles of a project — how this kind of result is made here: voice, style, approved samples | `agency_work_profile` | the index of profiles; the full text of the one the job follows |
+| Passport | a five-section summary of the project: what it is, who uses it, settled decisions, what is not done here, where it heads | `agency_project_passport` | whole, header only, or one line with a command — by the employee's role |
+
+**Where records come from.** After a main job is accepted the Agency writes a lesson
+from its facts: how many rework rounds, what the returns were about, how long it took.
+With the "the department learns by itself" rule that lesson is accepted at once and
+the owner can edit or drop it; otherwise it waits as a proposal. An employee can
+propose a record from their own thread, and a remark repeated in three jobs of a
+department becomes a proposal too. The moment is always after acceptance: before
+that it is a guess.
+
+**How the passport is built.** Not by hand and not by the lead: a cheap background
+model sums up what the project already has — its knowledge, work profiles, goals,
+the briefs of accepted jobs and the project rules — into at most 2 000 characters.
+It rebuilds in batches, after a set number of accepted jobs, and an edition applies
+at once; the previous one stays in history and comes back with one button, and an owner's edit
+or restore holds twice as long as an ordinary edition. Before a
+replacement the decision model looks at it, when the owner has that decision point on:
+a secret or a state-of-the-day cancels the replacement and the owner gets a message.
+
+**How it reaches the work.** The prompt of a launch is layered: agency rules →
+project (rules, passport, profile index, project knowledge) → department (charter
+and its knowledge) → employee → job. Records arrive as index lines, up to 3 500
+characters per scope; only pinned and important ones (80+) arrive in full, up to
+8 000 per layer. The body of any record is read with `bb agency knowledge get`, and
+every such read is counted — the memory budget evicts what nobody ever opened before
+it evicts what is merely old. A department keeps 40 accepted records by default, and
+an auto-written lesson lives 90 days unless it is pinned. If the decision model is
+on, it picks the records that fit the job and the rest are announced by a line with
+the command.
+
+**What is not memory.** Project rules (`.bb/AGENTS.md`) live on the machine and
+arrive as their own layer. Secrets live in Env Catalog: neither the database, nor a
+backup, nor an export holds a value, only the name of a variable. The state of the
+day — who is busy, what is in flight — is the board, not memory.
+
+**What is pinned.** The launch snapshot carries the ids and hashes of the records,
+the passport and the profile that went into it, so rebuilding a passport or editing a
+record cannot slip into a prepared launch unnoticed.
+
 ## Interface
 
 The home screen lists jobs by state, with a project, department or employee picker
@@ -123,7 +173,7 @@ and properties, files and launches on the right.
 
 Every new BB session gets a routing section: what to do in the chat and what to
 hand to which department of the project. An employee gets its role — lead,
-executor or reviewer — in the launch prompt. Instructions and service messages to
+executor, reviewer or assistant — in the launch prompt. Instructions and service messages to
 agents are always in English; the "Agency language" setting sets the language of
 reports and comments. The `delegate` / `suggest` / `off` mode is in the settings.
 
@@ -134,14 +184,23 @@ new version on the machine and in the folder of the bound project.
 
 Sections: Jobs (list and kanban, archive, search in briefs and comments, saved
 views), Inbox, Goals, Projects, Departments, Employees (with a Metrics tab),
-Automations, Knowledge, Launches, a Dashboard of spend and budgets, and Settings.
+Automations, Knowledge, Launches, a Dashboard of spend, budgets and CLI subscription usage, and Settings.
 The owner changes behavior without code: work rules of the Agency, a department, a
 machine and an employee (rework rounds, launch watch, concurrency limits, budgets,
 auto review, escalation, "Run without sandbox", nightly recheck), the Agency-wide
 rules — the top prompt layer, charter and job description templates, the language
-(Russian / English), skill version pinning, backups and soft WIP limits of kanban
-columns. The interface and the standard templates switch between Russian and
+(Russian / English), skill version pinning, backups, model prices and a check of the
+employees' models against what this BB has connected (with a move to the nearest
+available one), and soft WIP limits of kanban columns. The interface and the standard templates switch between Russian and
 English.
+
+Besides its rules, a project has two memory tabs: Passport — the summary of what the
+project is, with a preview per delivery size, the history of editions and a one-button
+restore — and Work profiles: voice, style, approved samples and an addition to the
+acceptance criterion. A department has a Skill library: the set it may raise for a
+particular job, with a grant journal — which skill, to whom, for which job and who
+decided. The Decision model settings hold both background models: the decision model
+with its decision points and the passport writer.
 
 The Agency creates nothing by itself. An empty Agency offers starter departments —
 development, a development conveyor, research and writing, each with a lead, executors,
@@ -214,6 +273,11 @@ not that the feature is missing.
 | Limits and queue | Concurrent launches per Agency, department and employee; a launch queue by priority; soft WIP limits on kanban columns | Symphony parallel agents, ClickUp WIP limits |
 | Assignment and job team | Lead or the least loaded executor or reviewer; reviewers and observers on a job | Jira load-based assignment, Bitrix24 task roles |
 | Knowledge | Items scoped to the Agency, a department or a project go into launches; a remark repeated in three jobs becomes a knowledge proposal | Bitrix24 knowledge base, lane-stack "repeated fix → project rule" |
+| Project passport | A background model sums the project's own records into a five-section summary, rebuilt in batches; how much of it an employee gets depends on their role | TencentDB Agent Memory L0–L3 (raw → facts → scenes → profile) |
+| Work profiles | How this kind of result is made here: voice, style, approved samples and an addition to acceptance; the index reaches every launch of the project, the full text reaches the job it is set on | — |
+| Decision model | A fast model answers with a typed decision and its confidence where a rule is too crude: the memory gate, the launch briefing, the passport gate; below the threshold the answer is not applied, an error equals "don't know" | System One (TypeSafe), OpenRouter decisions API |
+| Department skill library | The set a department may raise for a particular job: the decision model opens one for a single launch, every grant lands in a journal, and the profile's rights stay untouched | Fixed Binding + ACL in TencentDB Agent Memory |
+| Assistants in a department | A fourth role type: they take subtasks on a cheap model, never lead a main job and never hand work out | — |
 | Goals, hierarchy, metrics | Goals over main jobs, subordinate departments with escalation, employee metrics | Linear Initiatives, Asana Goals, Paperclip `reportsTo`, Bitrix24 efficiency |
 | Questions to the owner | A typed question pauses the job; the answer continues the same thread | Linear agents (the human stays the owner) |
 | Automations | Event → rule → job, cron schedules, signed webhooks, Telegram notifications | Jira automation rules, Multica autopilots |
@@ -253,6 +317,9 @@ src/
     db/                      SQLite and append-only migrations
     inbox/                   stored incoming notifications
     triggers/                event source adapters
+    knowledge/               knowledge records, lessons, repeated remarks
+    decisions/               the decision model: client, decision points, key name
+    projects/                work profiles and the project passport
     runtime/                 isolation, ContextSnapshot, run-store, launch, prepare-run
     dispatcher/              launch and reconciliation contracts
     flow/                    dependencies and next steps
@@ -323,6 +390,7 @@ The documents are in Russian. **Start with the [work plan and index](docs/README
 - [Data and states](docs/data-model.md) · [package versions](docs/dependencies.md)
 - [CLI](docs/cli.md) · [BB API: what it can and cannot do](docs/bb-api.md)
 - [Rules and context of different levels](docs/instruction-context.md)
+- [How the Agency's memory is kept: what to write, in what words and when](skills/agency/references/memory.md)
 - [Launch snapshot](docs/session-context-contract.md) · [revise compiler](docs/context-snapshot-revise.md)
 - [Interaction contracts and readiness](docs/interaction-and-runtime.md)
 - [Communication and history inside a job](docs/task-interaction.md)
