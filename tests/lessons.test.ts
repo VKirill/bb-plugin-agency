@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
-import { draftLesson, lessonExists, proposeLessonForJob } from "../src/server/knowledge/lessons";
-import { listKnowledge } from "../src/server/knowledge/store";
+import { draftLesson, expireLessons, lessonExists, proposeLessonForJob, trimDepartmentMemory } from "../src/server/knowledge/lessons";
+import { listKnowledge, saveKnowledge, type KnowledgeItem } from "../src/server/knowledge/store";
+import { knowledgeDecisionRefusal } from "../src/server/knowledge/decide";
 import { seed } from "./role-types.test";
 
 const NOW = "2026-09-20T10:00:00.000Z";
@@ -79,5 +80,88 @@ describe("lesson after acceptance", () => {
     expect(listKnowledge(db, { status: "proposal" })).toHaveLength(1);
     // Пока владелец не принял, урок в запуски не идёт.
     expect(listKnowledge(db, { status: "accepted" })).toHaveLength(0);
+  });
+
+  it("lets the department keep the lesson itself when the rule says so", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const main = s.job("Сама запомнила", s.developer);
+    const written = proposeLessonForJob(db, main.id, NOW, { autoLearn: true, memoryLimit: 40 });
+    // Владелец не нужен: запись сразу в работе, за ним остаётся вето.
+    expect(written.ok && written.value.proposed?.status).toBe("accepted");
+    expect(listKnowledge(db, { status: "accepted" })).toHaveLength(1);
+  });
+
+  it("keeps the department's memory inside its budget, pinned records first", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const write = (title: string, importance: number, pinned = false) =>
+      saveKnowledge(
+        db,
+        { expectedRevision: 0, title, summary: title, body: "Тело.", kind: "lesson", importance, pinned, source: "Тест", scopeKind: "department", scopeId: s.departmentId },
+        { proposedBy: null },
+        NOW,
+      );
+    write("Закреплённая", 10, true);
+    write("Важная", 90);
+    write("Первая мелочь", 20);
+    write("Вторая мелочь", 30);
+
+    const archived = trimDepartmentMemory(db, s.departmentId, 2, NOW);
+    expect(archived.map((row) => row.title)).toEqual(["Первая мелочь", "Вторая мелочь"]);
+    const left = listKnowledge(db, { scopeKind: "department", scopeId: s.departmentId, status: "accepted" }).map((row) => row.title);
+    // Закреплённое не вытесняется, даже если у него низкая важность.
+    expect(left.sort()).toEqual(["Важная", "Закреплённая"]);
+  });
+
+  it("retires an auto lesson after its term and leaves a pinned one", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const old = "2026-01-01T00:00:00.000Z";
+    const write = (title: string, pinned: boolean, author: string | null) =>
+      saveKnowledge(
+        db,
+        { expectedRevision: 0, title, summary: title, body: "Тело.", kind: "lesson", pinned, source: "Тест", scopeKind: "department", scopeId: s.departmentId },
+        { proposedBy: author },
+        old,
+      );
+    const auto = write("Старый авто-урок", false, "agency:lesson");
+    if (auto.ok) db.prepare(`UPDATE agency_knowledge SET status = 'accepted' WHERE id = ?`).run(auto.value.id);
+    const pinned = write("Закреплённый урок", true, "agency:lesson");
+    if (pinned.ok) db.prepare(`UPDATE agency_knowledge SET status = 'accepted' WHERE id = ?`).run(pinned.value.id);
+    const byOwner = write("Урок владельца", false, null);
+    expect(byOwner.ok && byOwner.value.status).toBe("accepted");
+
+    const expired = expireLessons(db, 90, NOW);
+    expect(expired.map((row) => row.title)).toEqual(["Старый авто-урок"]);
+    const left = listKnowledge(db, { status: "accepted" }).map((row) => row.title).sort();
+    expect(left).toEqual(["Закреплённый урок", "Урок владельца"]);
+  });
+});
+
+describe("who decides a knowledge record", () => {
+  const LEAD = "agt_lead";
+  const item = (over: Partial<KnowledgeItem> = {}) =>
+    ({ id: "kn_1", kind: "lesson", scopeKind: "department", scopeId: "dep_1", ...over }) as KnowledgeItem;
+
+  it("lets the owner decide anything: their call has no employee thread", () => {
+    expect(knowledgeDecisionRefusal(null, item({ scopeKind: "agency", scopeId: null }), null)).toBeNull();
+    expect(knowledgeDecisionRefusal(null, null, null)).toBeNull();
+  });
+
+  it("lets the lead decide their own department's lesson", () => {
+    expect(knowledgeDecisionRefusal(LEAD, item(), LEAD)).toBeNull();
+    expect(knowledgeDecisionRefusal(LEAD, item({ kind: "procedure" }), LEAD)).toBeNull();
+    expect(knowledgeDecisionRefusal(LEAD, item({ kind: "reference" }), LEAD)).toBeNull();
+  });
+
+  it("refuses everything else: another department, another kind, a plain employee", () => {
+    expect(knowledgeDecisionRefusal(LEAD, item(), "agt_other")?.code).toBe("forbidden");
+    expect(knowledgeDecisionRefusal("agt_worker", item(), LEAD)?.code).toBe("forbidden");
+    // Решение и предпочтение владельца отдел себе не выписывает.
+    expect(knowledgeDecisionRefusal(LEAD, item({ kind: "decision" }), LEAD)?.code).toBe("forbidden");
+    expect(knowledgeDecisionRefusal(LEAD, item({ kind: "preference" }), LEAD)?.code).toBe("forbidden");
+    expect(knowledgeDecisionRefusal(LEAD, item({ scopeKind: "project", scopeId: "proj_1" }), LEAD)?.message).toContain("владелец");
+    expect(knowledgeDecisionRefusal(LEAD, null, LEAD)?.code).toBe("not_found");
   });
 });

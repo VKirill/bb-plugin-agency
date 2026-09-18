@@ -17,6 +17,20 @@ function scopeKey(item: Pick<KnowledgeItemView, "scopeKind" | "scopeId">): strin
 }
 
 /**
+ * Кто написал запись. Урок, принятый без владельца, честно говорит об этом: правило «Отдел
+ * учится сам» принимает его сразу, а за владельцем остаётся право поправить или убрать.
+ */
+function authorLine(item: KnowledgeItemView): string {
+  if (item.proposedBy === "agency:remarks") return "Предложило Агентство: замечание повторилось в нескольких задачах";
+  if (item.proposedBy === "agency:lesson") {
+    return item.status === "accepted"
+      ? "Отдел записал сам после приёмки задачи — принято автоматически. Поправьте или уберите, если запись лишняя."
+      : "Предложило Агентство: черновик урока после приёмки задачи";
+  }
+  return "Предложил сотрудник";
+}
+
+/**
  * Knowledge on data: materials by scope. Accepted materials reach every launch
  * of their scope; proposals from employees wait for the owner's decision.
  */
@@ -135,7 +149,7 @@ export function KnowledgeLivePage({
             <div>
               <h2 className="text-base font-semibold">{current.title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{`${scopeLabel(scopeKey(current))} · ${current.source} · ${tr(STATUS_LABEL[current.status])} · ${new Date(current.updatedAt).toLocaleDateString(uiLocale())}`}</p>
-              {current.proposedBy && <p className="text-xs text-muted-foreground">{tr(current.proposedBy === "agency:remarks" ? "Предложило Агентство: замечание повторилось в нескольких задачах" : current.proposedBy === "agency:lesson" ? "Предложило Агентство: черновик урока после приёмки задачи" : "Предложил сотрудник")}</p>}
+              {current.proposedBy && <p className="text-xs text-muted-foreground">{tr(authorLine(current))}</p>}
             </div>
             <Button size="sm" variant="ghost" aria-label={tr("Закрыть материал")} onClick={() => setSelected(null)}>{tr("Закрыть")}</Button>
           </div>

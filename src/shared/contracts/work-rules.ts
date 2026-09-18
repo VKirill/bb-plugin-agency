@@ -21,6 +21,12 @@ export const workRulesSchema = z
     minorDefectsWithoutRound: z.boolean(),
     /** An executor's hand-in creates and queues an independent review subtask by itself. */
     autoReview: z.boolean(),
+    /** The department keeps its own lessons: a draft after acceptance is accepted without the owner. */
+    autoLearn: z.boolean(),
+    /** How many accepted materials a department keeps; the oldest unpinned ones go to the archive. */
+    memoryLimit: z.number().int().min(5).max(200),
+    /** Days an auto-accepted lesson lives before it goes to the archive; a pinned one lives on. */
+    memoryTtlDays: z.number().int().min(7).max(365),
     /** Once a day after nightlyRecheckHour a reviewer rechecks the versions accepted since the previous recheck. */
     nightlyRecheck: z.boolean(),
     /** Hour of the BB server's clock, 0–23. */
@@ -69,6 +75,10 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   reworkLimit: 3,
   minorDefectsWithoutRound: false,
   autoReview: false,
+  // Отдел учится сам: черновик урока из фактов задачи принимается без владельца, но с его вето.
+  autoLearn: true,
+  memoryLimit: 40,
+  memoryTtlDays: 90,
   nightlyRecheck: false,
   nightlyRecheckHour: 3,
   runWithoutSandbox: false,
@@ -107,6 +117,9 @@ export const INHERITED_RULE_KEYS = [
   "reworkLimit",
   "minorDefectsWithoutRound",
   "autoReview",
+  "autoLearn",
+  "memoryLimit",
+  "memoryTtlDays",
   "nightlyRecheck",
   "nightlyRecheckHour",
   "runWithoutSandbox",

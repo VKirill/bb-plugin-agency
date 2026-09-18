@@ -1,7 +1,8 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
 import { getKnowledge, listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
-import { proposeLessonForJob } from "./knowledge/lessons";
+import { expireLessons, proposeLessonForJob } from "./knowledge/lessons";
+import { knowledgeDecisionRefusal } from "./knowledge/decide";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
 import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
 import { agentMetrics } from "./insights/metrics";
@@ -38,7 +39,7 @@ import { serverDay } from "./runtime/nightly-recheck/service";
 import { sweepRemarkPatterns } from "./knowledge/remark-patterns";
 import { agentDeleteBlocker, archiveDepartment, deleteAgent, deleteDepartment, departmentArchivedAt, departmentDeleteBlocker, restoreDepartment } from "./organization/lifecycle";
 import { installStarterKit, starterKitView, translateStarterKit, type StarterKitPorts } from "./organization/starter-kit";
-import { rulesForLaunch, workRulesView } from "./rules/work-rules";
+import { rulesForDepartment, rulesForLaunch, workRulesView } from "./rules/work-rules";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { rpcContract, type AgentModelsView, type ProviderUsageView } from "../shared/rpc-contract";
 import { openDatabase } from "./db/database";
@@ -242,12 +243,22 @@ export function registerAgency(bb: BbPluginApi) {
     boardPolicy: () => boardPolicy,
     archivedJobIds: () => archivedJobIds(db, archiveAfterDays, new Date()),
     onAccepted: (jobId) => {
-      const proposed = proposeLessonForJob(db, jobId, new Date().toISOString());
-      if (!proposed.ok || !proposed.value.proposed) return;
-      const lesson = proposed.value.proposed;
+      const job = store.getJob(jobId);
+      if (!job) return;
+      const rules = rulesForDepartment(db, job.departmentId);
+      const written = proposeLessonForJob(db, jobId, new Date().toISOString(), {
+        autoLearn: rules.autoLearn,
+        memoryLimit: rules.memoryLimit,
+      });
+      if (!written.ok || !written.value.proposed) return;
+      const lesson = written.value.proposed;
+      const archived = written.value.archived?.length ?? 0;
       void sendOwnerMessage(
         {
-          text: `Предложен урок после приёмки: «${lesson.title}». Примите или поправьте его в «Знаниях» — принятое приходит во все запуски отдела.`,
+          text:
+            lesson.status === "accepted"
+              ? `Отдел запомнил: «${lesson.title}». Запись уже приходит в его запуски — поправьте или уберите её в «Знаниях».${archived ? ` Старых записей ушло в архив: ${archived}.` : ""}`
+              : `Предложен урок после приёмки: «${lesson.title}». Примите или поправьте его в «Знаниях» — принятое приходит во все запуски отдела.`,
           dedupeKey: `lesson:${lesson.id}`,
         },
         "lesson",
@@ -625,6 +636,18 @@ export function registerAgency(bb: BbPluginApi) {
   };
 
   /** Профили работ проекта: голос и стиль живут в проекте, а не в напоминаниях владельца. */
+  /**
+   * Решение по записи знаний: владелец решает всё, руководитель отдела — только по записям своего
+   * отдела и только про работу (урок, процедура, справка). Предпочтения и решения владельца, а
+   * также знания проекта и всего Агентства, остаются за ним.
+   */
+  const mayDecideKnowledge = (callerAgentId: string | null, knowledgeId: string) => {
+    const item = getKnowledge(db, knowledgeId) ?? null;
+    const lead = item?.scopeId ? store.getDepartment(item.scopeId)?.leadAgentId ?? null : null;
+    const refusal = knowledgeDecisionRefusal(callerAgentId, item, lead);
+    return refusal ? fail(refusal.code, refusal.message) : { ok: true as const };
+  };
+
   const workProfileHandlers = {
     listWorkProfiles: async (input: { bbProjectId?: string }) => {
       const access = readOnly();
@@ -821,8 +844,10 @@ export function registerAgency(bb: BbPluginApi) {
       return saved;
     },
     setKnowledgeStatus: async (input: { id: string; expectedRevision: number; status: "proposal" | "accepted" | "archived" }) => {
-      const access = ownerOnly();
+      const access = readOnly();
       if (!access.ok) return access;
+      const allowed = mayDecideKnowledge(access.value.ctx.caller?.agentId ?? null, input.id);
+      if (!allowed.ok) return allowed;
       const saved = setKnowledgeStatus(db, input, new Date().toISOString());
       if (saved.ok) onChanged();
       return saved;
@@ -1453,6 +1478,18 @@ export function registerAgency(bb: BbPluginApi) {
         return [] as string[];
       });
       if (rechecks.length > 0) changed = true;
+      // Обходчик памяти: авто-уроки, которые владелец не закрепил, через свой срок уходят в архив.
+      const expired = expireLessons(db, rulesForDepartment(db, "").memoryTtlDays, new Date().toISOString());
+      if (expired.length > 0) {
+        changed = true;
+        void sendOwnerMessage(
+          {
+            text: `Память отделов подчищена: ${expired.length} авто-урок(ов) старше срока ушли в архив. Нужный можно вернуть в «Знаниях» и закрепить.`,
+            dedupeKey: `lesson-expiry:${new Date().toISOString().slice(0, 10)}`,
+          },
+          "lesson",
+        );
+      }
       if (runRemarkPatterns() > 0) changed = true;
       if (changed) onChanged();
       await sweepTelegramOutbox({

@@ -89,6 +89,19 @@ describe("work rules editor", () => {
     expect(input("Кругов доработки под одной задачей").disabled).toBe(false);
   });
 
+  it("lets a department set its own memory budget without touching the agency one", async () => {
+    stored = {};
+    await render("department:dep_abc123", true);
+    // Память отдела — такое же правило, как круги доработки: по умолчанию общее, можно взять своё.
+    expect(input("Записей в памяти отдела").disabled).toBe(true);
+    const own = host!.querySelector('[aria-label="Записей в памяти отдела: своё значение"]') as HTMLButtonElement;
+    await act(async () => own.click());
+    await act(async () => type(input("Записей в памяти отдела"), "12"));
+    await act(async () => button("Сохранить правила").click());
+    const save = calls.find((call) => call.method === "saveWorkRules");
+    expect((save?.input as { rules: unknown }).rules).toEqual({ memoryLimit: 12 });
+  });
+
   it("treats an empty limit as no limit on this level, not as an inherited value", async () => {
     stored = { budgetMonthlyUsd: 50 };
     await render("department:dep_abc123", true);

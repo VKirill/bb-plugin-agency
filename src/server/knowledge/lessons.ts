@@ -1,14 +1,17 @@
 import { ok, type DomainResult } from "../../domain";
 import type { SqlDatabase } from "../db/sql";
-import { saveKnowledge, type KnowledgeItem } from "./store";
+import { listKnowledge, saveKnowledge, setKnowledgeStatus, type KnowledgeItem } from "./store";
 
 /**
  * Урок после приёмки: как прошла главная задача и что из этого стоит помнить отделу.
  *
- * Черновик собирает само Агентство из фактов задачи — круги доработки, замечания, сроки, —
- * и кладёт его в знания отдела **предложением**. Владелец правит формулировку и принимает;
- * принятое приходит во все следующие запуски отдела. Без этого шага отдел каждый раз начинает
- * с нуля и наступает на те же грабли.
+ * Запись собирает само Агентство из фактов задачи — круги доработки, замечания, сроки. При
+ * включённом правиле «Отдел учится сам» она сразу принимается в знания отдела, а владелец
+ * получает сообщение с правом отменить; иначе ждёт его решения предложением.
+ *
+ * Чтобы память не превращалась в свалку, у неё есть рамки: бюджет записей на отдел
+ * (`trimDepartmentMemory`) и срок жизни авто-урока (`expireLessons`). Закреплённые владельцем
+ * записи не вытесняются и не устаревают.
  */
 
 export const LESSON_AUTHOR = "agency:lesson";
@@ -68,7 +71,7 @@ export function draftLesson(db: SqlDatabase, jobId: string, now: string): Lesson
       ? "Замечания выше повторяться не должны: перед сдачей проверяйте их отдельным пунктом самопроверки."
       : "Работа прошла без доработок — опишите, что именно помогло, чтобы повторить это в следующий раз.",
     "",
-    "_Черновик собран Агентством из фактов задачи. Допишите вывод своими словами и примите запись._",
+    "_Собрано Агентством из фактов задачи. Поправьте вывод своими словами или уберите запись, если она не нужна._",
   ].join("\n");
 
   return {
@@ -88,7 +91,38 @@ export function lessonExists(db: SqlDatabase, jobKey: string): boolean {
   return Boolean(db.prepare(`SELECT 1 FROM agency_knowledge WHERE title LIKE ?`).get(`Урок из ${jobKey}:%`));
 }
 
-export function proposeLessonForJob(db: SqlDatabase, jobId: string, now: string): DomainResult<{ proposed: KnowledgeItem | null }> {
+export type LessonOptions = {
+  /** Отдел учится сам: запись принимается без владельца, он получает право вето. */
+  autoLearn?: boolean;
+  /** Сколько принятых записей держит отдел: лишние уходят в архив, закреплённые остаются. */
+  memoryLimit?: number;
+};
+
+/**
+ * Бюджет памяти отдела: индекс в промпте не должен расти бесконечно. Лишние записи уходят в
+ * архив, начиная с самых старых и наименее важных; закреплённые владельцем остаются всегда.
+ */
+export function trimDepartmentMemory(db: SqlDatabase, departmentId: string, limit: number, now: string): KnowledgeItem[] {
+  const accepted = listKnowledge(db, { scopeKind: "department", scopeId: departmentId, status: "accepted" });
+  if (accepted.length <= limit) return [];
+  const droppable = accepted
+    .filter((item) => !item.pinned)
+    .sort((left, right) => left.importance - right.importance || Date.parse(left.updatedAt) - Date.parse(right.updatedAt));
+  const archived: KnowledgeItem[] = [];
+  for (const item of droppable) {
+    if (accepted.length - archived.length <= limit) break;
+    const moved = setKnowledgeStatus(db, { id: item.id, expectedRevision: item.revision, status: "archived" }, now);
+    if (moved.ok) archived.push(moved.value);
+  }
+  return archived;
+}
+
+export function proposeLessonForJob(
+  db: SqlDatabase,
+  jobId: string,
+  now: string,
+  options: LessonOptions = {},
+): DomainResult<{ proposed: KnowledgeItem | null; archived?: KnowledgeItem[] }> {
   const draft = draftLesson(db, jobId, now);
   if (!draft) return ok({ proposed: null });
   const key = draft.title.slice("Урок из ".length).split(":")[0] ?? "";
@@ -111,5 +145,27 @@ export function proposeLessonForJob(db: SqlDatabase, jobId: string, now: string)
     now,
   );
   if (!saved.ok) return saved;
-  return ok({ proposed: saved.value });
+  if (!options.autoLearn) return ok({ proposed: saved.value });
+  // Отдел учится сам: запись принимается сразу, владелец получает сообщение с правом отменить.
+  const accepted = setKnowledgeStatus(db, { id: saved.value.id, expectedRevision: saved.value.revision, status: "accepted" }, now);
+  if (!accepted.ok) return ok({ proposed: saved.value });
+  const archived = options.memoryLimit ? trimDepartmentMemory(db, draft.departmentId, options.memoryLimit, now) : [];
+  return ok({ proposed: accepted.value, archived });
+}
+
+/**
+ * Срок жизни авто-урока: через `ttlDays` запись уходит в архив, если владелец её не закрепил и не
+ * поднял важность. Память отдела не копит правила, которые никто не подтвердил.
+ */
+export function expireLessons(db: SqlDatabase, ttlDays: number, now: string): KnowledgeItem[] {
+  const edge = Date.parse(now) - ttlDays * 86_400_000;
+  if (Number.isNaN(edge)) return [];
+  const expired: KnowledgeItem[] = [];
+  for (const item of listKnowledge(db, { status: "accepted" })) {
+    if (item.kind !== "lesson" || item.pinned || item.proposedBy !== LESSON_AUTHOR) continue;
+    if (Date.parse(item.updatedAt) > edge) continue;
+    const moved = setKnowledgeStatus(db, { id: item.id, expectedRevision: item.revision, status: "archived" }, now);
+    if (moved.ok) expired.push(moved.value);
+  }
+  return expired;
 }
