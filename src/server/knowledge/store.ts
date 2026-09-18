@@ -44,6 +44,9 @@ export type KnowledgeItem = {
   pinned: boolean;
   /** Зачем записали: помогает владельцу решить, нужна ли запись дальше. */
   writeReason: string;
+  /** Сколько раз запись открывали целиком: по этому счёту видно, работает она или лежит. */
+  readCount: number;
+  lastReadAt: string | null;
   source: string;
   scopeKind: KnowledgeScopeKind;
   scopeId: string | null;
@@ -62,6 +65,8 @@ type Row = {
   importance?: number | null;
   pinned?: number | null;
   write_reason?: string | null;
+  read_count?: number | null;
+  last_read_at?: string | null;
   body: string;
   source: string;
   scope_kind: KnowledgeScopeKind;
@@ -82,6 +87,8 @@ const toItem = (row: Row): KnowledgeItem => ({
   importance: typeof row.importance === "number" ? row.importance : 50,
   pinned: row.pinned === 1,
   writeReason: (row.write_reason ?? "").trim(),
+  readCount: typeof row.read_count === "number" ? row.read_count : 0,
+  lastReadAt: row.last_read_at ?? null,
   source: row.source,
   scopeKind: row.scope_kind,
   scopeId: row.scope_id,
@@ -140,6 +147,11 @@ export function saveKnowledge(db: SqlDatabase, input: SaveKnowledgeInput, actor:
   const pinned = input.pinned ? 1 : 0;
   const writeReason = (input.writeReason ?? "").trim();
   if (!input.id) {
+    // Одно название на область, как имя записи в памяти BB: повтор — это правка, а не второй экземпляр.
+    const twin = db
+      .prepare(`SELECT id FROM agency_knowledge WHERE title = ? AND scope_kind = ? AND COALESCE(scope_id, '') = ? AND status <> 'archived'`)
+      .get(title, input.scopeKind, input.scopeId ?? "") as { id: string } | undefined;
+    if (twin) return fail("conflict", `Материал «${title}» в этой области уже есть (${twin.id}): измените его, а не заводите второй.`);
     const id = `kno_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     db.prepare(
       `INSERT INTO agency_knowledge (id, title, summary, body, kind, importance, pinned, write_reason, source, scope_kind, scope_id, status, proposed_by, revision, created_at, updated_at)
@@ -170,20 +182,55 @@ export function setKnowledgeStatus(db: SqlDatabase, input: { id: string; expecte
 
 export const KNOWLEDGE_LEVEL_LIMIT = 8_000;
 
-/** Accepted materials of one scope as a prompt block, oldest first, cut to the level limit. */
+/**
+ * Сколько знаков занимает индекс одного уровня. Рамка нужна и при бюджете записей: у отдела
+ * записей немного, а у Агентства и проекта их ничто не ограничивает, и без предела индекс
+ * съел бы промпт. Что не поместилось — не потеряно: сотрудник видит счёт и команду списка.
+ */
+export const KNOWLEDGE_INDEX_LIMIT = 3_500;
+
+/**
+ * Порядок записей в промпте: сначала закреплённые, потом важные, потом те, что читают. Дата
+ * записи — последний признак: иначе первые строки навсегда занимает то, что записали раньше всех.
+ */
+export function knowledgeOrder(left: KnowledgeItem, right: KnowledgeItem): number {
+  return (
+    Number(right.pinned) - Number(left.pinned) ||
+    right.importance - left.importance ||
+    right.readCount - left.readCount ||
+    Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
+    left.title.localeCompare(right.title)
+  );
+}
+
+/** Accepted materials of one scope as a prompt block: an index cut to its limit, full text for the few. */
 export function knowledgeBlock(db: SqlDatabase, scopeKind: KnowledgeScopeKind, scopeId: string | null): { text: string; ids: { id: string; hash: string }[] } {
   // A database opened by an older migration step has no knowledge table yet.
   if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agency_knowledge'`).get()) return { text: "", ids: [] };
   const items = (db
-    .prepare(`SELECT * FROM agency_knowledge WHERE status = 'accepted' AND scope_kind = ? AND COALESCE(scope_id, '') = ? ORDER BY created_at, id`)
-    .all(scopeKind, scopeId ?? "") as Row[]).map(toItem);
+    .prepare(`SELECT * FROM agency_knowledge WHERE status = 'accepted' AND scope_kind = ? AND COALESCE(scope_id, '') = ?`)
+    .all(scopeKind, scopeId ?? "") as Row[])
+    .map(toItem)
+    .sort(knowledgeOrder);
   if (!items.length) return { text: "", ids: [] };
   const ids: { id: string; hash: string }[] = [];
   // Индекс: одна строка на запись, как в памяти BB. Полный текст сотрудник берёт сам.
-  const index = items.map((item) => `- [${item.kind}] ${item.title} — ${item.summary} (${item.id})`);
-  const full: string[] = [];
-  let used = index.join("\n").length;
+  const index: string[] = [];
+  const shown: KnowledgeItem[] = [];
+  let used = 0;
   for (const item of items) {
+    const line = `- [${item.kind}] ${item.title} — ${item.summary} (${item.id})`;
+    if (used + line.length + 1 > KNOWLEDGE_INDEX_LIMIT) break;
+    index.push(line);
+    shown.push(item);
+    used += line.length + 1;
+  }
+  // В снимок запуска попадает то, что сотрудник правда увидел: остальное он и не читал.
+  const tail = shown.length < items.length
+    ? [`Показано ${shown.length} из ${items.length}: остальное — bb agency knowledge list --input-json '{}'.`]
+    : [];
+  const full: string[] = [];
+  for (const item of shown) {
     const whole = item.pinned || item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE;
     const part = `### ${item.title}\nИсточник: ${item.source}\n${item.body}`;
     if (whole && used + part.length <= KNOWLEDGE_LEVEL_LIMIT) {
@@ -197,9 +244,18 @@ export function knowledgeBlock(db: SqlDatabase, scopeKind: KnowledgeScopeKind, s
   const text = [
     "Материалы этой области. Полный текст любой записи: bb agency knowledge get --input-json '{\"id\":\"kno_…\"}'.",
     ...index,
+    ...tail,
     ...(full.length ? ["", "Целиком (важные и закреплённые):", ...full] : []),
   ].join("\n");
   return { text, ids };
+}
+
+/**
+ * Запись открыли целиком. Счёт обращений отличает работающую запись от лежащей: по нему
+ * бюджет памяти вытесняет то, что никто ни разу не прочитал, а не просто старое.
+ */
+export function markKnowledgeRead(db: SqlDatabase, id: string, now: string): void {
+  db.prepare(`UPDATE agency_knowledge SET read_count = COALESCE(read_count, 0) + 1, last_read_at = ? WHERE id = ?`).run(now, id);
 }
 
 export function getKnowledge(db: SqlDatabase, id: string): KnowledgeItem | null {

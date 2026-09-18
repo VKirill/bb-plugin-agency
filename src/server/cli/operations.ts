@@ -103,6 +103,7 @@ export const CLI_OPERATIONS = {
   getSkillPins: { input: emptyObjectSchema, summary: "Закреплённые версии навыков против текущих: чем отличаются и что мешает запуску" },
   pinSkills: { input: emptyObjectSchema, summary: "Закрепить текущие версии навыков; только владелец, не из треда сотрудника" },
   getKnowledge: { input: z.object({ id: z.string() }).strict(), summary: "Одна запись знаний целиком: в запуск приходит только сводка, тело читается так" },
+  setKnowledgeStatus: { input: z.object({ id: z.string(), expectedRevision: z.number().int(), status: z.enum(["proposal", "accepted", "archived"]) }).strict(), summary: "Принять запись или убрать её в архив; руководитель отдела решает только по своему отделу (урок, процедура, справка)" },
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), summary: "Профили работ проекта: как здесь делают такой результат — голос, стиль, эталоны" },
   saveWorkProfile: { input: z.object({ bbProjectId: z.string(), key: z.string(), expectedRevision: z.number().int(), title: z.string(), triggers: z.array(z.string()).optional(), body: z.string(), samples: z.array(z.object({ label: z.string(), ref: z.string(), note: z.string().optional() }).strict()).optional(), acceptance: z.string().optional() }).strict(), summary: "Сохранить профиль работы проекта; expectedRevision из listWorkProfiles, 0 для нового" },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string(), key: z.string() }).strict(), summary: "Удалить профиль работы проекта" },

@@ -149,6 +149,7 @@ export function KnowledgeLivePage({
             <div>
               <h2 className="text-base font-semibold">{current.title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{`${scopeLabel(scopeKey(current))} · ${current.source} · ${tr(STATUS_LABEL[current.status])} · ${new Date(current.updatedAt).toLocaleDateString(uiLocale())}`}</p>
+              <p className="text-xs text-muted-foreground">{current.readCount > 0 ? tr("Сотрудники открывали {count} раз — запись работает.", { count: current.readCount }) : tr("Сотрудники ни разу не открывали: при нехватке места в памяти отдела такая запись уходит в архив первой.")}</p>
               {current.proposedBy && <p className="text-xs text-muted-foreground">{tr(authorLine(current))}</p>}
             </div>
             <Button size="sm" variant="ghost" aria-label={tr("Закрыть материал")} onClick={() => setSelected(null)}>{tr("Закрыть")}</Button>

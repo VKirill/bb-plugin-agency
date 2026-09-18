@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
-import { knowledgeBlock, listKnowledge, saveKnowledge, setKnowledgeStatus } from "../src/server/knowledge/store";
+import { KNOWLEDGE_INDEX_LIMIT, knowledgeBlock, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus } from "../src/server/knowledge/store";
 import { listGoals, saveGoal, setJobGoal } from "../src/server/organization/goals";
 import { openEscalations, setDepartmentParent, sweepEscalations } from "../src/server/organization/hierarchy";
 import { agentMetrics } from "../src/server/insights/metrics";
@@ -56,6 +56,56 @@ describe("knowledge", () => {
     expect(block.text).not.toContain("Тело мелочи.");
     // Обе записи закреплены в снимке: правка любой из них видна по хэшу.
     expect(block.ids).toHaveLength(2);
+  });
+
+  it("puts the valuable first and cuts the index to its limit instead of growing the prompt", () => {
+    const { db, s } = open();
+    const write = (title: string, importance: number, pinned = false) =>
+      saveKnowledge(
+        db,
+        { expectedRevision: 0, title, summary: `${title}: ${"хвост ".repeat(20)}`, body: "Тело.", kind: "fact", importance, pinned, source: "Владелец", scopeKind: "department", scopeId: s.departmentId },
+        { proposedBy: null },
+        NOW,
+      );
+    for (let index = 0; index < 40; index += 1) write(`Запись ${String(index).padStart(2, "0")}`, 10);
+    write("Закреплённая мелочь", 5, true);
+    write("Важное правило", 95);
+
+    const block = knowledgeBlock(db, "department", s.departmentId);
+    const lines = block.text.split("\n").filter((line) => line.startsWith("- ["));
+    expect(block.text.length).toBeLessThan(KNOWLEDGE_INDEX_LIMIT + 8_000);
+    // Индекс не съедает промпт: часть записей осталась за кадром, и сотрудник об этом знает.
+    expect(lines.length).toBeLessThan(42);
+    expect(block.text).toContain(`Показано ${lines.length} из 42`);
+    // Наверху то, что важно и закреплено, а не то, что записали первым.
+    expect(lines[0]).toContain("Закреплённая мелочь");
+    expect(lines[1]).toContain("Важное правило");
+    // В снимок попадает ровно то, что сотрудник увидел.
+    expect(block.ids).toHaveLength(lines.length);
+  });
+
+  it("lifts a record employees actually read above one nobody opened", () => {
+    const { db, s } = open();
+    const write = (title: string) =>
+      saveKnowledge(db, { expectedRevision: 0, title, summary: `${title}.`, body: "Тело.", kind: "reference", importance: 50, source: "Владелец", scopeKind: "department", scopeId: s.departmentId }, { proposedBy: null }, NOW);
+    const unread = write("Никто не открывал");
+    const read = write("К этому возвращаются");
+    if (!read.ok || !unread.ok) throw new Error("fixture");
+    markKnowledgeRead(db, read.value.id, NOW);
+
+    const lines = knowledgeBlock(db, "department", s.departmentId).text.split("\n").filter((line) => line.startsWith("- ["));
+    expect(lines[0]).toContain("К этому возвращаются");
+  });
+
+  it("refuses a second record with the same title in the same scope", () => {
+    const { db, s } = open();
+    const first = saveKnowledge(db, { expectedRevision: 0, title: "Голос канала", body: "Первый вариант.", source: "Владелец", scopeKind: "department", scopeId: s.departmentId }, { proposedBy: null }, NOW);
+    expect(first.ok).toBe(true);
+    const twin = saveKnowledge(db, { expectedRevision: 0, title: "Голос канала", body: "Второй вариант.", source: "Сотрудник", scopeKind: "department", scopeId: s.departmentId }, { proposedBy: s.developer }, NOW);
+    expect(twin.ok).toBe(false);
+    if (!twin.ok) expect(twin.error.message).toContain("измените его");
+    // В другой области название свободно: у каждого отдела свой голос.
+    expect(saveKnowledge(db, { expectedRevision: 0, title: "Голос канала", body: "Общий.", source: "Владелец", scopeKind: "agency", scopeId: null }, { proposedBy: null }, NOW).ok).toBe(true);
   });
 });
 
@@ -132,6 +182,7 @@ describe("metrics, archive, search, views", () => {
   it("routes the new CLI aliases", () => {
     for (const [argv, operation] of [
       [["knowledge", "list"], "listKnowledge"],
+      [["knowledge", "status"], "setKnowledgeStatus"],
       [["goal", "link"], "setJobGoal"],
       [["job", "search"], "searchJobs"],
       [["agent", "metrics"], "agentMetrics"],

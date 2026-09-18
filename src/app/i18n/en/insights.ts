@@ -169,6 +169,8 @@ export const EN_INSIGHTS: Record<string, string> = {
   "Есть вывод и ссылка на источник.": "There is a conclusion and a link to the source.",
   "Предложило Агентство: замечание повторилось в нескольких задачах": "Proposed by the Agency: the remark repeated in several jobs",
   "Предложило Агентство: черновик урока после приёмки задачи": "Proposed by the Agency: a lesson drafted after the job was accepted",
+  "Сотрудники открывали {count} раз — запись работает.": "Employees opened it {count} times — the record is doing its job.",
+  "Сотрудники ни разу не открывали: при нехватке места в памяти отдела такая запись уходит в архив первой.": "Employees never opened it: when the department memory runs out of room, a record like this goes to the archive first.",
   "Отдел записал сам после приёмки задачи — принято автоматически. Поправьте или уберите, если запись лишняя.": "The department wrote this itself after the job was accepted — accepted automatically. Edit it or remove it if the record is not needed.",
   "Принятый материал попадает в промпт каждого запуска своей области строкой индекса: вид, название и сводка. Полный текст сотрудник берёт сам через bb agency knowledge get; целиком сразу приходят только закреплённые и важные записи.":
     "An accepted material reaches every launch of its scope as one index line: kind, title and summary. The employee reads the full text with bb agency knowledge get; only pinned and important entries arrive whole.",

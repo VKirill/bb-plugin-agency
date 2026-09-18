@@ -794,6 +794,9 @@ export const knowledgeItemSchema = z
     importance: z.number().int(),
     pinned: z.boolean(),
     writeReason: z.string(),
+    /** Сколько раз запись открывали из треда сотрудника: видно, работает она или лежит. */
+    readCount: z.number().int(),
+    lastReadAt: z.string().nullable(),
     source: z.string(),
     scopeKind: knowledgeScopeKindSchema,
     scopeId: z.string().nullable(),

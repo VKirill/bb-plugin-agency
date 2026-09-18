@@ -1,6 +1,6 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
-import { getKnowledge, listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { getKnowledge, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
 import { expireLessons, proposeLessonForJob } from "./knowledge/lessons";
 import { knowledgeDecisionRefusal } from "./knowledge/decide";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
@@ -833,7 +833,10 @@ export function registerAgency(bb: BbPluginApi) {
       const access = readOnly();
       if (!access.ok) return access;
       const item = getKnowledge(db, input.id);
-      return item ? { ok: true as const, value: item } : fail("not_found", `knowledge ${input.id} not found`);
+      if (!item) return fail("not_found", `knowledge ${input.id} not found`);
+      // Считаем только чтение из треда сотрудника: владелец листает записи в интерфейсе, это не работа.
+      if (access.value.ctx.caller?.agentId) markKnowledgeRead(db, item.id, new Date().toISOString());
+      return { ok: true as const, value: item };
     },
     saveKnowledge: async (input: SaveKnowledgeInput) => {
       const access = readOnly();

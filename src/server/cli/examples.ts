@@ -343,6 +343,7 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   ownerDigest: { kind: "watchdog", stuckHours: 12, notify: true },
   listScriptTemplates: {},
   listKnowledge: {},
+  setKnowledgeStatus: { id: "kno_aaaaaaaaaaaa", expectedRevision: 1, status: "archived" },
   saveKnowledge: { expectedRevision: 0, title: "Тон рассылок", body: "Пишем коротко, без канцелярита.", source: "Решение владельца 2026-09-17", scopeKind: "department", scopeId: "dep_aaaaaaaaaaaa" },
   listGoals: {},
   setJobGoal: { jobId: "job_aaaaaaaaaaaa", goalId: "gol_aaaaaaaaaaaa" },

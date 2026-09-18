@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
 import { draftLesson, expireLessons, lessonExists, proposeLessonForJob, trimDepartmentMemory } from "../src/server/knowledge/lessons";
-import { listKnowledge, saveKnowledge, type KnowledgeItem } from "../src/server/knowledge/store";
+import { listKnowledge, markKnowledgeRead, saveKnowledge, type KnowledgeItem } from "../src/server/knowledge/store";
 import { knowledgeDecisionRefusal } from "../src/server/knowledge/decide";
 import { seed } from "./role-types.test";
 
@@ -163,5 +163,27 @@ describe("who decides a knowledge record", () => {
     expect(knowledgeDecisionRefusal(LEAD, item({ kind: "preference" }), LEAD)?.code).toBe("forbidden");
     expect(knowledgeDecisionRefusal(LEAD, item({ scopeKind: "project", scopeId: "proj_1" }), LEAD)?.message).toContain("владелец");
     expect(knowledgeDecisionRefusal(LEAD, null, LEAD)?.code).toBe("not_found");
+  });
+});
+
+describe("what the department keeps when the budget is full", () => {
+  it("drops what nobody opened before what employees keep reading", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const write = (title: string) =>
+      saveKnowledge(
+        db,
+        { expectedRevision: 0, title, summary: title, body: "Тело.", kind: "lesson", importance: 50, source: "Тест", scopeKind: "department", scopeId: s.departmentId },
+        { proposedBy: null },
+        NOW,
+      );
+    const read = write("К этому возвращаются");
+    write("Никто не открывал");
+    if (!read.ok) throw new Error("fixture");
+    markKnowledgeRead(db, read.value.id, NOW);
+
+    const archived = trimDepartmentMemory(db, s.departmentId, 1, NOW);
+    // Важность и дата у записей одинаковые: решает то, что одну читают, а вторую нет.
+    expect(archived.map((row) => row.title)).toEqual(["Никто не открывал"]);
   });
 });

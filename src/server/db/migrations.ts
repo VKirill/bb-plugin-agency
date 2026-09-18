@@ -644,6 +644,9 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   `ALTER TABLE agency_knowledge ADD COLUMN importance INTEGER;`,
   `ALTER TABLE agency_knowledge ADD COLUMN pinned INTEGER;`,
   `ALTER TABLE agency_knowledge ADD COLUMN write_reason TEXT;`,
+  // Что сотрудники правда читают: по этому счёту вытесняется лишнее, а не по дате записи.
+  `ALTER TABLE agency_knowledge ADD COLUMN read_count INTEGER;`,
+  `ALTER TABLE agency_knowledge ADD COLUMN last_read_at TEXT;`,
 ];
 
 function statementHash(sql: string): string {

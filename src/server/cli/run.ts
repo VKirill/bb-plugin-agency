@@ -48,6 +48,7 @@ const WRITE_OPERATIONS = new Set<CliRoutedOperation>([
   "saveWorkRules",
   "saveTemplate",
   "saveKnowledge",
+  "setKnowledgeStatus",
   "setJobGoal",
   "saveAgencyRules",
   "saveProjectRules",

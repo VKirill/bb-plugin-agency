@@ -87,7 +87,7 @@ metadata:
 | Правила проекта: прочитать и сохранить `.bb/AGENTS.md` | `bb agency project rules\|rules-save` |
 | Правила работы: пороги, лимиты, модели по умолчанию; бюджеты и расход | `bb agency rules get\|save\|budgets` |
 | Общие правила Агентства (верхний слой промпта) и шаблоны форм | `bb agency rules agency-get\|agency-save`, `bb agency templates list\|save` |
-| Знания: список, одна запись целиком, предложить материал | `bb agency knowledge list\|get\|save` |
+| Знания: список, одна запись целиком, предложить материал, решение по записи своего отдела | `bb agency knowledge list\|get\|save\|status` |
 | Цели главных задач; поиск и архив задач; показатели сотрудника | `bb agency goal list\|link`, `bb agency job search\|archive`, `bb agency agent metrics` |
 
 ## Отчёт владельцу

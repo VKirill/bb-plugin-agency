@@ -10,8 +10,8 @@ import { listKnowledge, saveKnowledge, setKnowledgeStatus, type KnowledgeItem } 
  * получает сообщение с правом отменить; иначе ждёт его решения предложением.
  *
  * Чтобы память не превращалась в свалку, у неё есть рамки: бюджет записей на отдел
- * (`trimDepartmentMemory`) и срок жизни авто-урока (`expireLessons`). Закреплённые владельцем
- * записи не вытесняются и не устаревают.
+ * (`trimDepartmentMemory`, вытесняет сначала непрочитанное) и срок жизни авто-урока
+ * (`expireLessons`). Закреплённые владельцем записи не вытесняются и не устаревают.
  */
 
 export const LESSON_AUTHOR = "agency:lesson";
@@ -105,9 +105,15 @@ export type LessonOptions = {
 export function trimDepartmentMemory(db: SqlDatabase, departmentId: string, limit: number, now: string): KnowledgeItem[] {
   const accepted = listKnowledge(db, { scopeKind: "department", scopeId: departmentId, status: "accepted" });
   if (accepted.length <= limit) return [];
+  // Первым уходит то, что никто ни разу не открыл: счёт обращений честнее даты записи.
   const droppable = accepted
     .filter((item) => !item.pinned)
-    .sort((left, right) => left.importance - right.importance || Date.parse(left.updatedAt) - Date.parse(right.updatedAt));
+    .sort(
+      (left, right) =>
+        left.readCount - right.readCount ||
+        left.importance - right.importance ||
+        Date.parse(left.updatedAt) - Date.parse(right.updatedAt),
+    );
   const archived: KnowledgeItem[] = [];
   for (const item of droppable) {
     if (accepted.length - archived.length <= limit) break;

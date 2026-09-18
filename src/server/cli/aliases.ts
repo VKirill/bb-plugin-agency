@@ -39,6 +39,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "list") return "listKnowledge";
     if (rest[0] === "get") return "getKnowledge";
     if (rest[0] === "save") return "saveKnowledge";
+    if (rest[0] === "status") return "setKnowledgeStatus";
   }
   if (head === "goal" && rest.length === 1) {
     if (rest[0] === "list") return "listGoals";
