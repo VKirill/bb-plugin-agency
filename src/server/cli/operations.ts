@@ -1,5 +1,5 @@
 import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../shared/rpc-contract";
-import { addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
+import { saveDecisionSettingsInputSchema, addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
 import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
 import { getWorkRulesInputSchema } from "../../shared/rpc-contract";
@@ -96,6 +96,9 @@ export const CLI_OPERATIONS = {
   saveAgencyRules: { input: saveAgencyRulesInputSchema, summary: "Новая версия общих правил Агентства; пустой текст выключает слой. expectedVersion = latestVersion" },
   listKnowledge: { input: emptyObjectSchema, summary: "Знания Агентства, отделов и проектов: принятые (идут в запуски по области), предложения и архив" },
   saveKnowledge: { input: saveKnowledgeInputSchema, summary: "Материал знаний; из треда сотрудника сохраняется как предложение до решения владельца" },
+  getDecisionSettings: { input: emptyObjectSchema, summary: "Оценщик: настройки, точки решения, состояние ключа и имена переменных Env Catalog" },
+  saveDecisionSettings: { input: saveDecisionSettingsInputSchema, summary: "Включить оценщика, выбрать модель, имя ключа и точки решения; expectedRevision из getDecisionSettings" },
+  testDecisionModel: { input: emptyObjectSchema, summary: "Задать оценщику один вопрос и показать ответ, уверенность и время" },
   listGoals: { input: emptyObjectSchema, summary: "Цели над главными задачами с прогрессом" },
   setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), summary: "Привязать главную задачу к цели (goalId null — отвязать)" },
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },

@@ -96,6 +96,11 @@ export type LessonOptions = {
   autoLearn?: boolean;
   /** Сколько принятых записей держит отдел: лишние уходят в архив, закреплённые остаются. */
   memoryLimit?: number;
+  /**
+   * Ответ оценщика, если владелец его включил: отказ останавливает запись, важность приходит
+   * предложением. Оценщик молчит или не уверен — работаем по своим правилам, как будто его нет.
+   */
+  verdict?: { keep: boolean; reason: string | null; importance: number | null; duplicateOf: string | null } | null;
 };
 
 /**
@@ -128,11 +133,13 @@ export function proposeLessonForJob(
   jobId: string,
   now: string,
   options: LessonOptions = {},
-): DomainResult<{ proposed: KnowledgeItem | null; archived?: KnowledgeItem[] }> {
+): DomainResult<{ proposed: KnowledgeItem | null; archived?: KnowledgeItem[]; rejected?: string }> {
   const draft = draftLesson(db, jobId, now);
   if (!draft) return ok({ proposed: null });
   const key = draft.title.slice("Урок из ".length).split(":")[0] ?? "";
   if (key && lessonExists(db, key)) return ok({ proposed: null });
+  // Оценщик сказал «не надо»: записи не будет, но владелец узнает причину одной строкой.
+  if (options.verdict && !options.verdict.keep) return ok({ proposed: null, rejected: options.verdict.reason ?? "Оценщик не советует хранить эту запись." });
   const saved = saveKnowledge(
     db,
     {
@@ -141,7 +148,8 @@ export function proposeLessonForJob(
       summary: draft.summary,
       body: draft.body,
       kind: "lesson",
-      importance: 60,
+      // Вид у урока известен по построению; спорной остаётся только важность.
+      importance: options.verdict?.importance ?? 60,
       writeReason: "Черновик после приёмки главной задачи: чтобы отдел не повторял те же круги.",
       source: draft.source,
       scopeKind: "department",

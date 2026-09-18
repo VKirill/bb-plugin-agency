@@ -310,6 +310,55 @@ export const agentModelsViewSchema = z
 export type AgentModelsView = z.infer<typeof agentModelsViewSchema>;
 
 /** Как в этом проекте делают такой вид результата: голос, стиль, эталоны. */
+/** Оценщик: настройки, точки решения и состояние ключа. Значение ключа сюда не приходит. */
+export const decisionSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    endpointKind: z.enum(["openrouter", "typesafe", "custom"]),
+    baseUrl: z.string(),
+    model: z.string(),
+    keySource: z.enum(["env-catalog", "machine-env"]),
+    keyName: z.string(),
+    timeoutMs: z.number().int(),
+    points: z.array(z.string()),
+    revision: z.number().int(),
+  })
+  .strict();
+
+export const decisionViewSchema = z
+  .object({
+    settings: decisionSettingsSchema,
+    points: z.array(z.object({ key: z.string(), title: z.string(), hint: z.string(), threshold: z.number() }).strict()),
+    keyReady: z.boolean(),
+    keyProblem: z.string().nullable(),
+    catalogAvailable: z.boolean(),
+    keyOptions: z.array(z.object({ name: z.string(), service: z.string().nullable(), masked: z.string().nullable() }).strict()),
+  })
+  .strict();
+
+export const saveDecisionSettingsInputSchema = z
+  .object({
+    expectedRevision: z.number().int().min(0),
+    enabled: z.boolean(),
+    endpointKind: z.enum(["openrouter", "typesafe", "custom"]),
+    baseUrl: z.string().max(300).optional(),
+    model: z.string().max(120),
+    keySource: z.enum(["env-catalog", "machine-env"]),
+    keyName: z.string().max(120),
+    timeoutMs: z.number().int().min(1_000).max(60_000).optional(),
+    points: z.array(z.string().max(40)).max(20).optional(),
+  })
+  .strict();
+
+export const decisionTestSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    ms: z.number(),
+    answers: z.array(z.object({ id: z.string(), value: z.union([z.string(), z.number(), z.boolean()]), confidence: z.number() }).strict()),
+  }).strict(),
+  z.object({ ok: z.literal(false), ms: z.number(), reason: z.string(), detail: z.string().nullable() }).strict(),
+]);
+
 export const workProfileSchema = z
   .object({
     id: z.string(),
@@ -860,6 +909,9 @@ export const jobSearchHitSchema = z
   .strict();
 export const savedViewSchema = z.object({ id: z.string(), name: z.string(), filters: z.record(z.string(), z.string()), updatedAt: z.string() }).strict();
 export type KnowledgeItemView = z.infer<typeof knowledgeItemSchema>;
+export type DecisionView = z.infer<typeof decisionViewSchema>;
+export type DecisionSettingsView = z.infer<typeof decisionSettingsSchema>;
+export type DecisionTestView = z.infer<typeof decisionTestSchema>;
 export const backupFileSchema = z.object({ name: z.string(), size: z.number().int(), createdAt: z.string() }).strict();
 export type BackupFileView = z.infer<typeof backupFileSchema>;
 export type GoalViewRecord = z.infer<typeof goalViewSchema>;
@@ -1077,6 +1129,10 @@ export const rpcContract = defineRpcContract({
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), output: domainResultSchema(z.array(workProfileSchema)) },
   saveWorkProfile: { input: saveWorkProfileInputSchema, output: domainResultSchema(workProfileSchema) },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string().min(1), key: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  getDecisionSettings: { input: z.null(), output: domainResultSchema(decisionViewSchema) },
+  saveDecisionSettings: { input: saveDecisionSettingsInputSchema, output: domainResultSchema(decisionSettingsSchema) },
+  saveDecisionKey: { input: z.object({ name: z.string().min(1).max(120), value: z.string().min(1).max(500) }).strict(), output: domainResultSchema(z.object({ name: z.string() }).strict()) },
+  testDecisionModel: { input: z.null(), output: domainResultSchema(decisionTestSchema) },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), output: domainResultSchema(agentModelsViewSchema) },
   setModelPrices: { input: z.object({ rows: z.array(modelPriceRowSchema).max(300) }).strict(), output: modelPricesViewSchema },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },

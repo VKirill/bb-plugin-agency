@@ -1,7 +1,12 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
-import { getKnowledge, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
-import { expireLessons, proposeLessonForJob } from "./knowledge/lessons";
+import { getKnowledge, KNOWLEDGE_KINDS, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { draftLesson, expireLessons, proposeLessonForJob } from "./knowledge/lessons";
+import { getDecisionSettings, saveDecisionSettings, type SaveDecisionSettingsInput } from "./decisions/settings";
+import { askMemoryGate } from "./decisions/memory-gate";
+import { askDecisions } from "./decisions/client";
+import { DECISION_POINTS } from "../shared/decisions";
+import { listEnvKeyOptions, putEnvKey, resolveDecisionKey } from "./decisions/key";
 import { knowledgeDecisionRefusal } from "./knowledge/decide";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
 import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
@@ -246,24 +251,45 @@ export function registerAgency(bb: BbPluginApi) {
       const job = store.getJob(jobId);
       if (!job) return;
       const rules = rulesForDepartment(db, job.departmentId);
-      const written = proposeLessonForJob(db, jobId, new Date().toISOString(), {
-        autoLearn: rules.autoLearn,
-        memoryLimit: rules.memoryLimit,
-      });
-      if (!written.ok || !written.value.proposed) return;
-      const lesson = written.value.proposed;
-      const archived = written.value.archived?.length ?? 0;
-      void sendOwnerMessage(
-        {
-          text:
-            lesson.status === "accepted"
-              ? `Отдел запомнил: «${lesson.title}». Запись уже приходит в его запуски — поправьте или уберите её в «Знаниях».${archived ? ` Старых записей ушло в архив: ${archived}.` : ""}`
-              : `Предложен урок после приёмки: «${lesson.title}». Примите или поправьте его в «Знаниях» — принятое приходит во все запуски отдела.`,
-          dedupeKey: `lesson:${lesson.id}`,
-        },
-        "lesson",
-      );
-      onChanged();
+      void (async () => {
+        const now = new Date().toISOString();
+        // Оценщик спрашивается до записи и только если владелец его включил; молчит — пишем как обычно.
+        const draft = draftLesson(db, jobId, now);
+        const verdict = draft
+          ? await askMemoryGate(
+              getDecisionSettings(db),
+              { title: draft.title, summary: draft.summary, body: draft.body },
+              listKnowledge(db, { scopeKind: "department", scopeId: draft.departmentId, status: "accepted" }),
+            ).catch(() => null)
+          : null;
+        const written = proposeLessonForJob(db, jobId, now, {
+          autoLearn: rules.autoLearn,
+          memoryLimit: rules.memoryLimit,
+          verdict,
+        });
+        if (!written.ok) return;
+        if (written.value.rejected) {
+          void sendOwnerMessage(
+            { text: `Урок после приёмки ${job.key} не записан. ${written.value.rejected}`, dedupeKey: `lesson-skip:${job.id}` },
+            "lesson",
+          );
+          return;
+        }
+        if (!written.value.proposed) return;
+        const lesson = written.value.proposed;
+        const archived = written.value.archived?.length ?? 0;
+        void sendOwnerMessage(
+          {
+            text:
+              lesson.status === "accepted"
+                ? `Отдел запомнил: «${lesson.title}». Запись уже приходит в его запуски — поправьте или уберите её в «Знаниях».${archived ? ` Старых записей ушло в архив: ${archived}.` : ""}`
+                : `Предложен урок после приёмки: «${lesson.title}». Примите или поправьте его в «Знаниях» — принятое приходит во все запуски отдела.`,
+            dedupeKey: `lesson:${lesson.id}`,
+          },
+          "lesson",
+        );
+        onChanged();
+      })();
     },
   });
   const catalogRolesSettings = bb.settings.define({
@@ -646,6 +672,69 @@ export function registerAgency(bb: BbPluginApi) {
     const lead = item?.scopeId ? store.getDepartment(item.scopeId)?.leadAgentId ?? null : null;
     const refusal = knowledgeDecisionRefusal(callerAgentId, item, lead);
     return refusal ? fail(refusal.code, refusal.message) : { ok: true as const };
+  };
+
+  /**
+   * Оценщик: настройки, имена ключей из Env Catalog и живая проверка. Секрет сюда не приходит —
+   * владелец выбирает имя переменной, а сам ключ остаётся в каталоге или в окружении машины.
+   */
+  const decisionHandlers = {
+    getDecisionSettings: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const settings = getDecisionSettings(db);
+      const key = await resolveDecisionKey({ source: settings.keySource, name: settings.keyName });
+      const catalog = await listEnvKeyOptions();
+      return {
+        ok: true as const,
+        value: {
+          settings,
+          points: DECISION_POINTS.map((point) => ({ ...point })),
+          keyReady: key.ok,
+          keyProblem: key.ok ? null : key.reason,
+          catalogAvailable: catalog.available,
+          keyOptions: catalog.options,
+        },
+      };
+    },
+    saveDecisionSettings: async (input: SaveDecisionSettingsInput) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = saveDecisionSettings(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    saveDecisionKey: async (input: { name: string; value: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      // Ключ уходит в Env Catalog и шифруется там; у себя мы запоминаем только имя.
+      const stored = await putEnvKey(input.name, input.value, "Ключ оценщика Агентства");
+      return stored.ok
+        ? { ok: true as const, value: { name: input.name } }
+        : fail("invalid_command", stored.reason === "no_catalog" ? "Плагин Env Catalog не отвечает: задайте ключ переменной окружения машины." : "Нужны имя переменной и значение ключа.");
+    },
+    testDecisionModel: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const settings = getDecisionSettings(db);
+      // Проверка идёт по настройкам как есть, но выключенный оценщик проверить всё равно можно.
+      const outcome = await askDecisions(
+        { ...settings, enabled: true },
+        {
+          state: "Запись памяти отдела: «Перед сдачей прогнать тесты — дважды возвращали работу именно из-за этого».",
+          questions: [
+            { id: "keep", kind: "bool", prompt: "Стоит ли хранить эту запись в памяти отдела?" },
+            { id: "kind", kind: "choice", prompt: "Какой это вид записи?", choices: KNOWLEDGE_KINDS },
+          ],
+        },
+      );
+      return {
+        ok: true as const,
+        value: outcome.ok
+          ? { ok: true as const, ms: outcome.ms, answers: outcome.answers }
+          : { ok: false as const, ms: outcome.ms, reason: outcome.reason, detail: outcome.detail ?? null },
+      };
+    },
   };
 
   const workProfileHandlers = {
@@ -1048,8 +1137,11 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers } satisfies Pick<
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...decisionHandlers } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
+    | "getDecisionSettings"
+    | "saveDecisionSettings"
+    | "testDecisionModel"
     | "listBudgets"
     | "providerUsage"
     | "getSkillPins"
@@ -1706,6 +1798,7 @@ export function registerAgency(bb: BbPluginApi) {
     modelPrices: async () => pricesView(),
     ...agentModelHandlers,
     ...workProfileHandlers,
+    ...decisionHandlers,
     setModelPrices: async ({ rows }) => {
       const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
       applyWorkSettings(next);

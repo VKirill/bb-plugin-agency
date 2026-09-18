@@ -25,6 +25,7 @@ import { USAGE_COLLECTOR_MIGRATION } from "../runtime/usage-collector/migration.
 import { CRON_OCCURRENCE_MIGRATION } from "../triggers/cron/migration.js";
 import { ASSISTANT_MEMBERSHIP_MIGRATION } from "../runtime/assistants/migration.js";
 import { WORK_PROFILE_MIGRATION } from "../projects/work-profiles.js";
+import { DECISION_SETTINGS_MIGRATION } from "../decisions/settings.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -647,6 +648,7 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   // Что сотрудники правда читают: по этому счёту вытесняется лишнее, а не по дате записи.
   `ALTER TABLE agency_knowledge ADD COLUMN read_count INTEGER;`,
   `ALTER TABLE agency_knowledge ADD COLUMN last_read_at TEXT;`,
+  DECISION_SETTINGS_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

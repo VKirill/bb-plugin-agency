@@ -88,6 +88,7 @@ metadata:
 | Правила работы: пороги, лимиты, модели по умолчанию; бюджеты и расход | `bb agency rules get\|save\|budgets` |
 | Общие правила Агентства (верхний слой промпта) и шаблоны форм | `bb agency rules agency-get\|agency-save`, `bb agency templates list\|save` |
 | Знания: список, одна запись целиком, предложить материал, решение по записи своего отдела | `bb agency knowledge list\|get\|save\|status` |
+| Оценщик: настройки, включение, проверка связи | `bb agency decisions get\|save\|test` |
 | Цели главных задач; поиск и архив задач; показатели сотрудника | `bb agency goal list\|link`, `bb agency job search\|archive`, `bb agency agent metrics` |
 
 ## Отчёт владельцу

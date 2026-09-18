@@ -309,4 +309,88 @@ export const EN_SETTINGS: Record<string, string> = {
     "The project's list of profiles reaches every launch: the lead sees the keys and the signs.",
   "Полный текст профиля получает только та задача, которой он назначен, вместе с эталонами и добавкой к приёмке.":
     "Only the job it is set on receives the full profile, with its samples and the addition to the acceptance criteria.",
+
+  // decisions.tsx — the decision model
+  "Оценщик":
+    "Decision model",
+  "Быстрая модель, которая отвечает не текстом, а решением: выбор из списка, оценка по шкале или да/нет — и своей уверенностью.":
+    "A fast model that answers with a decision rather than text: a choice from a list, a score on a scale or yes/no — each with its own confidence.",
+  "Она не заменяет сотрудника. Её спрашивают там, где Агентство и так решает по правилу, но правило грубое: например, стоит ли запоминать запись.":
+    "It does not replace an employee. It is asked where the Agency already decides by a rule, but the rule is crude — for example, whether a record is worth remembering.",
+  "Ответ ниже порога уверенности не применяется, а молчание и ошибка равны «не знаю»: Агентство продолжает работать по своим правилам.":
+    "An answer below the confidence threshold is not applied, and silence or an error means “don't know”: the Agency keeps working by its own rules.",
+  "Спрашивать оценщика":
+    "Ask the decision model",
+  "Куда обращаться":
+    "Where to call",
+  "Адрес":
+    "Address",
+  "Совместимый с чат-форматом шлюз, например Cloudflare AI Gateway.":
+    "A gateway that speaks the chat format, e.g. Cloudflare AI Gateway.",
+  "Где лежит ключ":
+    "Where the key lives",
+  "Переменная с ключом":
+    "Variable holding the key",
+  "Ключ уйдёт в Env Catalog под выбранным именем и зашифруется там. Агентство хранит только имя.":
+    "The key goes to the Env Catalog under the chosen name and is encrypted there. The Agency keeps only the name.",
+  "Ключ на месте: {name}.":
+    "The key is in place: {name}.",
+  "Вставить ключ":
+    "Paste the key",
+  "Сохранить ключ":
+    "Save the key",
+  "Где спрашивать":
+    "Where to ask",
+  "Каждая точка включается отдельно. Выключенная точка работает по правилам Агентства, как будто оценщика нет.":
+    "Each point is switched on separately. A point that is off works by the Agency's rules, as if the decision model were not there.",
+  "Применяем с уверенностью от {percent}%.":
+    "Applied from {percent}% confidence.",
+  "Сохранить настройки":
+    "Save settings",
+  "Проверить связь":
+    "Test the connection",
+  "Что делает проверка":
+    "What the test does",
+  "Агентство задаёт модели один вопрос о тестовой записи и показывает ответ, уверенность и время. Расход — доли цента.":
+    "The Agency asks the model one question about a sample record and shows the answer, the confidence and the time. It costs a fraction of a cent.",
+  "Проверка идёт по сохранённым настройкам, поэтому сначала сохраните изменения.":
+    "The test uses the saved settings, so save your changes first.",
+  "Ответила за {ms} мс: {answers}":
+    "Answered in {ms} ms: {answers}",
+  "ключ не найден":
+    "the key was not found",
+  "не ответила вовремя":
+    "it did not answer in time",
+  "ответ не по схеме":
+    "the answer did not match the schema",
+  "запрос не прошёл":
+    "the request failed",
+  "Не получилось за {ms} мс: {reason}{detail}":
+    "Did not work out in {ms} ms: {reason}{detail}",
+  "Не удалось прочитать настройки оценщика.":
+    "Could not read the decision model settings.",
+  "Не удалось сохранить настройки оценщика.":
+    "Could not save the decision model settings.",
+  "Настройки оценщика сохранены.":
+    "Decision model settings saved.",
+  "Не удалось сохранить ключ.":
+    "Could not save the key.",
+  "Ключ сохранён в Env Catalog под именем {name}. Агентство запомнило только имя.":
+    "The key is saved in the Env Catalog under the name {name}. The Agency remembered only the name.",
+  "Спрашиваем…":
+    "Asking…",
+  "Проверка не прошла: метод недоступен.":
+    "The test did not run: the method is unavailable.",
+  "Загружаем настройки оценщика…":
+    "Loading the decision model settings…",
+  "Плагин Env Catalog не отвечает: выберите ключ из окружения машины или включите плагин.":
+    "The Env Catalog plugin is not answering: pick a key from the machine environment or enable the plugin.",
+  "Переменной с таким именем нет: выберите другую или вставьте ключ ниже.":
+    "There is no variable with that name: pick another one or paste the key below.",
+  "Укажите, в какой переменной лежит ключ.":
+    "Say which variable holds the key.",
+  "Привратник памяти":
+    "Memory gatekeeper",
+  "Перед записью урока в память отдела: хранить ли, какой это вид, нет ли в тексте секрета или временного статуса, не повтор ли это. Отказ и находка секрета останавливают запись, вид и важность приходят предложением.":
+    "Before a lesson enters the department memory: whether to keep it, what kind it is, whether the text holds a secret or a status of the day, whether it repeats an existing record. A refusal or a found secret stops the write; kind and importance arrive as a suggestion.",
 };
