@@ -374,4 +374,37 @@ export const EN_TEAM: Record<string, string> = {
   "Архив · {count}": "Archive · {count}",
   "В архиве": "Archived",
   "В архив": "Archive",
+
+  // skill-pool.tsx — библиотека навыков отдела
+  "Библиотека навыков":
+    "Skill library",
+  "Библиотека навыков отдела":
+    "The department's skill library",
+  "Навыки в профиле сотрудника едут в каждый его запуск. Библиотека — то, что отдел вправе поднять под конкретное задание.":
+    "Skills in an employee's profile go to every launch of theirs. The library is what the department may raise for a particular job.",
+  "Оценщик читает задание и открывает отсюда только то, без чего работа будет заметно хуже: на один запуск и с записью в журнал.":
+    "The decision model reads the job and opens from here only what the work would be noticeably worse without — for one launch and written into the log.",
+  "Правит библиотеку владелец или руководитель этого отдела. Пусто — работают только профили сотрудников.":
+    "The owner or this department's lead edits the library. Empty — only the employees' profiles apply.",
+  "Сохранить библиотеку":
+    "Save the library",
+  "В библиотеке: {count}":
+    "In the library: {count}",
+  "Журнал выдач":
+    "Grant log",
+  "Кому и какой навык открыли под задачу, кто решил и насколько был уверен. По журналу видно, чего отделу не хватает постоянно: такой навык стоит добавить сотруднику в профиль.":
+    "Who got which skill for which job, who decided and how sure they were. The log shows what the department lacks again and again — such a skill belongs in an employee's profile.",
+  "Пока ничего не открывали.":
+    "Nothing has been opened yet.",
+  "Загружаем библиотеку навыков…":
+    "Loading the skill library…",
+  "Не удалось прочитать библиотеку навыков отдела.":
+    "Could not read the department's skill library.",
+  "Не удалось сохранить библиотеку навыков.":
+    "Could not save the skill library.",
+  "Библиотека отдела сохранена. Оценщик будет открывать отсюда то, что подходит по заданию.":
+    "The department library is saved. The decision model will open from it whatever fits the job.",
+  "Оценщик":
+    "Decision model",
+  "Владелец": "Owner",
 };

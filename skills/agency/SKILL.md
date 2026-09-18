@@ -89,6 +89,7 @@ metadata:
 | Общие правила Агентства (верхний слой промпта) и шаблоны форм | `bb agency rules agency-get\|agency-save`, `bb agency templates list\|save` |
 | Знания: список, одна запись целиком, предложить материал, решение по записи своего отдела | `bb agency knowledge list\|get\|save\|status` |
 | Оценщик: настройки, включение, проверка связи | `bb agency decisions get\|save\|test` |
+| Библиотека навыков отдела и журнал выдач | `bb agency skills pool\|pool-save\|grants` |
 | Цели главных задач; поиск и архив задач; показатели сотрудника | `bb agency goal list\|link`, `bb agency job search\|archive`, `bb agency agent metrics` |
 
 ## Отчёт владельцу

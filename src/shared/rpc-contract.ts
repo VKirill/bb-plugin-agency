@@ -310,6 +310,22 @@ export const agentModelsViewSchema = z
 export type AgentModelsView = z.infer<typeof agentModelsViewSchema>;
 
 /** Как в этом проекте делают такой вид результата: голос, стиль, эталоны. */
+/** Одна выдача навыка под задачу: кому, что, по какой работе и кто решил. */
+export const skillGrantSchema = z
+  .object({
+    id: z.string(),
+    departmentId: z.string(),
+    agentId: z.string(),
+    jobId: z.string(),
+    jobKey: z.string(),
+    skillId: z.string(),
+    skillName: z.string(),
+    decidedBy: z.enum(["decision-model", "lead", "owner"]),
+    confidence: z.number().nullable(),
+    createdAt: z.string(),
+  })
+  .strict();
+
 /** Оценщик: настройки, точки решения и состояние ключа. Значение ключа сюда не приходит. */
 export const decisionSettingsSchema = z
   .object({
@@ -910,6 +926,7 @@ export const jobSearchHitSchema = z
 export const savedViewSchema = z.object({ id: z.string(), name: z.string(), filters: z.record(z.string(), z.string()), updatedAt: z.string() }).strict();
 export type KnowledgeItemView = z.infer<typeof knowledgeItemSchema>;
 export type DecisionView = z.infer<typeof decisionViewSchema>;
+export type SkillGrantView = z.infer<typeof skillGrantSchema>;
 export type DecisionSettingsView = z.infer<typeof decisionSettingsSchema>;
 export type DecisionTestView = z.infer<typeof decisionTestSchema>;
 export const backupFileSchema = z.object({ name: z.string(), size: z.number().int(), createdAt: z.string() }).strict();
@@ -1129,6 +1146,18 @@ export const rpcContract = defineRpcContract({
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), output: domainResultSchema(z.array(workProfileSchema)) },
   saveWorkProfile: { input: saveWorkProfileInputSchema, output: domainResultSchema(workProfileSchema) },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string().min(1), key: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  getSkillPool: {
+    input: z.object({ departmentId: z.string().min(1) }).strict(),
+    output: domainResultSchema(z.object({ departmentId: z.string(), skillIds: z.array(z.string()), grants: z.array(skillGrantSchema) }).strict()),
+  },
+  setSkillPool: {
+    input: z.object({ departmentId: z.string().min(1), skillIds: z.array(z.string().max(120)).max(60) }).strict(),
+    output: domainResultSchema(z.object({ skillIds: z.array(z.string()) }).strict()),
+  },
+  listSkillGrants: {
+    input: z.object({ departmentId: z.string().optional(), agentId: z.string().optional() }).strict(),
+    output: domainResultSchema(z.array(skillGrantSchema)),
+  },
   getDecisionSettings: { input: z.null(), output: domainResultSchema(decisionViewSchema) },
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, output: domainResultSchema(decisionSettingsSchema) },
   saveDecisionKey: { input: z.object({ name: z.string().min(1).max(120), value: z.string().min(1).max(500) }).strict(), output: domainResultSchema(z.object({ name: z.string() }).strict()) },

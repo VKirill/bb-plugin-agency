@@ -204,7 +204,13 @@ export function knowledgeOrder(left: KnowledgeItem, right: KnowledgeItem): numbe
 }
 
 /** Accepted materials of one scope as a prompt block: an index cut to its limit, full text for the few. */
-export function knowledgeBlock(db: SqlDatabase, scopeKind: KnowledgeScopeKind, scopeId: string | null): { text: string; ids: { id: string; hash: string }[] } {
+export function knowledgeBlock(
+  db: SqlDatabase,
+  scopeKind: KnowledgeScopeKind,
+  scopeId: string | null,
+  /** Записи, которые оценщик отобрал под задачу: тогда в индекс идут они, закреплённые и важные. */
+  focus?: ReadonlySet<string> | null,
+): { text: string; ids: { id: string; hash: string }[] } {
   // A database opened by an older migration step has no knowledge table yet.
   if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agency_knowledge'`).get()) return { text: "", ids: [] };
   const items = (db
@@ -218,7 +224,9 @@ export function knowledgeBlock(db: SqlDatabase, scopeKind: KnowledgeScopeKind, s
   const index: string[] = [];
   const shown: KnowledgeItem[] = [];
   let used = 0;
-  for (const item of items) {
+  // Под задачу в промпт идёт отобранное: остальное сотрудник берёт списком, если оно ему нужно.
+  const chosen = focus ? items.filter((item) => focus.has(item.id) || item.pinned || item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE) : items;
+  for (const item of chosen) {
     const line = `- [${item.kind}] ${item.title} — ${item.summary} (${item.id})`;
     if (used + line.length + 1 > KNOWLEDGE_INDEX_LIMIT) break;
     index.push(line);
@@ -227,7 +235,11 @@ export function knowledgeBlock(db: SqlDatabase, scopeKind: KnowledgeScopeKind, s
   }
   // В снимок запуска попадает то, что сотрудник правда увидел: остальное он и не читал.
   const tail = shown.length < items.length
-    ? [`Показано ${shown.length} из ${items.length}: остальное — bb agency knowledge list --input-json '{}'.`]
+    ? [
+        focus
+          ? `Показаны записи под эту задачу: ${shown.length} из ${items.length}. Остальные — bb agency knowledge list --input-json '{}'.`
+          : `Показано ${shown.length} из ${items.length}: остальное — bb agency knowledge list --input-json '{}'.`,
+      ]
     : [];
   const full: string[] = [];
   for (const item of shown) {

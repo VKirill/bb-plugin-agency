@@ -5,6 +5,7 @@ import { draftLesson, expireLessons, proposeLessonForJob } from "./knowledge/les
 import { getDecisionSettings, saveDecisionSettings, type SaveDecisionSettingsInput } from "./decisions/settings";
 import { askMemoryGate } from "./decisions/memory-gate";
 import { askBriefing } from "./decisions/briefing";
+import { listSkillGrants, listSkillPool, logSkillGrants, setSkillPool } from "./organization/skill-pool";
 import { askDecisions } from "./decisions/client";
 import { DECISION_POINTS } from "../shared/decisions";
 import { listEnvKeyOptions, putEnvKey, resolveDecisionKey } from "./decisions/key";
@@ -416,13 +417,42 @@ export function registerAgency(bb: BbPluginApi) {
     checkHost: (input) => machines.checkLaunch(input),
     checkModel,
     checkLimits: checkLaunchGate,
-    // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу.
-    briefing: async ({ job, skills }) =>
-      askBriefing(getDecisionSettings(db), {
+    // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу, а из
+    // библиотеки отдела открывает недостающее — на один запуск и с записью в журнал.
+    briefing: async ({ job, skills, catalog }) => {
+      const own = new Set(skills.map((skill) => skill.id));
+      const poolIds = new Set(listSkillPool(db, job.departmentId));
+      const pool = catalog.filter((skill) => poolIds.has(skill.id) && !own.has(skill.id));
+      const result = await askBriefing(getDecisionSettings(db), {
         job,
         skills,
+        pool,
         lessons: listKnowledge(db, { scopeKind: "department", scopeId: job.departmentId, status: "accepted" }).sort(knowledgeOrder),
-      }).then((result) => (result ? { text: result.text } : null)),
+      });
+      if (!result) return null;
+      if (result.granted.length) {
+        logSkillGrants(
+          db,
+          result.granted.map((row) => ({
+            departmentId: job.departmentId,
+            agentId: job.assignedAgentId,
+            jobId: job.key,
+            jobKey: job.key,
+            skillId: row.skill.id,
+            skillName: row.skill.name,
+            decidedBy: "decision-model" as const,
+            confidence: row.confidence,
+          })),
+          new Date().toISOString(),
+        );
+        onChanged();
+      }
+      return {
+        text: result.text,
+        addSkillIds: result.granted.map((row) => row.skill.id),
+        lessonIds: result.lessons.map((lesson) => lesson.id),
+      };
+    },
     loadCatalogRoles: async () => {
       const resolved = await resolveCatalogRoles();
       if (!resolved.ok) return resolved;
@@ -742,6 +772,37 @@ export function registerAgency(bb: BbPluginApi) {
           ? { ok: true as const, ms: outcome.ms, answers: outcome.answers }
           : { ok: false as const, ms: outcome.ms, reason: outcome.reason, detail: outcome.detail ?? null },
       };
+    },
+  };
+
+  /**
+   * Библиотека навыков отдела и журнал выдач. Библиотеку правит владелец или руководитель этого
+   * отдела: это решение о правах, но принимается оно один раз для отдела, а не на каждую задачу.
+   */
+  const skillPoolHandlers = {
+    getSkillPool: async (input: { departmentId: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return {
+        ok: true as const,
+        value: { departmentId: input.departmentId, skillIds: listSkillPool(db, input.departmentId), grants: listSkillGrants(db, { departmentId: input.departmentId, limit: 50 }) },
+      };
+    },
+    setSkillPool: async (input: { departmentId: string; skillIds: string[] }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const callerAgentId = access.value.ctx.caller?.agentId ?? null;
+      if (callerAgentId && store.getDepartment(input.departmentId)?.leadAgentId !== callerAgentId) {
+        return fail("forbidden", "Библиотеку навыков отдела правит его руководитель или владелец.");
+      }
+      const saved = setSkillPool(db, input, { agentId: callerAgentId }, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    listSkillGrants: async (input: { departmentId?: string; agentId?: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listSkillGrants(db, { ...input, limit: 200 }) };
     },
   };
 
@@ -1145,8 +1206,11 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...decisionHandlers } satisfies Pick<
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...decisionHandlers, ...skillPoolHandlers } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
+    | "getSkillPool"
+    | "setSkillPool"
+    | "listSkillGrants"
     | "getDecisionSettings"
     | "saveDecisionSettings"
     | "testDecisionModel"
@@ -1807,6 +1871,7 @@ export function registerAgency(bb: BbPluginApi) {
     ...agentModelHandlers,
     ...workProfileHandlers,
     ...decisionHandlers,
+    ...skillPoolHandlers,
     setModelPrices: async ({ rows }) => {
       const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
       applyWorkSettings(next);

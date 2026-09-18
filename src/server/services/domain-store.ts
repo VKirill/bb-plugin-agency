@@ -1911,10 +1911,12 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       const chosen = profileKey ? profiles.find((profile) => profile.key === profileKey) ?? null : null;
       return { index: workProfileIndex(profiles), body: chosen ? workProfileBlock(chosen) : null };
     },
-    knowledgeForLaunch: (departmentId: string, bindingId: string) => {
-      const agency = knowledgeBlock(db, "agency", null);
-      const project = knowledgeBlock(db, "project", bindingId);
-      const department = knowledgeBlock(db, "department", departmentId);
+    knowledgeForLaunch: (departmentId: string, bindingId: string, focusIds?: readonly string[] | null) => {
+      // Фокус подсказки: в промпт идут отобранные записи, остальные — строкой «ещё N, команда».
+      const focus = focusIds && focusIds.length ? new Set(focusIds) : null;
+      const agency = knowledgeBlock(db, "agency", null, focus);
+      const project = knowledgeBlock(db, "project", bindingId, focus);
+      const department = knowledgeBlock(db, "department", departmentId, focus);
       const ids = [...agency.ids, ...project.ids, ...department.ids];
       return ids.length ? { agency: agency.text, project: project.text, department: department.text, ids } : null;
     },

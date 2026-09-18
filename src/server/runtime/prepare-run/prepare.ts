@@ -61,9 +61,12 @@ export type PrepareRunDeps = {
   roleInstructions?: (jobId: string) => string | null;
   /** Подсказка оценщика к этой работе: навыки и записи памяти под задачу. Молчит — запуск как раньше. */
   briefing?: (input: {
-    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string };
+    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string; assignedAgentId: string };
+    /** Навыки сотрудника: они уедут в запуск в любом случае. */
     skills: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string } | null>;
+    /** Весь каталог машины: из него берётся библиотека отдела. */
+    catalog: readonly { id: string; name: string; description?: string }[];
+  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
 };
@@ -192,6 +195,24 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       if (neededIds.size > ISOLATED_LIST_LIMIT) {
         return fail("too_many_skills", `Запуску нужно ${neededIds.size} навыков с учётом плагинов, BB передаёт не больше ${ISOLATED_LIST_LIMIT}.`);
       }
+      // Подсказка спрашивается до упаковки навыков: открытое из библиотеки отдела должно уехать
+      // в тот же запуск, а не в следующий. Молчит — набор остаётся ровно профильным.
+      const briefing = deps.briefing
+        ? await deps.briefing({
+            job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, departmentId: job.departmentId, assignedAgentId: job.assignedAgentId ?? "" },
+            skills: [...neededIds]
+              .map((id) => listed.value.find((skill) => skill.id === id))
+              .filter((skill): skill is (typeof listed.value)[number] => Boolean(skill))
+              .map((skill) => ({ id: skill.id, name: skill.name, ...(skill.description ? { description: skill.description } : {}) })),
+            catalog: listed.value.map((skill) => ({ id: skill.id, name: skill.name, ...(skill.description ? { description: skill.description } : {}) })),
+          }).catch(() => null)
+        : null;
+      for (const skillId of briefing?.addSkillIds ?? []) {
+        // Потолок BB сильнее любой подсказки: сверх него навык просто не открывается.
+        if (neededIds.size >= ISOLATED_LIST_LIMIT) break;
+        if (listed.value.some((skill) => skill.id === skillId)) neededIds.add(skillId);
+      }
+
       const catalogSkills: CatalogSkillEntry[] = [];
       for (const skill of listed.value) {
         if (!neededIds.has(skill.id)) continue;
@@ -208,14 +229,6 @@ export function createPrepareRun(deps: PrepareRunDeps) {
             handoff: null,
           });
       if (!persistedInputs.ok) return persistedInputs;
-
-      // Подсказка собирается после навыков: оценщик выбирает из того, что действительно уедет в запуск.
-      const briefing = deps.briefing
-        ? await deps.briefing({
-            job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, departmentId: job.departmentId },
-            skills: catalogSkills.map((skill) => ({ id: skill.id, name: skill.name ?? skill.id, ...(skill.description ? { description: skill.description } : {}) })),
-          }).catch(() => null)
-        : null;
 
       const compiled = compileContextSnapshot({
         binding,
@@ -238,7 +251,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         providerLimits: {},
         handoff: persistedInputs.value.handoff,
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
-        knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id) ?? null,
+        knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id, briefing?.lessonIds ?? null) ?? null,
         workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,
         briefing,
         ...(pluginGrants.length ? { pluginGrants } : {}),

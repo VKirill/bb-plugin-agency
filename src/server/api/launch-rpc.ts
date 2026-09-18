@@ -163,9 +163,10 @@ export function createIsolatedLaunchRpc(deps: {
   checkLimits?: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
   /** Подсказка оценщика к запуску: навыки и записи памяти под задачу. Не задана — запуск как раньше. */
   briefing?: (input: {
-    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string };
+    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string; assignedAgentId: string };
     skills: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string } | null>;
+    catalog: readonly { id: string; name: string; description?: string }[];
+  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
   /** Installed BB plugins: tools of the plugins an employee profile selects. */
   plugins?: PluginDirectory;
   onChanged?: () => void;

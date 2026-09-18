@@ -292,6 +292,35 @@ describe("the launch briefing", () => {
     expect(briefing?.text).not.toContain("Навыки");
   });
 
+  it("opens a skill from the department library for this job and reports it separately", async () => {
+    const briefing = await askBriefing(
+      ready,
+      {
+        job: { key: "AG-42", title: "Полный аудит сайта", brief: "Технический и контентный аудит.", acceptance: "Отчёт с приоритетами." },
+        skills: [{ id: "s1", name: "ru-text" }, { id: "s2", name: "dataviz" }],
+        pool: [{ id: "p1", name: "drmax", description: "аудит сайта" }, { id: "p2", name: "telegram-ads" }],
+        lessons: [],
+      },
+      {
+        key: "k",
+        fetch: (async () =>
+          chatReply({
+            s0: { value: true, confidence: 0.9 },
+            s1: { value: false, confidence: 0.9 },
+            // Порог выдачи выше обычного: 0.55 его не проходит, 0.95 проходит.
+            p0: { value: true, confidence: 0.95 },
+            p1: { value: true, confidence: 0.55 },
+          })) as unknown as typeof fetch,
+      },
+    );
+    expect(briefing?.granted.map((row) => row.skill.name)).toEqual(["drmax"]);
+    expect(briefing?.skills.map((skill) => skill.name)).toEqual(["ru-text"]);
+    expect(briefing?.text).toContain("Открыты для этой задачи из библиотеки отдела: drmax");
+    expect(briefing?.text).toContain("журнал выдач");
+    // Навык, в котором оценщик не уверен, не открывается: права — не место для «на всякий случай».
+    expect(briefing?.text).not.toContain("telegram-ads");
+  });
+
   it("does not ask at all when the point is off or there is nothing to pick from", async () => {
     const fetchMock = vi.fn();
     expect(await askBriefing({ ...CHAT, points: [] }, { job, skills: [{ id: "s", name: "ru-text" }], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
