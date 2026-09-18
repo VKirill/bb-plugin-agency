@@ -80,6 +80,8 @@ export const jobSchema = revisionedRecordSchema
     dueAt: utcInstantSchema.nullable(),
     /** Execution contract; absent when nothing is set. */
     contract: jobContractSchema.optional(),
+    /** Work profile of the project this job follows: voice, style, approved samples. */
+    workProfileKey: z.string().trim().max(60).nullable().optional(),
     /** When the job last entered done/canceled. Listed in the workspace snapshot only. */
     closedAt: utcInstantSchema.nullable().optional(),
   })
@@ -141,6 +143,7 @@ export const createJobCommandSchema = createCommandSchema
     priority: jobPrioritySchema.default("normal"),
     dueAt: utcInstantSchema.nullable().default(null),
     contract: jobContractSchema.nullable().optional(),
+    workProfileKey: z.string().trim().max(60).nullable().optional(),
     /**
      * Without assignedAgentId: let the server pick. `lead` — the department lead;
      * `executor` / `reviewer` — the active launchable member of that role type
@@ -165,6 +168,7 @@ export const updateJobCommandSchema = changeCommandSchema
     dueAt: utcInstantSchema.nullable().optional(),
     /** null clears the contract. */
     contract: jobContractSchema.nullable().optional(),
+    workProfileKey: z.string().trim().max(60).nullable().optional(),
   })
   .strict();
 

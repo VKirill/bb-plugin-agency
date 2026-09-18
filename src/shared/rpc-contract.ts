@@ -309,6 +309,41 @@ export const agentModelsViewSchema = z
 
 export type AgentModelsView = z.infer<typeof agentModelsViewSchema>;
 
+/** Как в этом проекте делают такой вид результата: голос, стиль, эталоны. */
+export const workProfileSchema = z
+  .object({
+    id: z.string(),
+    bbProjectId: z.string(),
+    key: z.string(),
+    title: z.string(),
+    triggers: z.array(z.string()),
+    body: z.string(),
+    samples: z.array(z.object({ label: z.string(), ref: z.string(), note: z.string().optional() }).strict()),
+    acceptance: z.string(),
+    revision: z.number().int(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
+export type WorkProfileView = z.infer<typeof workProfileSchema>;
+
+export const saveWorkProfileInputSchema = z
+  .object({
+    bbProjectId: z.string().min(1),
+    key: z.string().min(1).max(60),
+    expectedRevision: z.number().int().min(0),
+    title: z.string().min(1).max(120),
+    triggers: z.array(z.string().max(120)).max(20).default([]),
+    body: z.string().min(1).max(20_000),
+    samples: z
+      .array(z.object({ label: z.string().min(1).max(120), ref: z.string().min(1).max(400), note: z.string().max(400).optional() }).strict())
+      .max(20)
+      .default([]),
+    acceptance: z.string().max(2_000).default(""),
+  })
+  .strict();
+
 export type ModelPricesView = z.infer<typeof modelPricesViewSchema>;
 export type ModelPriceRowView = z.infer<typeof modelPricesViewSchema>["rows"][number];
 
@@ -1026,6 +1061,9 @@ export const rpcContract = defineRpcContract({
   providerUsage: { input: z.null(), output: domainResultSchema(z.array(providerUsageSchema)) },
   modelPrices: { input: z.null(), output: modelPricesViewSchema },
   agentModels: { input: z.null(), output: domainResultSchema(agentModelsViewSchema) },
+  listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), output: domainResultSchema(z.array(workProfileSchema)) },
+  saveWorkProfile: { input: saveWorkProfileInputSchema, output: domainResultSchema(workProfileSchema) },
+  deleteWorkProfile: { input: z.object({ bbProjectId: z.string().min(1), key: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), output: domainResultSchema(agentModelsViewSchema) },
   setModelPrices: { input: z.object({ rows: z.array(modelPriceRowSchema).max(300) }).strict(), output: modelPricesViewSchema },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },

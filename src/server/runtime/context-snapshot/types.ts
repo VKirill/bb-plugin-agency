@@ -76,6 +76,8 @@ export type CompileContextSnapshotInput = {
   handoff: HandoffPackage | null;
   /** Agency-wide rules in force: the top prompt layer. Absent when the owner has none. */
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
+  /** Work profiles of the project: the index for everyone, the body of the one this job follows. */
+  workProfiles?: { index: string | null; body: string | null } | null;
   /** Accepted knowledge by scope, already cut to the launch limit. */
   knowledge?: { agency: string; project: string; department: string; ids: { id: string; hash: string }[] } | null;
   /** The launch's role in its job (lead, executor, reviewer): English guidance for the job layer. */

@@ -180,6 +180,32 @@ function compileOk(input: CompileContextSnapshotInput = baseInput()) {
   return result.snapshot;
 }
 
+describe("work profile in the prompt", () => {
+  it("lists the project's profiles and puts the chosen one in the job layer", () => {
+    const snapshot = compileOk(
+      baseInput({
+        workProfiles: {
+          index: "- tg-post — Пост в Telegram — признаки: пост в телеграм",
+          body: "Профиль работы проекта «Пост в Telegram» (tg-post):\nГолос Кирилла.",
+        },
+      }),
+    );
+    // The index reaches the project layer: the lead sees what this project has and picks one.
+    expect(snapshot.prompt.levels.project).toContain("tg-post — Пост в Telegram");
+    expect(snapshot.prompt.levels.project).toContain("workProfileKey");
+    // The body reaches the job layer: the executor holds the voice without being reminded.
+    expect(snapshot.prompt.levels.job).toContain("Голос Кирилла");
+    // Pinned in the digest: editing a profile does not slip into a prepared launch unnoticed.
+    expect(JSON.stringify(snapshot)).toContain("workProfileHash");
+  });
+
+  it("says nothing when the project has no profiles", () => {
+    const snapshot = compileOk();
+    expect(snapshot.prompt.levels.project).not.toContain("workProfileKey");
+    expect(JSON.stringify(snapshot)).not.toContain("workProfileHash");
+  });
+});
+
 describe("compileContextSnapshot schema 2", () => {
   it("compiles launch fields: model, two policies, MCP none, explicit handoff none", () => {
     const snapshot = compileOk();

@@ -24,6 +24,7 @@ import { DUE_REMINDER_MIGRATION } from "../runtime/due-reminder/service";
 import { USAGE_COLLECTOR_MIGRATION } from "../runtime/usage-collector/migration.js";
 import { CRON_OCCURRENCE_MIGRATION } from "../triggers/cron/migration.js";
 import { ASSISTANT_MEMBERSHIP_MIGRATION } from "../runtime/assistants/migration.js";
+import { WORK_PROFILE_MIGRATION } from "../projects/work-profiles.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -635,6 +636,8 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   `ALTER TABLE agency_launch_queue ADD COLUMN failing_since TEXT;`,
   `ALTER TABLE agency_launch_queue ADD COLUMN dropped_at TEXT;`,
   ASSISTANT_MEMBERSHIP_MIGRATION,
+  WORK_PROFILE_MIGRATION,
+  `ALTER TABLE agency_job ADD COLUMN work_profile_key TEXT;`,
 ];
 
 function statementHash(sql: string): string {

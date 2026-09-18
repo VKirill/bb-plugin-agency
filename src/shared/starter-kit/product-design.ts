@@ -399,7 +399,7 @@ export const DESIGN_KIT: KitDepartment = {
 
 ## Входы, без которых не начинаем
 - Требование или сценарий: что пользователь делает на этом экране.
-- Где это живёт: страница, компонент, платформа, ширина экрана.
+- Где это живёт: страница, компонент, платформа, ширина экрана.\n- Канал и стиль: профиль работы проекта (его ключ ставится задаче полем workProfileKey) или прямое указание владельца в брифе.
 
 ## Процесс
 1. Руководитель дизайна оценивает поручение и делит его: сценарий → макет → проверка.
@@ -437,7 +437,7 @@ How the product looks and how it is used: scenarios, page mockups, one system of
 
 ## Inputs we need before starting
 - The requirement or scenario: what the user does on this screen.
-- Where it lives: page, component, platform, screen width.
+- Where it lives: page, component, platform, screen width.\n- The channel and the style: the project's work profile (its key goes on the job as workProfileKey) or the owner's own words in the brief.
 
 ## Process
 1. The design lead judges the job and splits it: scenario → mockup → review.

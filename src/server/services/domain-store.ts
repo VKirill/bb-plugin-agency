@@ -5,6 +5,7 @@ import { handInCommentMissing } from "../runtime/hand-in/service";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
 import { foreignRuleKeys, readStoredRules, rulesForDepartment, rulesForLaunch, workRulesView, writeStoredRules } from "../rules/work-rules";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCommand, type WorkRulesView } from "../../shared/contracts/work-rules";
+import { listWorkProfiles, workProfileBlock, workProfileIndex } from "../projects/work-profiles";
 import {
   assertAcceptCurrentVersion,
   assertAssigneeInDepartment,
@@ -1419,6 +1420,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           priority: parsed.data.priority,
           dueAt: parsed.data.dueAt,
           ...(parsed.data.contract && !contractIsEmpty(parsed.data.contract) ? { contract: parsed.data.contract } : {}),
+          ...(parsed.data.workProfileKey ? { workProfileKey: parsed.data.workProfileKey } : {}),
           revision: 1,
           updatedAt: nowUtc(ctx),
         };
@@ -1522,11 +1524,15 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           hasRun: isActiveRunState(scoped.value.job.state, facts?.threadBound === true),
         });
         if (!blocked.ok) return blocked;
-        const { contract: _previousContract, ...current } = scoped.value.job;
+        const { contract: _previousContract, workProfileKey: _previousProfile, ...current } = scoped.value.job;
         const contract = parsed.data.contract === undefined ? scoped.value.job.contract : parsed.data.contract;
+        // null clears the profile, undefined keeps it: the same rule as the contract.
+        const workProfileKey =
+          parsed.data.workProfileKey === undefined ? scoped.value.job.workProfileKey : parsed.data.workProfileKey;
         const next: Job = {
           ...current,
           ...(contract && !contractIsEmpty(contract) ? { contract } : {}),
+          ...(workProfileKey ? { workProfileKey } : {}),
           title: parsed.data.title ?? scoped.value.job.title,
           brief: parsed.data.brief ?? scoped.value.job.brief,
           acceptance: parsed.data.acceptance ?? scoped.value.job.acceptance,
@@ -1897,6 +1903,14 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     reworkBlocksReview: (jobId: string, publishedHash: string | null) => reworkBlocksReview(db, jobId, publishedHash),
     handInCommentMissing: (jobId: string) => handInCommentMissing(db, jobId),
     currentAgencyRules: () => currentAgencyRules(db),
+    workProfilesForLaunch: (bindingId: string, profileKey: string | null) => {
+      const binding = repos.binding.get(bindingId);
+      if (!binding) return null;
+      const profiles = listWorkProfiles(db, binding.bbProjectId);
+      if (!profiles.length) return null;
+      const chosen = profileKey ? profiles.find((profile) => profile.key === profileKey) ?? null : null;
+      return { index: workProfileIndex(profiles), body: chosen ? workProfileBlock(chosen) : null };
+    },
     knowledgeForLaunch: (departmentId: string, bindingId: string) => {
       const agency = knowledgeBlock(db, "agency", null);
       const project = knowledgeBlock(db, "project", bindingId);

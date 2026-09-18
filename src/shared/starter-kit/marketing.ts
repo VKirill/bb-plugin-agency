@@ -1044,7 +1044,7 @@ export const SOCIAL_KIT: KitDepartment = {
 
 ## Входы, без которых не начинаем
 - Площадка и её аудитория.
-- Обещание и границы из стратегии: что можно обещать, чего нельзя.
+- Обещание и границы из стратегии: что можно обещать, чего нельзя.\n- Канал и стиль: профиль работы проекта (его ключ ставится задаче полем workProfileKey) или прямое указание владельца в брифе.
 
 ## Процесс
 1. Лид контента оценивает поручение: план, посты или разбор.
@@ -1082,7 +1082,7 @@ Presence in social networks: the publishing plan, the posts, the reading of the 
 
 ## Inputs we need before starting
 - The platform and its audience.
-- The promise and the boundaries from the strategy: what may be promised and what may not.
+- The promise and the boundaries from the strategy: what may be promised and what may not.\n- The channel and the style: the project's work profile (its key goes on the job as workProfileKey) or the owner's own words in the brief.
 
 ## Process
 1. The content lead judges the job: a plan, posts or analysis.

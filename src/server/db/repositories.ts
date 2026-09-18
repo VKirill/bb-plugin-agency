@@ -75,6 +75,7 @@ type JobRow = {
   priority: Job["priority"];
   due_at: string | null;
   contract_json?: string | null;
+  work_profile_key?: string | null;
   revision: number;
   updated_at: string;
 };
@@ -233,6 +234,7 @@ function mapJob(row: JobRow): Job {
     priority: row.priority,
     dueAt: row.due_at,
     ...parseContract(row.contract_json),
+    ...(row.work_profile_key ? { workProfileKey: row.work_profile_key } : {}),
     revision: row.revision,
     updatedAt: row.updated_at,
   };
@@ -512,8 +514,8 @@ export function createRepositories(db: SqlDatabase) {
           `INSERT INTO agency_job
             (id, key, binding_id, department_id, title, brief, acceptance, state, parent_job_id,
              assigned_agent_id, reviewer_agent_ids, observer_agent_ids, priority, due_at, revision, updated_at,
-             closed_at, contract_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             closed_at, contract_json, work_profile_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           row.id,
           row.key,
@@ -533,6 +535,7 @@ export function createRepositories(db: SqlDatabase) {
           row.updatedAt,
           isClosedJobState(row.state) ? row.updatedAt : null,
           contractJson(row.contract),
+          row.workProfileKey ?? null,
         );
       },
       update(row: Job): void {
@@ -541,7 +544,7 @@ export function createRepositories(db: SqlDatabase) {
             closed_at = CASE WHEN ? = 0 THEN NULL WHEN state = ? THEN COALESCE(closed_at, ?) ELSE ? END,
             title = ?, brief = ?, acceptance = ?, state = ?, binding_id = ?, department_id = ?,
             assigned_agent_id = ?, reviewer_agent_ids = ?, observer_agent_ids = ?, priority = ?, due_at = ?, revision = ?, updated_at = ?,
-            contract_json = ?
+            contract_json = ?, work_profile_key = ?
            WHERE id = ?`,
         ).run(
           isClosedJobState(row.state) ? 1 : 0,
@@ -562,6 +565,7 @@ export function createRepositories(db: SqlDatabase) {
           row.revision,
           row.updatedAt,
           contractJson(row.contract),
+          row.workProfileKey ?? null,
           row.id,
         );
       },

@@ -86,6 +86,7 @@ import {
   type ModelPriceTable,
 } from "./runtime/dashboard-usage/pricing";
 import { fail, ok } from "../domain/result";
+import { deleteWorkProfile, listWorkProfiles, saveWorkProfile } from "./projects/work-profiles";
 import { modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
 import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
 import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
@@ -609,6 +610,51 @@ export function registerAgency(bb: BbPluginApi) {
     return { ok: true as const, value: { hostId: binding?.hostId ?? null, catalogUnavailable: !catalog.length, rows } };
   };
 
+  /** Профили работ проекта: голос и стиль живут в проекте, а не в напоминаниях владельца. */
+  const workProfileHandlers = {
+    listWorkProfiles: async (input: { bbProjectId?: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listWorkProfiles(db, input.bbProjectId) };
+    },
+    saveWorkProfile: async (input: {
+      bbProjectId: string;
+      key: string;
+      expectedRevision: number;
+      title: string;
+      triggers?: string[];
+      body: string;
+      samples?: { label: string; ref: string; note?: string }[];
+      acceptance?: string;
+    }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = saveWorkProfile(
+        db,
+        {
+          bbProjectId: input.bbProjectId,
+          key: input.key,
+          expectedRevision: input.expectedRevision,
+          title: input.title,
+          triggers: input.triggers ?? [],
+          body: input.body,
+          samples: input.samples ?? [],
+          acceptance: input.acceptance ?? "",
+        },
+        new Date().toISOString(),
+      );
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    deleteWorkProfile: async (input: { bbProjectId: string; key: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const removed = deleteWorkProfile(db, input.bbProjectId, input.key);
+      if (removed.ok && removed.value.removed) onChanged();
+      return removed;
+    },
+  };
+
   const agentModelHandlers = {
     agentModels: () => agentModelsView(false),
     repairAgentModels: ({ agentIds }: { agentIds?: string[] }) => agentModelsView(true, agentIds),
@@ -954,7 +1000,7 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers } satisfies Pick<
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
     | "listBudgets"
     | "providerUsage"
@@ -1599,6 +1645,7 @@ export function registerAgency(bb: BbPluginApi) {
     agencyLanguage: async () => ({ language: agencyLanguage() }),
     modelPrices: async () => pricesView(),
     ...agentModelHandlers,
+    ...workProfileHandlers,
     setModelPrices: async ({ rows }) => {
       const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
       applyWorkSettings(next);

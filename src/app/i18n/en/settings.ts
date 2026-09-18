@@ -242,4 +242,32 @@ export const EN_SETTINGS: Record<string, string> = {
     "The common order of a review: open the version, walk the criteria, reproduce, describe the defects, give the verdict.",
   "Общий порядок: взять только названное, не додумывать, дать ссылку на каждый факт, сдать выжимку.":
     "The common order: take only what was named, never guess, reference every fact, hand in a digest.",
+  // work-profiles.tsx — how this project makes this kind of result
+  "Профили работ": "Work profiles",
+  "У подключения нет BB-проекта: профили работ хранятся у проекта.": "This connection has no BB project: work profiles belong to the project.",
+  "Как в этом проекте делают такой вид результата: голос канала, стиль превью, одобренные эталоны.":
+    "How this project makes this kind of result: the channel voice, the thumbnail style, the approved samples.",
+  "Список профилей приходит в каждый запуск проекта. Руководитель ставит профиль подзадаче, и его полный текст видит исполнитель — напоминать про стиль не нужно.":
+    "The list of profiles reaches every launch of the project. The lead sets a profile on a subtask and the executor sees its full text — nobody has to remind them about the style.",
+  "Профилей пока нет. Первый профиль имеет смысл завести для того, что делается регулярно: пост в канал, превью, письмо клиенту.":
+    "No profiles yet. The first one is worth writing for whatever is made regularly: a channel post, a thumbnail, a customer letter.",
+  "Ключ": "Key",
+  "Признаки": "Signs",
+  "Эталоны": "Samples",
+  "Добавить профиль": "Add a profile",
+  "Сохранить профиль": "Save the profile",
+  "Профиль сохранён. Он придёт в следующий запуск задач этого проекта.": "Profile saved. It reaches the next launch of this project's jobs.",
+  "Профиль удалён.": "Profile removed.",
+  "Не удалось сохранить профиль. Проверьте ключ и текст.": "Could not save the profile. Check the key and the text.",
+  "Загружаем профили работ…": "Loading work profiles…",
+  "Короткое имя латиницей: tg-post, zen-post, yt-thumbnail.": "A short latin name: tg-post, zen-post, yt-thumbnail.",
+  "Через запятую: по этим словам руководитель узнаёт такую работу.": "Comma separated: the words by which a lead recognises this kind of work.",
+  "Как это делается": "How it is made",
+  "Голос, стиль, длина, что никогда. Пишите так, как объяснили бы новому человеку.":
+    "Voice, style, length, what never. Write it the way you would explain it to a new person.",
+  "По строке: название | ссылка | чем хорош. Например «AG-14 | job:AG-14 | 40 000 просмотров».":
+    "One per line: label | reference | why it is good. For example \"AG-14 | job:AG-14 | 40,000 views\".",
+  "Добавка к критерию приёмки": "Added to the acceptance criteria",
+  "В задаче профиль ставится полем workProfileKey: «bb agency job update» с ключом профиля. Руководитель делает это сам, когда видит подходящую работу.":
+    "A job takes a profile through workProfileKey: `bb agency job update` with the profile key. The lead does it when they see work of that kind.",
 };

@@ -226,6 +226,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         handoff: persistedInputs.value.handoff,
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
         knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id) ?? null,
+        workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,
         ...(pluginGrants.length ? { pluginGrants } : {}),
         placement: deps.store.placementForLaunch?.(job) ?? null,
         permissionMode: withoutSandbox ? "full" : null,

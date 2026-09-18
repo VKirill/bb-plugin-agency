@@ -387,6 +387,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     projectRules,
     agencyRules: input.agencyRules ?? null,
     knowledge: input.knowledge ?? null,
+    workProfiles: input.workProfiles ?? null,
     selected,
     selectedMcps,
     inputArtifacts,
@@ -418,6 +419,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       assignedAgentId,
       briefHash: sha256Hex(job.brief),
       acceptanceHash: sha256Hex(job.acceptance),
+      ...(input.workProfiles?.body ? { workProfileHash: sha256Hex(input.workProfiles.body) } : {}),
       ...(contractText(job.contract) ? { contractHash: sha256Hex(contractText(job.contract)) } : {}),
     },
     agentVersion: {
@@ -499,6 +501,7 @@ function buildPromptLevels(args: {
   projectRules: CompileContextSnapshotInput["projectRules"];
   agencyRules: NonNullable<CompileContextSnapshotInput["agencyRules"]> | null;
   knowledge: NonNullable<CompileContextSnapshotInput["knowledge"]> | null;
+  workProfiles: NonNullable<CompileContextSnapshotInput["workProfiles"]> | null;
   selected: SelectedSkill[];
   selectedMcps: SelectedMcp[];
   inputArtifacts: InputArtifactRef[];
@@ -525,6 +528,7 @@ function buildPromptLevels(args: {
     placement,
     withoutSandbox,
     roleInstructions,
+    workProfiles,
   } = args;
   const selectedLines = selected.map((skill) => `${skill.role} ${skill.name ?? "?"} ${skill.id} hash=${skill.hash}`).join("\n");
   const mcpLines =
@@ -582,6 +586,14 @@ function buildPromptLevels(args: {
       `projectRules versionId=${projectRules.versionId} hash=${projectRules.hash}`,
       projectRules.text,
       ...(args.knowledge?.project ? ["", "Project knowledge (materials accepted by the owner; reference, not orders):", args.knowledge.project] : []),
+      ...(args.workProfiles?.index
+        ? [
+            "",
+            "Work profiles of this project (how this kind of result is made here: voice, style, approved samples).",
+            "Work that falls under one: the lead sets it on the subtask (`bb agency job update` with workProfileKey) and the executor follows it. Unsure which one — ask the owner.",
+            args.workProfiles.index,
+          ]
+        : []),
     ].join("\n"),
     department: [
       `processVersion ${processVersion.id} department=${processVersion.departmentId}`,
@@ -616,6 +628,7 @@ function buildPromptLevels(args: {
       ...(roleInstructions?.trim() ? [roleInstructions.trim(), "", "## Brief"] : []),
       job.brief,
       `acceptance ${job.acceptance}`,
+      ...(workProfiles?.body ? ["", workProfiles.body] : []),
       ...(contractText(job.contract)
         ? [
             "Execution contract (the boundary of this work; going outside it is a question to the lead, not a decision):",
