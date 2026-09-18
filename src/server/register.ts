@@ -1,9 +1,10 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
-import { getKnowledge, KNOWLEDGE_KINDS, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { getKnowledge, KNOWLEDGE_KINDS, knowledgeOrder, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
 import { draftLesson, expireLessons, proposeLessonForJob } from "./knowledge/lessons";
 import { getDecisionSettings, saveDecisionSettings, type SaveDecisionSettingsInput } from "./decisions/settings";
 import { askMemoryGate } from "./decisions/memory-gate";
+import { askBriefing } from "./decisions/briefing";
 import { askDecisions } from "./decisions/client";
 import { DECISION_POINTS } from "../shared/decisions";
 import { listEnvKeyOptions, putEnvKey, resolveDecisionKey } from "./decisions/key";
@@ -415,6 +416,13 @@ export function registerAgency(bb: BbPluginApi) {
     checkHost: (input) => machines.checkLaunch(input),
     checkModel,
     checkLimits: checkLaunchGate,
+    // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу.
+    briefing: async ({ job, skills }) =>
+      askBriefing(getDecisionSettings(db), {
+        job,
+        skills,
+        lessons: listKnowledge(db, { scopeKind: "department", scopeId: job.departmentId, status: "accepted" }).sort(knowledgeOrder),
+      }).then((result) => (result ? { text: result.text } : null)),
     loadCatalogRoles: async () => {
       const resolved = await resolveCatalogRoles();
       if (!resolved.ok) return resolved;

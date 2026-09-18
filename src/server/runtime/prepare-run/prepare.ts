@@ -59,6 +59,11 @@ export type PrepareRunDeps = {
   jobInputs?: JobInputPort;
   /** The launch's role guidance in its job (lead, executor or reviewer). */
   roleInstructions?: (jobId: string) => string | null;
+  /** Подсказка оценщика к этой работе: навыки и записи памяти под задачу. Молчит — запуск как раньше. */
+  briefing?: (input: {
+    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string };
+    skills: readonly { id: string; name: string; description?: string }[];
+  }) => Promise<{ text: string } | null>;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
 };
@@ -204,6 +209,14 @@ export function createPrepareRun(deps: PrepareRunDeps) {
           });
       if (!persistedInputs.ok) return persistedInputs;
 
+      // Подсказка собирается после навыков: оценщик выбирает из того, что действительно уедет в запуск.
+      const briefing = deps.briefing
+        ? await deps.briefing({
+            job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, departmentId: job.departmentId },
+            skills: catalogSkills.map((skill) => ({ id: skill.id, name: skill.name ?? skill.id, ...(skill.description ? { description: skill.description } : {}) })),
+          }).catch(() => null)
+        : null;
+
       const compiled = compileContextSnapshot({
         binding,
         job,
@@ -227,6 +240,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
         knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id) ?? null,
         workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,
+        briefing,
         ...(pluginGrants.length ? { pluginGrants } : {}),
         placement: deps.store.placementForLaunch?.(job) ?? null,
         permissionMode: withoutSandbox ? "full" : null,

@@ -388,6 +388,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     agencyRules: input.agencyRules ?? null,
     knowledge: input.knowledge ?? null,
     workProfiles: input.workProfiles ?? null,
+    briefing: input.briefing ?? null,
     selected,
     selectedMcps,
     inputArtifacts,
@@ -420,6 +421,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       briefHash: sha256Hex(job.brief),
       acceptanceHash: sha256Hex(job.acceptance),
       ...(input.workProfiles?.body ? { workProfileHash: sha256Hex(input.workProfiles.body) } : {}),
+      ...(input.briefing?.text ? { briefingHash: sha256Hex(input.briefing.text) } : {}),
       ...(contractText(job.contract) ? { contractHash: sha256Hex(contractText(job.contract)) } : {}),
     },
     agentVersion: {
@@ -502,6 +504,7 @@ function buildPromptLevels(args: {
   agencyRules: NonNullable<CompileContextSnapshotInput["agencyRules"]> | null;
   knowledge: NonNullable<CompileContextSnapshotInput["knowledge"]> | null;
   workProfiles: NonNullable<CompileContextSnapshotInput["workProfiles"]> | null;
+  briefing: NonNullable<CompileContextSnapshotInput["briefing"]> | null;
   selected: SelectedSkill[];
   selectedMcps: SelectedMcp[];
   inputArtifacts: InputArtifactRef[];
@@ -529,6 +532,7 @@ function buildPromptLevels(args: {
     withoutSandbox,
     roleInstructions,
     workProfiles,
+    briefing,
   } = args;
   const selectedLines = selected.map((skill) => `${skill.role} ${skill.name ?? "?"} ${skill.id} hash=${skill.hash}`).join("\n");
   const mcpLines =
@@ -629,6 +633,7 @@ function buildPromptLevels(args: {
       job.brief,
       `acceptance ${job.acceptance}`,
       ...(workProfiles?.body ? ["", workProfiles.body] : []),
+      ...(briefing?.text ? ["", briefing.text] : []),
       ...(contractText(job.contract)
         ? [
             "Execution contract (the boundary of this work; going outside it is a question to the lead, not a decision):",

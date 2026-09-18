@@ -13,6 +13,8 @@ export type CatalogSkillEntry = {
   hash: string;
   source: string;
   name?: string;
+  /** Строка из SKILL.md: нужна подсказке к запуску, в промпт не идёт. */
+  description?: string;
 };
 
 /** One plugin granted to a launch, resolved from the installed plugin and the skill catalog. */
@@ -78,6 +80,8 @@ export type CompileContextSnapshotInput = {
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
   /** Work profiles of the project: the index for everyone, the body of the one this job follows. */
   workProfiles?: { index: string | null; body: string | null } | null;
+  /** Подсказка оценщика к этой работе: навыки и записи памяти, отобранные под задачу. */
+  briefing?: { text: string } | null;
   /** Accepted knowledge by scope, already cut to the launch limit. */
   knowledge?: { agency: string; project: string; department: string; ids: { id: string; hash: string }[] } | null;
   /** The launch's role in its job (lead, executor, reviewer): English guidance for the job layer. */
@@ -175,6 +179,10 @@ export type ContextSnapshot = {
     assignedAgentId: string;
     briefHash: string;
     acceptanceHash: string;
+    /** Есть, когда руководитель назначил задаче профиль работы проекта. */
+    workProfileHash?: string;
+    /** Есть, когда подсказку к запуску собрал оценщик. */
+    briefingHash?: string;
     /** Present when the job has an execution contract. */
     contractHash?: string;
   };

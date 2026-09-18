@@ -4,6 +4,8 @@ import type { CatalogSkillId } from "../../../shared/contracts/ids.js";
 export type LiveCatalogSkill = {
   id: CatalogSkillId;
   name: string;
+  /** Строка из SKILL.md: по одному имени не понять, для чего навык. */
+  description?: string;
   pluginId: string;
   source: string;
   filePath?: string;

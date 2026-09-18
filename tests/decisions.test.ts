@@ -4,6 +4,7 @@ import { openMigratedDatabase } from "../src/server/db";
 import { getDecisionSettings, saveDecisionSettings } from "../src/server/decisions/settings";
 import { askDecisions } from "../src/server/decisions/client";
 import { askMemoryGate } from "../src/server/decisions/memory-gate";
+import { askBriefing, BRIEFING_POINT } from "../src/server/decisions/briefing";
 import { DEFAULT_DECISION_SETTINGS, type DecisionSettings } from "../src/shared/decisions";
 import { proposeLessonForJob } from "../src/server/knowledge/lessons";
 import { listKnowledge } from "../src/server/knowledge/store";
@@ -190,5 +191,80 @@ describe("a lesson and the gatekeeper's verdict", () => {
     const rest = seed(other);
     const quiet = proposeLessonForJob(other, rest.job("Без оценщика", rest.developer).id, NOW, { autoLearn: true, verdict: null });
     expect(quiet.ok && quiet.value.proposed?.importance).toBe(60);
+  });
+});
+
+describe("the launch briefing", () => {
+  const job = { key: "AG-31", title: "Статья про кокон", brief: "Написать статью по нашему методу.", acceptance: "Статья прошла вычитку." };
+  const lesson = (id: string, title: string) =>
+    ({ id, title, summary: `${title}.`, body: "Тело.", kind: "lesson", importance: 50, pinned: false, writeReason: "", readCount: 0, lastReadAt: null, source: "Тест", scopeKind: "department", scopeId: "dep_1", status: "accepted", proposedBy: null, revision: 1, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }) as never;
+  const ready = { ...ON, points: [BRIEFING_POINT] };
+
+  it("names the skills and records the model picked, and leaves the rest out", async () => {
+    const briefing = await askBriefing(
+      ready,
+      { job, skills: [{ id: "s1", name: "ru-text" }, { id: "s2", name: "telegram-ads" }], lessons: [lesson("kno_1", "Вычитка обязательна"), lesson("kno_2", "Отчёт по рекламе")] },
+      {
+        key: "k",
+        fetch: (async () =>
+          chatReply({
+            s0: { value: true, confidence: 0.9 },
+            s1: { value: false, confidence: 0.9 },
+            k0: { value: true, confidence: 0.8 },
+            k1: { value: false, confidence: 0.85 },
+          })) as unknown as typeof fetch,
+      },
+    );
+    expect(briefing?.skills.map((skill) => skill.name)).toEqual(["ru-text"]);
+    expect(briefing?.lessons.map((item) => item.id)).toEqual(["kno_1"]);
+    expect(briefing?.text).toContain("ru-text");
+    expect(briefing?.text).toContain("Вычитка обязательна");
+    // Ненужное не попадает в промпт: иначе подсказка ничем не лучше полного списка.
+    expect(briefing?.text).not.toContain("telegram-ads");
+    expect(briefing?.text).toContain("не приказ");
+  });
+
+  it("stays silent when nothing fits or the model is unsure", async () => {
+    const nothing = await askBriefing(ready, { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [] }, {
+      key: "k",
+      fetch: (async () => chatReply({ s0: { value: false, confidence: 0.99 } })) as unknown as typeof fetch,
+    });
+    expect(nothing).toBeNull();
+
+    const unsure = await askBriefing(ready, { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [] }, {
+      key: "k",
+      fetch: (async () => chatReply({ s0: { value: true, confidence: 0.3 } })) as unknown as typeof fetch,
+    });
+    expect(unsure).toBeNull();
+  });
+
+  it("drops a pick that covers half the list: that is not a hint, that is the list again", async () => {
+    const briefing = await askBriefing(
+      ready,
+      { job, skills: [{ id: "s1", name: "ru-text" }, { id: "s2", name: "dataviz" }], lessons: [lesson("kno_1", "Первая"), lesson("kno_2", "Вторая"), lesson("kno_3", "Третья"), lesson("kno_4", "Четвёртая")] },
+      {
+        key: "k",
+        fetch: (async () =>
+          chatReply({
+            s0: { value: true, confidence: 0.9 },
+            s1: { value: true, confidence: 0.9 },
+            k0: { value: true, confidence: 0.9 },
+            k1: { value: false, confidence: 0.9 },
+            k2: { value: false, confidence: 0.9 },
+            k3: { value: false, confidence: 0.9 },
+          })) as unknown as typeof fetch,
+      },
+    );
+    // Оба навыка «нужны» — сигнала нет; одна запись из четырёх — сигнал есть.
+    expect(briefing?.skills).toEqual([]);
+    expect(briefing?.lessons.map((item) => item.id)).toEqual(["kno_1"]);
+    expect(briefing?.text).not.toContain("Навыки");
+  });
+
+  it("does not ask at all when the point is off or there is nothing to pick from", async () => {
+    const fetchMock = vi.fn();
+    expect(await askBriefing({ ...ON, points: [] }, { job, skills: [{ id: "s", name: "ru-text" }], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
+    expect(await askBriefing(ready, { job, skills: [], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

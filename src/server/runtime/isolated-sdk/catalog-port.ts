@@ -29,6 +29,7 @@ export function createSdkSkillCatalogPort(skills: IsolatedSkillsApi): SkillCatal
           listed.skills.map((skill) => ({
             id: skill.id as CatalogSkillId,
             name: skill.name,
+            ...(typeof (skill as { description?: unknown }).description === "string" ? { description: (skill as { description: string }).description } : {}),
             pluginId: skill.pluginId ?? "",
             source: catalogSource(skill),
             filePath: skill.filePath,

@@ -206,6 +206,25 @@ describe("work profile in the prompt", () => {
   });
 });
 
+describe("the briefing in the prompt", () => {
+  it("puts the picked skills and records into the job layer and pins them", () => {
+    const snapshot = compileOk(
+      baseInput({
+        briefing: { text: "Подсказка к этой работе (собрал оценщик Агентства).\nНавыки: ru-text." },
+      }),
+    );
+    expect(snapshot.prompt.levels.job).toContain("Навыки: ru-text");
+    // Закреплена как всё остальное: правка подсказки не проскочит в готовый запуск.
+    expect(JSON.stringify(snapshot)).toContain("briefingHash");
+  });
+
+  it("says nothing when the decision model stayed silent", () => {
+    const snapshot = compileOk();
+    expect(snapshot.prompt.levels.job).not.toContain("оценщик");
+    expect(JSON.stringify(snapshot)).not.toContain("briefingHash");
+  });
+});
+
 describe("compileContextSnapshot schema 2", () => {
   it("compiles launch fields: model, two policies, MCP none, explicit handoff none", () => {
     const snapshot = compileOk();
