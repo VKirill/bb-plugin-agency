@@ -1,4 +1,6 @@
 import { knowledgeBlock } from "../knowledge/store";
+import { getPassport } from "../projects/passport.js";
+import { passportDeliveryFor, passportText } from "../../shared/passport.js";
 import { agencyLanguage } from "../i18n/language.js";
 import { currentAgencyRules } from "../templates/store";
 import { handInCommentMissing } from "../runtime/hand-in/service";
@@ -1910,6 +1912,20 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       if (!profiles.length) return null;
       const chosen = profileKey ? profiles.find((profile) => profile.key === profileKey) ?? null : null;
       return { index: workProfileIndex(profiles), body: chosen ? workProfileBlock(chosen) : null };
+    },
+    /**
+     * Паспорт проекта для запуска: сколько его достанется сотруднику, решает правило работы, а
+     * тип роли задаёт значение по умолчанию. Паспорта нет — слой проекта остаётся прежним.
+     */
+    passportForLaunch: (bindingId: string, departmentId: string, agentId: string | null, hostId?: string) => {
+      const binding = repos.binding.get(bindingId);
+      if (!binding) return null;
+      const passport = getPassport(db, binding.bbProjectId);
+      if (!passport) return null;
+      const rules = rulesForLaunch(db, departmentId, agentId ?? "", hostId);
+      const mode = passportDeliveryFor(memberRole(departmentId, agentId), rules);
+      const text = passportText(passport, mode);
+      return text ? { text, mode, revision: passport.revision } : null;
     },
     knowledgeForLaunch: (departmentId: string, bindingId: string, focusIds?: readonly string[] | null) => {
       // Фокус подсказки: в промпт идут отобранные записи, остальные — строкой «ещё N, команда».

@@ -80,6 +80,8 @@ export type CompileContextSnapshotInput = {
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
   /** Work profiles of the project: the index for everyone, the body of the one this job follows. */
   workProfiles?: { index: string | null; body: string | null } | null;
+  /** Паспорт проекта в том объёме, который положен этому сотруднику: сводка «что это за проект». */
+  passport?: { text: string; mode: string; revision: number } | null;
   /** Подсказка оценщика к этой работе: навыки и записи памяти, отобранные под задачу. */
   briefing?: { text: string } | null;
   /** Accepted knowledge by scope, already cut to the launch limit. */
@@ -183,6 +185,8 @@ export type ContextSnapshot = {
     workProfileHash?: string;
     /** Есть, когда подсказку к запуску собрал оценщик. */
     briefingHash?: string;
+    /** Есть, когда в запуск ушёл паспорт проекта: по хэшу видно, какую редакцию читал сотрудник. */
+    passportHash?: string;
     /** Present when the job has an execution contract. */
     contractHash?: string;
   };

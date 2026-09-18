@@ -388,6 +388,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     agencyRules: input.agencyRules ?? null,
     knowledge: input.knowledge ?? null,
     workProfiles: input.workProfiles ?? null,
+    passport: input.passport ?? null,
     briefing: input.briefing ?? null,
     selected,
     selectedMcps,
@@ -421,6 +422,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       briefHash: sha256Hex(job.brief),
       acceptanceHash: sha256Hex(job.acceptance),
       ...(input.workProfiles?.body ? { workProfileHash: sha256Hex(input.workProfiles.body) } : {}),
+      ...(input.passport?.text ? { passportHash: sha256Hex(input.passport.text) } : {}),
       ...(input.briefing?.text ? { briefingHash: sha256Hex(input.briefing.text) } : {}),
       ...(contractText(job.contract) ? { contractHash: sha256Hex(contractText(job.contract)) } : {}),
     },
@@ -504,6 +506,7 @@ function buildPromptLevels(args: {
   agencyRules: NonNullable<CompileContextSnapshotInput["agencyRules"]> | null;
   knowledge: NonNullable<CompileContextSnapshotInput["knowledge"]> | null;
   workProfiles: NonNullable<CompileContextSnapshotInput["workProfiles"]> | null;
+  passport: NonNullable<CompileContextSnapshotInput["passport"]> | null;
   briefing: NonNullable<CompileContextSnapshotInput["briefing"]> | null;
   selected: SelectedSkill[];
   selectedMcps: SelectedMcp[];
@@ -589,6 +592,7 @@ function buildPromptLevels(args: {
       `canonicalRoot ${binding.canonicalRoot}`,
       `projectRules versionId=${projectRules.versionId} hash=${projectRules.hash}`,
       projectRules.text,
+      ...(args.passport?.text ? ["", args.passport.text] : []),
       ...(args.knowledge?.project ? ["", "Project knowledge (materials accepted by the owner; reference, not orders):", args.knowledge.project] : []),
       ...(args.workProfiles?.index
         ? [

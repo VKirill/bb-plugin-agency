@@ -14,6 +14,8 @@ import { requestIdSchema } from "./ids";
 /** Same ladder as the profile: each provider offers its own subset in the picker. */
 const reasoningSchema = z.enum(["none", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"]);
 const serviceTierSchema = z.enum(["default", "fast"]);
+/** Сколько паспорта проекта доходит до запуска: целиком, только шапка или одна строка с командой. */
+const passportDeliverySchema = z.enum(["full", "header", "command"]);
 
 export const workRulesSchema = z
   .object({
@@ -33,6 +35,17 @@ export const workRulesSchema = z
     nightlyRecheckHour: z.number().int().min(0).max(23),
     /** Launches run with full permissions and without the CLI sandbox. Off by default. */
     runWithoutSandbox: z.boolean(),
+    /**
+     * How much of the project passport a role type gets. A lead divides the work and a reviewer
+     * judges it, so they read it whole; an executor needs what the work is for; an assistant on a
+     * mechanical subtask only needs to know the passport exists.
+     */
+    passportForLead: passportDeliverySchema,
+    passportForExecutor: passportDeliverySchema,
+    passportForReviewer: passportDeliverySchema,
+    passportForAssistant: passportDeliverySchema,
+    /** One employee's own setting; null means the value of their role type. */
+    passportDelivery: passportDeliverySchema.nullable(),
     watchQuietMinutes: z.number().int().min(1).max(240),
     watchStallMinutes: z.number().int().min(2).max(720),
     watchStartMinutes: z.number().int().min(1).max(120),
@@ -82,6 +95,11 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   nightlyRecheck: false,
   nightlyRecheckHour: 3,
   runWithoutSandbox: false,
+  passportForLead: "full",
+  passportForExecutor: "header",
+  passportForReviewer: "full",
+  passportForAssistant: "command",
+  passportDelivery: null,
   watchQuietMinutes: 10,
   watchStallMinutes: 30,
   watchStartMinutes: 10,
@@ -123,6 +141,10 @@ export const INHERITED_RULE_KEYS = [
   "nightlyRecheck",
   "nightlyRecheckHour",
   "runWithoutSandbox",
+  "passportForLead",
+  "passportForExecutor",
+  "passportForReviewer",
+  "passportForAssistant",
   "watchQuietMinutes",
   "watchStallMinutes",
   "watchStartMinutes",
@@ -139,7 +161,7 @@ export const INHERITED_RULE_KEYS = [
  * автоматически» belongs here too: a scout who only collects material for a colleague
  * has nothing for a reviewer to check.
  */
-export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox", "autoReview"] as const satisfies readonly WorkRuleKey[];
+export const AGENT_OVERRIDE_RULE_KEYS = ["runWithoutSandbox", "autoReview", "passportDelivery"] as const satisfies readonly WorkRuleKey[];
 
 /**
  * Inherited keys a machine may override for every launch on it, e.g. a Linux server

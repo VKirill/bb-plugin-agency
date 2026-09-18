@@ -2,6 +2,7 @@ import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../
 import { saveDecisionSettingsInputSchema, addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
 import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
+import { savePassportInputSchema, savePassportSettingsInputSchema } from "../../shared/rpc-contract";
 import { getWorkRulesInputSchema } from "../../shared/rpc-contract";
 import { saveWorkRulesCommandSchema } from "../../shared/contracts/work-rules";
 import { listDashboardUsageInputSchema } from "../../shared/contracts/dashboard-usage";
@@ -113,6 +114,12 @@ export const CLI_OPERATIONS = {
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), summary: "Профили работ проекта: как здесь делают такой результат — голос, стиль, эталоны" },
   saveWorkProfile: { input: z.object({ bbProjectId: z.string(), key: z.string(), expectedRevision: z.number().int(), title: z.string(), triggers: z.array(z.string()).optional(), body: z.string(), samples: z.array(z.object({ label: z.string(), ref: z.string(), note: z.string().optional() }).strict()).optional(), acceptance: z.string().optional() }).strict(), summary: "Сохранить профиль работы проекта; expectedRevision из listWorkProfiles, 0 для нового" },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string(), key: z.string() }).strict(), summary: "Удалить профиль работы проекта" },
+  getProjectPassport: { input: z.object({ bbProjectId: z.string() }).strict(), summary: "Паспорт проекта: что это за проект, для кого и чего здесь не делают; история редакций" },
+  savePassport: { input: savePassportInputSchema, summary: "Переписать паспорт проекта руками; expectedRevision из getProjectPassport, 0 для нового" },
+  buildProjectPassport: { input: z.object({ bbProjectId: z.string() }).strict(), summary: "Собрать паспорт проекта заново по знаниям, профилям, целям и принятым результатам" },
+  rollbackPassport: { input: z.object({ bbProjectId: z.string(), revision: z.number().int() }).strict(), summary: "Вернуть прежнюю редакцию паспорта проекта" },
+  getPassportSettings: { input: emptyObjectSchema, summary: "Настройки писаря паспорта: модель, имя ключа, через сколько принятых задач пересобирать" },
+  savePassportSettings: { input: savePassportSettingsInputSchema, summary: "Включить писаря паспорта, выбрать модель и порог пересборки; expectedRevision из getPassportSettings" },
   agentModels: { input: emptyObjectSchema, summary: "Модели сотрудников против того, что подключено в этом BB: exact, substituted (есть замена), missing (замены нет)" },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), summary: "Перевести сотрудников на доступные модели: новая версия профиля с ближайшей подключённой моделью" },
   listArchivedJobs: { input: z.object({ limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() }).strict(), summary: "Архив закрытых задач" },

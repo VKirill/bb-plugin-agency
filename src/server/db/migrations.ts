@@ -27,6 +27,8 @@ import { ASSISTANT_MEMBERSHIP_MIGRATION } from "../runtime/assistants/migration.
 import { WORK_PROFILE_MIGRATION } from "../projects/work-profiles.js";
 import { DECISION_SETTINGS_MIGRATION } from "../decisions/settings.js";
 import { SKILL_GRANT_MIGRATION, SKILL_POOL_MIGRATION } from "../organization/skill-pool.js";
+import { PASSPORT_MIGRATION, PASSPORT_VERSION_MIGRATION } from "../projects/passport.js";
+import { PASSPORT_SETTINGS_MIGRATION } from "../projects/passport-settings.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -653,6 +655,10 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   // Библиотека навыков отдела и журнал выдач: динамические права без журнала необъяснимы.
   SKILL_POOL_MIGRATION,
   SKILL_GRANT_MIGRATION,
+  // Паспорт проекта: верхний слой памяти, который сотрудник читает первым.
+  PASSPORT_MIGRATION,
+  PASSPORT_VERSION_MIGRATION,
+  PASSPORT_SETTINGS_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

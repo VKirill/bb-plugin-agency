@@ -10,6 +10,7 @@ import { agentLabel } from "../data/group-refs";
 import type { Agent, Group, Job } from "./data";
 import { JobsPage } from "./jobs";
 import { Button, Empty, HintHeading, Icon, InfoHint, PageHead, Rows, SearchInput, TabBar, Textarea } from "./shared";
+import { PassportPanel } from "./passport";
 import { WorkProfilesPanel } from "./work-profiles";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../../shared/rpc-contract";
@@ -303,7 +304,8 @@ export function ProjectPage({ project, projects, departments, agents, jobs, setJ
    {projectJobs.length===0&&<Button variant="ghost" aria-label={tr("Удалить подключение проекта")} onClick={()=>setConfirm("remove")}><Icon name="Trash2" className="size-4"/></Button>}
   </PageHead>
   {archived&&<p role="status" className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">{tr("Проект отключён: новые задачи, отделы и запуски недоступны. История, задачи и файлы сохранены.")}</p>}
-  <TabBar value={tab} onChange={setTab} tabs={["Обзор","Правила","Профили работ",`Задачи (${projectJobs.length})`]}/>
+  <TabBar value={tab} onChange={setTab} tabs={["Обзор","Правила","Паспорт","Профили работ",`Задачи (${projectJobs.length})`]}/>
+  {tab==="Паспорт"&&(project.bbProjectId?<PassportPanel bbProjectId={project.bbProjectId} notice={notice}/>:<p className="text-sm text-muted-foreground">{tr("У подключения нет BB-проекта: паспорт хранится у проекта.")}</p>)}
   {tab==="Профили работ"&&(project.bbProjectId?<WorkProfilesPanel bbProjectId={project.bbProjectId} notice={notice}/>:<p className="text-sm text-muted-foreground">{tr("У подключения нет BB-проекта: профили работ хранятся у проекта.")}</p>)}
   {tab==="Обзор"&&<div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
    {!archived&&<ProjectReadiness project={project} departments={departments} agents={agents} actions={actions} openRules={()=>setTab("Правила")} openDepartment={openDepartment}/>}

@@ -200,7 +200,7 @@ export async function askDecisions(
 }
 
 /** Что значит код ответа для владельца: он читает это в проверке связи, а не лезет в журнал. */
-function statusHint(status: number): string {
+export function statusHint(status: number): string {
   if (status === 401 || status === 403) return `HTTP ${status}: ключ не подходит — проверьте переменную с ключом`;
   if (status === 402) return `HTTP ${status}: на счету провайдера кончились средства`;
   if (status === 404) return `HTTP ${status}: модели нет на этом подключении — проверьте имя модели и «куда обращаться»`;

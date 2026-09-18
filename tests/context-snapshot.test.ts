@@ -206,6 +206,26 @@ describe("work profile in the prompt", () => {
   });
 });
 
+describe("the project passport in the prompt", () => {
+  it("puts the passport into the project layer and pins the edition", () => {
+    const snapshot = compileOk(
+      baseInput({
+        passport: { text: "Паспорт проекта: плагин «Агентство» для BB.\n### Чего здесь не делают\nБазу руками не правим.", mode: "full", revision: 3 },
+      }),
+    );
+    expect(snapshot.prompt.levels.project).toContain("Паспорт проекта");
+    expect(snapshot.prompt.levels.project).toContain("Базу руками не правим");
+    // Pinned in the digest: a rebuilt passport does not slip into a prepared launch unnoticed.
+    expect(JSON.stringify(snapshot)).toContain("passportHash");
+  });
+
+  it("says nothing when the project has no passport", () => {
+    const snapshot = compileOk();
+    expect(snapshot.prompt.levels.project).not.toContain("Паспорт проекта");
+    expect(JSON.stringify(snapshot)).not.toContain("passportHash");
+  });
+});
+
 describe("the briefing in the prompt", () => {
   it("puts the picked skills and records into the job layer and pins them", () => {
     const snapshot = compileOk(

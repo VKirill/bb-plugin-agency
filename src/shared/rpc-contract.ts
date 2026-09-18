@@ -375,6 +375,107 @@ export const decisionTestSchema = z.union([
   z.object({ ok: z.literal(false), ms: z.number(), reason: z.string(), detail: z.string().nullable() }).strict(),
 ]);
 
+/** Паспорт проекта: сводка «что это за проект», её история и настройки писаря. */
+export const passportSectionSchema = z.object({ key: z.string(), text: z.string() }).strict();
+
+export const projectPassportSchema = z
+  .object({
+    id: z.string(),
+    bbProjectId: z.string(),
+    header: z.string(),
+    sections: z.array(passportSectionSchema),
+    sourceDigest: z.string(),
+    acceptedJobs: z.number().int(),
+    builtBy: z.enum(["model", "owner"]),
+    model: z.string().nullable(),
+    builtAt: z.string(),
+    revision: z.number().int(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
+export const passportVersionSchema = z
+  .object({
+    id: z.string(),
+    bbProjectId: z.string(),
+    revision: z.number().int(),
+    header: z.string(),
+    sections: z.array(passportSectionSchema),
+    builtBy: z.enum(["model", "owner"]),
+    model: z.string().nullable(),
+    note: z.string(),
+    builtAt: z.string(),
+  })
+  .strict();
+
+export const passportSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    baseUrl: z.string(),
+    model: z.string(),
+    keySource: z.enum(["env-catalog", "machine-env"]),
+    keyName: z.string(),
+    timeoutMs: z.number().int(),
+    triggerEveryN: z.number().int(),
+    revision: z.number().int(),
+  })
+  .strict();
+
+export const passportViewSchema = z
+  .object({
+    bbProjectId: z.string(),
+    passport: projectPassportSchema.nullable(),
+    versions: z.array(passportVersionSchema),
+    settings: passportSettingsSchema,
+    /** Что уедет в запуск при каждом объёме доставки: владелец видит это, а не догадывается. */
+    previews: z.array(z.object({ mode: z.string(), text: z.string() }).strict()),
+    /** Принято задач сейчас и порог, после которого паспорт пересоберётся сам. */
+    acceptedJobs: z.number().int(),
+    keyReady: z.boolean(),
+    /** Смотрит ли привратник новую редакцию: точка решения включается отдельно. */
+    gateEnabled: z.boolean(),
+  })
+  .strict();
+
+export const passportSettingsViewSchema = z
+  .object({ settings: passportSettingsSchema, keyReady: z.boolean(), keyProblem: z.string().nullable(), gateEnabled: z.boolean() })
+  .strict();
+
+export const savePassportInputSchema = z
+  .object({
+    bbProjectId: z.string().min(1),
+    expectedRevision: z.number().int().min(0),
+    header: z.string().max(1_000),
+    sections: z.array(z.object({ key: z.string().max(40), text: z.string().max(2_000) }).strict()).max(10),
+  })
+  .strict();
+
+export const savePassportSettingsInputSchema = z
+  .object({
+    expectedRevision: z.number().int().min(0),
+    enabled: z.boolean(),
+    baseUrl: z.string().max(300).optional(),
+    model: z.string().max(120),
+    keySource: z.enum(["env-catalog", "machine-env"]),
+    keyName: z.string().max(120),
+    timeoutMs: z.number().int().min(5_000).max(120_000).optional(),
+    triggerEveryN: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const passportBuildSchema = z.union([
+  z.object({ ok: z.literal(true), revision: z.number().int(), ms: z.number(), reason: z.literal("built") }).strict(),
+  z.object({ ok: z.literal(false), reason: z.string(), detail: z.string().nullable(), ms: z.number() }).strict(),
+]);
+
+export type ProjectPassportView = z.infer<typeof projectPassportSchema>;
+export type PassportVersionView = z.infer<typeof passportVersionSchema>;
+export type PassportPageView = z.infer<typeof passportViewSchema>;
+export type PassportSettingsView = z.infer<typeof passportSettingsSchema>;
+export type PassportSettingsPageView = z.infer<typeof passportSettingsViewSchema>;
+export type PassportBuildView = z.infer<typeof passportBuildSchema>;
+
 export const workProfileSchema = z
   .object({
     id: z.string(),
@@ -1143,6 +1244,13 @@ export const rpcContract = defineRpcContract({
   providerUsage: { input: z.null(), output: domainResultSchema(z.array(providerUsageSchema)) },
   modelPrices: { input: z.null(), output: modelPricesViewSchema },
   agentModels: { input: z.null(), output: domainResultSchema(agentModelsViewSchema) },
+  getPassportSettings: { input: z.null(), output: domainResultSchema(passportSettingsViewSchema) },
+  getProjectPassport: { input: z.object({ bbProjectId: z.string().min(1) }).strict(), output: domainResultSchema(passportViewSchema) },
+  savePassport: { input: savePassportInputSchema, output: domainResultSchema(projectPassportSchema) },
+  buildProjectPassport: { input: z.object({ bbProjectId: z.string().min(1) }).strict(), output: domainResultSchema(passportBuildSchema) },
+  rollbackPassport: { input: z.object({ bbProjectId: z.string().min(1), revision: z.number().int().min(1) }).strict(), output: domainResultSchema(projectPassportSchema) },
+  deleteProjectPassport: { input: z.object({ bbProjectId: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  savePassportSettings: { input: savePassportSettingsInputSchema, output: domainResultSchema(passportSettingsSchema) },
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), output: domainResultSchema(z.array(workProfileSchema)) },
   saveWorkProfile: { input: saveWorkProfileInputSchema, output: domainResultSchema(workProfileSchema) },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string().min(1), key: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },

@@ -11,7 +11,10 @@ import { createRpcAgencyApi, type RpcCaller } from "../data/rpc-agency-api";
 import { tr } from "../i18n";
 import { Button, Choice, InfoHint, Input, Panel } from "./shared";
 
-type FieldKind = "int" | "number" | "bool" | "optionalNumber" | "model";
+type FieldKind = "int" | "number" | "bool" | "optionalNumber" | "model" | "choice";
+
+/** Значение поля выбора, которое означает «решает уровень выше»: хранится как null. */
+const ROLE_DEFAULT = "role-default";
 
 type FieldSpec = {
   key: WorkRuleKey;
@@ -21,6 +24,10 @@ type FieldSpec = {
   min?: number;
   max?: number;
   step?: number;
+  /** For a choice field: what the owner picks from. */
+  options?: readonly { value: string; label: string }[];
+  /** A choice field that may hold null: «решает уровень выше». */
+  nullable?: boolean;
   /** For a model field: the provider, reasoning and fast mode keys the same picker sets. */
   providerKey?: WorkRuleKey;
   reasoningKey?: WorkRuleKey;
@@ -49,6 +56,30 @@ const SANDBOX_FIELD: FieldSpec = {
       <p><Tr text={"Команды, которые сотрудник всё же выполнил вне песочницы, Агентство отмечает в карточке задачи."} /></p>
     </>
   ),
+};
+
+const PASSPORT_OPTIONS = [
+  { value: "full", label: "Целиком" },
+  { value: "header", label: "Шапка" },
+  { value: "command", label: "По команде" },
+] as const;
+
+/** Паспорт проекта по типам ролей: одно правило на Агентство, отдел может задать своё. */
+const PASSPORT_GROUP: RuleGroup = {
+  title: "Паспорт проекта",
+  hint: (
+    <>
+      <p><Tr text={"Паспорт — короткая сводка «что это за проект», которую сотрудник читает перед работой. Здесь решается, сколько её доходит до каждого типа роли."}/></p>
+      <p><Tr text={"«Целиком» — все разделы; «Шапка» — что это и для кого, две-три строки; «По команде» — одна строка с командой, паспорт читается только если понадобился."}/></p>
+      <p><Tr text={"Правила проекта и профили работ приходят отдельно: паспорт их не повторяет."}/></p>
+    </>
+  ),
+  fields: [
+    { key: "passportForLead", label: "Руководителю", kind: "choice", options: PASSPORT_OPTIONS, hint: <p><Tr text={"Руководитель делит работу между сотрудниками: ему нужен весь паспорт."}/></p> },
+    { key: "passportForReviewer", label: "Проверяющему", kind: "choice", options: PASSPORT_OPTIONS, hint: <p><Tr text={"Проверяющий судит результат по «как здесь принято»: без паспорта он судит по одному критерию приёмки."}/></p> },
+    { key: "passportForExecutor", label: "Исполнителю", kind: "choice", options: PASSPORT_OPTIONS, hint: <p><Tr text={"Исполнителю обычно хватает шапки: что за продукт и для кого. Остальное он возьмёт командой, если понадобится."}/></p> },
+    { key: "passportForAssistant", label: "Помощнику", kind: "choice", options: PASSPORT_OPTIONS, hint: <p><Tr text={"Помощник делает одну механическую операцию по готовому заданию: ему достаточно знать, что паспорт есть."}/></p> },
+  ],
 };
 
 export const AGENCY_RULE_GROUPS: RuleGroup[] = [
@@ -82,6 +113,7 @@ export const AGENCY_RULE_GROUPS: RuleGroup[] = [
       { key: "watchCeilingHours", label: "Потолок одной попытки", unit: "ч", kind: "number", min: 0.5, max: 24, step: 0.5, hint: <p><Tr text={"Непрерывная работа дольше этого срока — задача останавливается на решение: возможно, сотрудник зациклился или работу надо делить."}/></p> },
     ],
   },
+  PASSPORT_GROUP,
   {
     title: "Песочница",
     fields: [SANDBOX_FIELD],
@@ -122,6 +154,15 @@ export const AGENT_REVIEW_RULE_GROUP: RuleGroup = {
   ],
 };
 
+/** Сколько паспорта достаётся одному сотруднику, если его работа не похожа на его тип роли. */
+export const AGENT_PASSPORT_RULE_GROUP: RuleGroup = {
+  title: "Паспорт проекта",
+  hint: <p><Tr text={"По умолчанию действует значение типа роли из правил отдела. Задайте своё, если этому сотруднику нужно больше или меньше."}/></p>,
+  fields: [
+    { key: "passportDelivery", label: "Сколько паспорта получает", kind: "choice", nullable: true, options: PASSPORT_OPTIONS, hint: <><p><Tr text={"«По типу роли» — как решено для его типа роли в правилах отдела."}/></p><p><Tr text={"Целиком — все разделы; шапка — что это и для кого; по команде — одна строка, паспорт читается по надобности."}/></p></> },
+  ],
+};
+
 export const LIMIT_RULE_GROUP = (scopeLabel: string, withWarn = true): RuleGroup => ({
   title: "Бюджет и параллельность",
   hint: <p>{tr("Лимиты {scope}. Они действуют вместе с лимитами других уровней: сработает самый строгий.", { scope: tr(scopeLabel) })}</p>,
@@ -159,6 +200,8 @@ function modelSelection(spec: FieldSpec, read: (key: WorkRuleKey) => unknown): E
 }
 
 function formatValue(value: unknown, spec: FieldSpec, source?: Record<string, unknown>): string {
+  if (spec.kind === "choice" && (value === null || value === undefined)) return tr("по типу роли");
+  if (spec.kind === "choice") return tr(spec.options?.find((option) => option.value === value)?.label ?? String(value));
   if (value === null || value === undefined) return tr("не задано");
   if (typeof value === "boolean") return value ? tr("да") : tr("нет");
   if (spec.kind === "model" && source) {
@@ -318,6 +361,20 @@ export function WorkRulesEditor({ scope, groups, inheritable, notice, routingHos
 function FieldInput({ spec, value, selection, disabled, onChange, onSelection, routingHostId }: { spec: FieldSpec; value: unknown; selection?: ExperimentalProviderModelPickerValue; disabled: boolean; onChange: (value: unknown) => void; onSelection: (value: ExperimentalProviderModelPickerValue) => void; routingHostId?: string }) {
   if (spec.kind === "bool") {
     return <Switch checked={Boolean(value)} disabled={disabled} onCheckedChange={(next) => onChange(next)} aria-label={tr(spec.label)} />;
+  }
+  if (spec.kind === "choice") {
+    const options = [...(spec.nullable ? [{ value: ROLE_DEFAULT, label: "По типу роли" }] : []), ...(spec.options ?? [])];
+    return (
+      <div className="w-52">
+        <Choice
+          label={spec.label}
+          disabled={disabled}
+          value={value === null || value === undefined ? ROLE_DEFAULT : String(value)}
+          onChange={(next) => onChange(next === ROLE_DEFAULT ? null : next)}
+          options={options}
+        />
+      </div>
+    );
   }
   if (spec.kind === "model" && selection) {
     return (

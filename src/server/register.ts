@@ -1,7 +1,7 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
 import { getKnowledge, KNOWLEDGE_KINDS, knowledgeOrder, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
-import { draftLesson, expireLessons, proposeLessonForJob } from "./knowledge/lessons";
+import { draftLesson, expireLessons, proposeLessonForJob, trimAllDepartments } from "./knowledge/lessons";
 import { getDecisionSettings, saveDecisionSettings, type SaveDecisionSettingsInput } from "./decisions/settings";
 import { askMemoryGate } from "./decisions/memory-gate";
 import { askBriefing } from "./decisions/briefing";
@@ -30,6 +30,8 @@ import { uuidV5 } from "./runtime/launch/operation-ids";
 
 const LAUNCH_QUEUE_NAMESPACE = "3d5f1c2e-7a4b-4c8d-9e6f-0a1b2c3d4e5f";
 const DISPATCHER_SWEEP_MS = 30_000;
+/** Сколько паспортов пересобирается за один обход диспетчера. */
+const PASSPORT_BUILDS_PER_SWEEP = 3;
 import { pinCurrentSkills, readSkillPinStatus, type SkillPinDeps } from "./runtime/isolated-sdk/skill-pin";
 import { createSdkSkillCatalogPort } from "./runtime/isolated-sdk";
 import { withCallerThread } from "./api/caller";
@@ -96,6 +98,13 @@ import {
 } from "./runtime/dashboard-usage/pricing";
 import { fail, ok } from "../domain/result";
 import { deleteWorkProfile, listWorkProfiles, saveWorkProfile } from "./projects/work-profiles";
+import { deletePassport, getPassport, listPassportVersions, rollbackPassport, writePassport } from "./projects/passport.js";
+import { readProjectRulesFile } from "./api/project-rules.js";
+import { projectAccessAllowed, type ProjectCaller } from "./api/project-access.js";
+import { PASSPORT_GATE_POINT } from "./decisions/passport-gate.js";
+import { getPassportSettings, savePassportSettings, type SavePassportSettingsInput } from "./projects/passport-settings.js";
+import { buildPassport, collectPassportMaterial, projectsDueForPassport, type ProjectRulesRead } from "./projects/passport-build.js";
+import { PASSPORT_DELIVERIES, passportText, type PassportSectionKey } from "../shared/passport.js";
 import { modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
 import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
 import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
@@ -806,10 +815,152 @@ export function registerAgency(bb: BbPluginApi) {
     },
   };
 
+  /**
+   * Паспорт проекта. Собирает его фоновая модель, применяется он сразу — поэтому владельцу здесь
+   * нужны три вещи: видеть, что уедет в запуск, вернуть прежнюю редакцию и выключить писаря.
+   */
+  /**
+   * Правила проекта с машины как материал для паспорта: по ним модель понимает, что это за
+   * проект. Машина не в сети — сборка идёт без них, а не откладывается.
+   */
+  /**
+   * Проект вызывающего. У владельца треда нет, и он видит всё; сотрудник читает паспорт и профили
+   * работ только того проекта, в котором сейчас работает: `allowedBindingIds` для этого не годится,
+   * там лежат все привязки Агентства.
+   */
+  const projectOfJob = (jobId: string): string | null => {
+    const job = store.getJob(jobId);
+    return (job ? listStoredBindings(db).find((row) => row.id === job.bindingId)?.bbProjectId : null) ?? null;
+  };
+  const assertProjectAccess = (caller: ProjectCaller, bbProjectId?: string) =>
+    projectAccessAllowed(caller, bbProjectId, projectOfJob)
+      ? { ok: true as const }
+      : fail("forbidden", "Это другой проект: паспорт и профили работ читаются только в своём.");
+
+  /** Смотрит ли привратник новую редакцию: без него паспорт применяется без проверки на секрет. */
+  const passportGateEnabled = (): boolean => {
+    const decisions = getDecisionSettings(db);
+    return decisions.enabled && decisions.points.includes(PASSPORT_GATE_POINT);
+  };
+
+  const passportProjectRules = async (bbProjectId: string): Promise<ProjectRulesRead> => {
+    const binding = listStoredBindings(db).find((row) => row.bbProjectId === bbProjectId && !row.archivedAt);
+    // Папки у проекта нет — читать нечего, и это не то же самое, что молчащая машина.
+    if (!binding) return { reachable: true, text: null };
+    const rules = await readProjectRulesFile(documents, binding).catch((error) => {
+      bb.log.warn(`Passport rules of ${bbProjectId}: ${String(error)}`);
+      return null;
+    });
+    if (!rules) return { reachable: false, text: null };
+    if (!rules.ok) {
+      bb.log.warn(`Passport rules of ${bbProjectId}: ${rules.error.code} ${rules.error.message}`);
+      return { reachable: false, text: null };
+    }
+    return { reachable: true, text: rules.value.text };
+  };
+
+  const passportHandlers = {
+    getPassportSettings: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const settings = getPassportSettings(db);
+      const key = await resolveDecisionKey({ source: settings.keySource, name: settings.keyName });
+      return { ok: true as const, value: { settings, keyReady: key.ok, keyProblem: key.ok ? null : key.reason, gateEnabled: passportGateEnabled() } };
+    },
+    savePassportSettings: async (input: SavePassportSettingsInput) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = savePassportSettings(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    getProjectPassport: async (input: { bbProjectId: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const allowed = assertProjectAccess(access.value.ctx.caller, input.bbProjectId);
+      if (!allowed.ok) return allowed;
+      const passport = getPassport(db, input.bbProjectId);
+      const settings = getPassportSettings(db);
+      const key = settings.enabled ? await resolveDecisionKey({ source: settings.keySource, name: settings.keyName }) : { ok: false as const };
+      return {
+        ok: true as const,
+        value: {
+          bbProjectId: input.bbProjectId,
+          passport,
+          versions: listPassportVersions(db, input.bbProjectId),
+          settings,
+          previews: passport
+            ? PASSPORT_DELIVERIES.map((mode) => ({ mode, text: passportText(passport, mode) ?? "" })).filter((row) => row.text)
+            : [],
+          acceptedJobs: collectPassportMaterial(db, input.bbProjectId).acceptedJobs,
+          keyReady: key.ok,
+          gateEnabled: passportGateEnabled(),
+        },
+      };
+    },
+    savePassport: async (input: { bbProjectId: string; expectedRevision: number; header: string; sections: { key: string; text: string }[] }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      // Правка владельца берёт отпечаток нынешнего материала: иначе следующая сборка сочла бы
+      // материал изменившимся и переписала бы правку в тот же час.
+      const material = collectPassportMaterial(db, input.bbProjectId);
+      const saved = writePassport(
+        db,
+        {
+          bbProjectId: input.bbProjectId,
+          header: input.header,
+          sections: input.sections.map((section) => ({ key: section.key as PassportSectionKey, text: section.text })),
+          sourceDigest: material.digest,
+          acceptedJobs: material.acceptedJobs,
+          builtBy: "owner",
+          note: "Правка владельца",
+          expectedRevision: input.expectedRevision,
+        },
+        new Date().toISOString(),
+      );
+      if (saved.ok) onChanged();
+      return saved;
+    },
+    buildProjectPassport: async (input: { bbProjectId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const result = await buildPassport(db, { bbProjectId: input.bbProjectId, trigger: "manual" }, { readRules: passportProjectRules });
+      if (result.ok) onChanged();
+      return {
+        ok: true as const,
+        value: result.ok
+          ? { ok: true as const, revision: result.revision, ms: result.ms, reason: "built" as const }
+          : { ok: false as const, reason: result.reason, detail: result.detail ?? null, ms: result.ms },
+      };
+    },
+    rollbackPassport: async (input: { bbProjectId: string; revision: number }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const rolled = rollbackPassport(db, input.bbProjectId, input.revision, new Date().toISOString());
+      if (rolled.ok) onChanged();
+      return rolled;
+    },
+    deleteProjectPassport: async (input: { bbProjectId: string }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const removed = deletePassport(db, input.bbProjectId);
+      if (removed.ok && removed.value.removed) onChanged();
+      return removed;
+    },
+  };
+
   const workProfileHandlers = {
     listWorkProfiles: async (input: { bbProjectId?: string }) => {
       const access = readOnly();
       if (!access.ok) return access;
+      const caller = access.value.ctx.caller;
+      const allowed = assertProjectAccess(caller, input.bbProjectId);
+      if (!allowed.ok) return allowed;
+      // Сотрудник без явного проекта получает профили своего, а не всех проектов Агентства.
+      if (caller && !input.bbProjectId) {
+        const own = projectOfJob(caller.jobId);
+        return { ok: true as const, value: own ? listWorkProfiles(db, own) : [] };
+      }
       return { ok: true as const, value: listWorkProfiles(db, input.bbProjectId) };
     },
     saveWorkProfile: async (input: {
@@ -1206,7 +1357,7 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...decisionHandlers, ...skillPoolHandlers } satisfies Pick<
+  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...passportHandlers, ...decisionHandlers, ...skillPoolHandlers } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
     | "getSkillPool"
     | "setSkillPool"
@@ -1645,7 +1796,10 @@ export function registerAgency(bb: BbPluginApi) {
         return [] as string[];
       });
       if (rechecks.length > 0) changed = true;
-      // Обходчик памяти: авто-уроки, которые владелец не закрепил, через свой срок уходят в архив.
+      // Обходчик памяти: бюджет отдела выравнивается независимо от того, сам он учится или нет.
+      const trimmed = trimAllDepartments(db, (departmentId) => rulesForDepartment(db, departmentId).memoryLimit, new Date().toISOString());
+      if (trimmed.length > 0) changed = true;
+      // Авто-уроки, которые владелец не закрепил, через свой срок уходят в архив.
       const expired = expireLessons(db, rulesForDepartment(db, "").memoryTtlDays, new Date().toISOString());
       if (expired.length > 0) {
         changed = true;
@@ -1658,6 +1812,29 @@ export function registerAgency(bb: BbPluginApi) {
         );
       }
       if (runRemarkPatterns() > 0) changed = true;
+      // Паспорт проекта: пересборка идёт пачками по счёту принятых задач, а не после каждой.
+      // За один обход собираем не больше нескольких: модель отвечает секунды, и очередь из
+      // десяти проектов задержала бы всё остальное, что делает диспетчер.
+      for (const bbProjectId of projectsDueForPassport(db, getPassportSettings(db)).slice(0, PASSPORT_BUILDS_PER_SWEEP)) {
+        const built = await buildPassport(db, { bbProjectId, trigger: "auto" }, { readRules: passportProjectRules }).catch((error) => {
+          bb.log.warn(`Passport ${bbProjectId}: ${String(error)}`);
+          return null;
+        });
+        if (built?.ok) {
+          changed = true;
+          continue;
+        }
+        // Отказ привратника владелец должен увидеть: паспорт читают все сотрудники проекта.
+        if (built && built.reason === "refused") {
+          void sendOwnerMessage(
+            {
+              text: `Паспорт проекта ${bbProjectId} не обновлён: ${built.detail ?? "привратник отклонил редакцию"}.`,
+              dedupeKey: `passport-refused:${bbProjectId}:${new Date().toISOString().slice(0, 10)}`,
+            },
+            "passport",
+          );
+        }
+      }
       if (changed) onChanged();
       await sweepTelegramOutbox({
         db,
@@ -1870,6 +2047,7 @@ export function registerAgency(bb: BbPluginApi) {
     modelPrices: async () => pricesView(),
     ...agentModelHandlers,
     ...workProfileHandlers,
+    ...passportHandlers,
     ...decisionHandlers,
     ...skillPoolHandlers,
     setModelPrices: async ({ rows }) => {

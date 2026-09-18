@@ -253,6 +253,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
         knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id, briefing?.lessonIds ?? null) ?? null,
         workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,
+        passport: deps.store.passportForLaunch?.(binding.id, job.departmentId, job.assignedAgentId ?? null, binding.hostId) ?? null,
         briefing,
         ...(pluginGrants.length ? { pluginGrants } : {}),
         placement: deps.store.placementForLaunch?.(job) ?? null,
