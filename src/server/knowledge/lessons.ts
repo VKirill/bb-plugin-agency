@@ -168,6 +168,19 @@ export function proposeLessonForJob(
 }
 
 /**
+ * Бюджет памяти всех отделов разом. Раньше он применялся только в момент, когда отдел принимал
+ * свой урок сам: у отдела с выключенным «учится сам» или с записями, заведёнными руками, индекс
+ * рос без предела. Обходчик выравнивает это раз в цикл.
+ */
+export function trimAllDepartments(db: SqlDatabase, limitFor: (departmentId: string) => number, now: string): KnowledgeItem[] {
+  const departments = (db.prepare(`SELECT DISTINCT scope_id AS id FROM agency_knowledge WHERE scope_kind = 'department' AND status = 'accepted' AND scope_id IS NOT NULL`).all() as { id: string }[])
+    .map((row) => row.id);
+  const archived: KnowledgeItem[] = [];
+  for (const departmentId of departments) archived.push(...trimDepartmentMemory(db, departmentId, limitFor(departmentId), now));
+  return archived;
+}
+
+/**
  * Срок жизни авто-урока: через `ttlDays` запись уходит в архив, если владелец её не закрепил и не
  * поднял важность. Память отдела не копит правила, которые никто не подтвердил.
  */
