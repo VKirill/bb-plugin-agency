@@ -127,6 +127,8 @@ export function createDomainRpc(deps: {
   boardPolicy?: () => BoardPolicy;
   /** Jobs of archived trees: kept out of the working snapshot. */
   archivedJobIds?: () => Set<string>;
+  /** Принятая версия задачи: повод предложить владельцу урок. */
+  onAccepted?: (jobId: string) => void;
 }): DomainHandlers {
   const { bb, store, db, onChanged, documents } = deps;
   const runs = createRunStore(db);
@@ -479,7 +481,13 @@ export function createDomainRpc(deps: {
         );
       }),
 
-    acceptArtifactVersion: (input) => withAccess((access) => mutated(store.acceptArtifactVersion(access.ctx, input))),
+    acceptArtifactVersion: (input) =>
+      withAccess((access) => {
+        const accepted = store.acceptArtifactVersion(access.ctx, input);
+        // Приняли главную задачу — Агентство складывает черновик урока в знания отдела.
+        if (accepted.ok) deps.onAccepted?.(input.jobId);
+        return mutated(accepted);
+      }),
 
     openArtifact: (input) =>
       withAccess(async (access) => {

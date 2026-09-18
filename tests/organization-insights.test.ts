@@ -26,10 +26,36 @@ describe("knowledge", () => {
     expect(knowledgeBlock(db, "department", s.departmentId).ids).toEqual([]);
     if (!proposal.ok) return;
     expect(setKnowledgeStatus(db, { id: proposal.value.id, expectedRevision: 1, status: "accepted" }, NOW).ok).toBe(true);
-    expect(knowledgeBlock(db, "department", s.departmentId).text).toContain("### Идея\nИсточник: Сотрудник\nЧерновик.");
+    // Обычная запись приходит строкой индекса: тело сотрудник берёт по id.
+    expect(knowledgeBlock(db, "department", s.departmentId).text).toContain("- [fact] Идея — Черновик. (");
+    expect(knowledgeBlock(db, "department", s.departmentId).text).not.toContain("### Идея");
     expect(knowledgeBlock(db, "agency", null).text).toContain("Коротко.");
     expect(saveKnowledge(db, { expectedRevision: 0, title: "x", body: "y", source: "z", scopeKind: "project", scopeId: null }, { proposedBy: null }, NOW).ok).toBe(false);
     expect(listKnowledge(db, { status: "accepted" })).toHaveLength(2);
+  });
+
+  it("keeps the important and pinned materials whole and the rest as an index", () => {
+    const { db, s } = open();
+    saveKnowledge(
+      db,
+      { expectedRevision: 0, title: "Правило релиза", summary: "Релиз только после зелёных тестов.", body: "Полный текст правила релиза.", kind: "procedure", importance: 90, source: "Владелец", scopeKind: "department", scopeId: s.departmentId },
+      { proposedBy: null },
+      NOW,
+    );
+    saveKnowledge(
+      db,
+      { expectedRevision: 0, title: "Мелочь", summary: "Незначимая заметка.", body: "Тело мелочи.", kind: "fact", importance: 20, source: "Владелец", scopeKind: "department", scopeId: s.departmentId },
+      { proposedBy: null },
+      NOW,
+    );
+    const block = knowledgeBlock(db, "department", s.departmentId);
+    expect(block.text).toContain("- [procedure] Правило релиза — Релиз только после зелёных тестов.");
+    expect(block.text).toContain("- [fact] Мелочь — Незначимая заметка.");
+    // Важная запись приходит целиком, незначимая — только строкой.
+    expect(block.text).toContain("Полный текст правила релиза.");
+    expect(block.text).not.toContain("Тело мелочи.");
+    // Обе записи закреплены в снимке: правка любой из них видна по хэшу.
+    expect(block.ids).toHaveLength(2);
   });
 });
 

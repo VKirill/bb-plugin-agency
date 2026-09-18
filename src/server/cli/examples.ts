@@ -320,6 +320,7 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     outcome: "succeeded",
   },
   listBudgets: {},
+  getKnowledge: { id: "kno_…" },
   listWorkProfiles: { bbProjectId: "proj_…" },
   saveWorkProfile: { bbProjectId: "proj_…", key: "tg-post", expectedRevision: 0, title: "Пост в Telegram", triggers: ["пост в телеграм", "тг"], body: "Голос…", samples: [{ label: "AG-14", ref: "job:AG-14", note: "40k просмотров" }], acceptance: "Написано голосом канала" },
   deleteWorkProfile: { bbProjectId: "proj_…", key: "tg-post" },

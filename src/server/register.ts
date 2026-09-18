@@ -1,6 +1,7 @@
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
-import { listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { getKnowledge, listKnowledge, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
+import { proposeLessonForJob } from "./knowledge/lessons";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
 import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
 import { agentMetrics } from "./insights/metrics";
@@ -240,6 +241,19 @@ export function registerAgency(bb: BbPluginApi) {
     send,
     boardPolicy: () => boardPolicy,
     archivedJobIds: () => archivedJobIds(db, archiveAfterDays, new Date()),
+    onAccepted: (jobId) => {
+      const proposed = proposeLessonForJob(db, jobId, new Date().toISOString());
+      if (!proposed.ok || !proposed.value.proposed) return;
+      const lesson = proposed.value.proposed;
+      void sendOwnerMessage(
+        {
+          text: `Предложен урок после приёмки: «${lesson.title}». Примите или поправьте его в «Знаниях» — принятое приходит во все запуски отдела.`,
+          dedupeKey: `lesson:${lesson.id}`,
+        },
+        "lesson",
+      );
+      onChanged();
+    },
   });
   const catalogRolesSettings = bb.settings.define({
     isolatedCatalogRolesJson: {
@@ -791,6 +805,12 @@ export function registerAgency(bb: BbPluginApi) {
       const access = readOnly();
       if (!access.ok) return access;
       return { ok: true as const, value: listKnowledge(db) };
+    },
+    getKnowledge: async (input: { id: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const item = getKnowledge(db, input.id);
+      return item ? { ok: true as const, value: item } : fail("not_found", `knowledge ${input.id} not found`);
     },
     saveKnowledge: async (input: SaveKnowledgeInput) => {
       const access = readOnly();

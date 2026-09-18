@@ -168,4 +168,5 @@ export const EN_INSIGHTS: Record<string, string> = {
   "Проверьте поставленный материал.": "Check the delivered material.",
   "Есть вывод и ссылка на источник.": "There is a conclusion and a link to the source.",
   "Предложило Агентство: замечание повторилось в нескольких задачах": "Proposed by the Agency: the remark repeated in several jobs",
+  "Предложило Агентство: черновик урока после приёмки задачи": "Proposed by the Agency: a lesson drafted after the job was accepted",
 };

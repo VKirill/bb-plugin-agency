@@ -638,6 +638,12 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   ASSISTANT_MEMBERSHIP_MIGRATION,
   WORK_PROFILE_MIGRATION,
   `ALTER TABLE agency_job ADD COLUMN work_profile_key TEXT;`,
+  // Знания приходят в промпт индексом сводок, а тело читается по запросу: иначе сотня записей не влезает.
+  `ALTER TABLE agency_knowledge ADD COLUMN summary TEXT;`,
+  `ALTER TABLE agency_knowledge ADD COLUMN kind TEXT;`,
+  `ALTER TABLE agency_knowledge ADD COLUMN importance INTEGER;`,
+  `ALTER TABLE agency_knowledge ADD COLUMN pinned INTEGER;`,
+  `ALTER TABLE agency_knowledge ADD COLUMN write_reason TEXT;`,
 ];
 
 function statementHash(sql: string): string {
