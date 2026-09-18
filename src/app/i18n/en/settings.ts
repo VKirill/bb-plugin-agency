@@ -270,4 +270,30 @@ export const EN_SETTINGS: Record<string, string> = {
   "Добавка к критерию приёмки": "Added to the acceptance criteria",
   "В задаче профиль ставится полем workProfileKey: «bb agency job update» с ключом профиля. Руководитель делает это сам, когда видит подходящую работу.":
     "A job takes a profile through workProfileKey: `bb agency job update` with the profile key. The lead does it when they see work of that kind.",
+  // work-profiles.tsx — the profile editor
+  "Профиль работы": "Work profile",
+  "Новый профиль работы": "New work profile",
+  "правка {count}": "revision {count}",
+  "Латиницей: tg-post, zen-post, yt-thumbnail.": "Latin letters: tg-post, zen-post, yt-thumbnail.",
+  "Пост в Telegram": "Telegram post",
+  "пост в телеграм, тг, пост в канал": "telegram post, tg, channel post",
+  "Работы, которые вы одобрили: исполнитель держит эту планку. Ссылкой может быть ключ задачи, адрес поста или путь к файлу.":
+    "The work you approved: the executor holds that bar. A reference can be a job key, a post address or a file path.",
+  "Название эталона": "Sample label",
+  "Ссылка на эталон": "Sample reference",
+  "Чем хорош эталон": "Why the sample is good",
+  "40 000 просмотров": "40,000 views",
+  "AG-14": "AG-14",
+  "job:AG-14": "job:AG-14",
+  "Добавить эталон": "Add a sample",
+  "Что проверяющий обязан проверить сверх критерия самой задачи.": "What the reviewer must check beyond the job's own criterion.",
+  "Что увидит сотрудник": "What the employee will see",
+  "Убрать профиль": "Remove the profile",
+  "Профиль ставится задаче полем workProfileKey — это делает руководитель, когда видит подходящую работу.":
+    "A job takes a profile through workProfileKey — the lead does it when they see work of that kind.",
+  "Как профиль попадает в работу": "How a profile reaches the work",
+  "Список профилей проекта приходит в каждый запуск: руководитель видит ключи и признаки.":
+    "The project's list of profiles reaches every launch: the lead sees the keys and the signs.",
+  "Полный текст профиля получает только та задача, которой он назначен, вместе с эталонами и добавкой к приёмке.":
+    "Only the job it is set on receives the full profile, with its samples and the addition to the acceptance criteria.",
 };

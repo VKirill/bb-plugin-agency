@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fail, ok, type DomainResult } from "../../domain";
+import { workProfileText, WORK_PROFILE_LIMIT } from "../../shared/work-profile-text.js";
 import type { SqlDatabase } from "../db/sql";
 
 /**
@@ -27,8 +28,7 @@ export const WORK_PROFILE_MIGRATION = `CREATE TABLE agency_work_profile (
     UNIQUE(bb_project_id, key)
   )`;
 
-/** Сколько знаков профиля доходит до промпта: остальное живёт в проекте и читается по ссылке. */
-export const WORK_PROFILE_LIMIT = 4_000;
+export { WORK_PROFILE_LIMIT };
 
 export type WorkProfileSample = { label: string; ref: string; note?: string };
 
@@ -177,14 +177,5 @@ export function workProfileIndex(profiles: readonly WorkProfile[]): string | nul
 
 /** Полный профиль для слоя поручения: голос, эталоны и дополнительный критерий приёмки. */
 export function workProfileBlock(profile: WorkProfile): string {
-  const samples = profile.samples.length
-    ? [
-        "Эталоны (одобрены владельцем, держим эту планку):",
-        ...profile.samples.map((sample) => `- ${sample.label}: ${sample.ref}${sample.note ? ` — ${sample.note}` : ""}`),
-      ]
-    : [];
-  const acceptance = profile.acceptance ? ["Дополнительно к критерию приёмки задачи:", profile.acceptance] : [];
-  return [`Профиль работы проекта «${profile.title}» (${profile.key}):`, profile.body, ...samples, ...acceptance]
-    .join("\n")
-    .slice(0, WORK_PROFILE_LIMIT);
+  return workProfileText(profile);
 }

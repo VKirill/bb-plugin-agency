@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract, WorkProfileView } from "../../shared/rpc-contract";
-import { Button, HintHeading, TextField } from "./shared";
-import { tr } from "../i18n";
+import { workProfileText } from "../../shared/work-profile-text";
+import { Button, Collection, HintHeading, InfoHint, TextField } from "./shared";
+import { tr, uiLocale } from "../i18n";
 
 /**
  * Профили работ проекта: как здесь делают такой вид результата. Голос канала, стиль превью,
@@ -12,17 +13,20 @@ import { tr } from "../i18n";
 
 type Result<T> = { ok: true; value: T } | { ok: false };
 
+type Sample = { label: string; ref: string; note: string };
+
 type Draft = {
   key: string;
   title: string;
   triggers: string;
   body: string;
-  samples: string;
+  samples: Sample[];
   acceptance: string;
   revision: number;
 };
 
-const EMPTY: Draft = { key: "", title: "", triggers: "", body: "", samples: "", acceptance: "", revision: 0 };
+const EMPTY_SAMPLE: Sample = { label: "", ref: "", note: "" };
+const EMPTY: Draft = { key: "", title: "", triggers: "", body: "", samples: [], acceptance: "", revision: 0 };
 
 function toDraft(profile: WorkProfileView): Draft {
   return {
@@ -30,19 +34,37 @@ function toDraft(profile: WorkProfileView): Draft {
     title: profile.title,
     triggers: profile.triggers.join(", "),
     body: profile.body,
-    samples: profile.samples.map((sample) => [sample.label, sample.ref, sample.note].filter(Boolean).join(" | ")).join("\n"),
+    samples: profile.samples.map((sample) => ({ label: sample.label, ref: sample.ref, note: sample.note ?? "" })),
     acceptance: profile.acceptance,
     revision: profile.revision,
   };
 }
 
-/** «AG-14 | job:AG-14 | 40 000 просмотров» — по строке на эталон. */
-function parseSamples(text: string): { label: string; ref: string; note?: string }[] {
-  return text
-    .split("\n")
-    .map((line) => line.split("|").map((part) => part.trim()))
-    .filter((parts) => parts[0] && parts[1])
-    .map((parts) => ({ label: parts[0]!, ref: parts[1]!, ...(parts[2] ? { note: parts[2] } : {}) }));
+function filledSamples(samples: readonly Sample[]) {
+  return samples
+    .filter((sample) => sample.label.trim() && sample.ref.trim())
+    .map((sample) => ({ label: sample.label.trim(), ref: sample.ref.trim(), ...(sample.note.trim() ? { note: sample.note.trim() } : {}) }));
+}
+
+/** Строка эталона: название, ссылка и чем он хорош — три поля вместо формата с разделителями. */
+function SampleRow({
+  sample,
+  onChange,
+  onRemove,
+}: {
+  sample: Sample;
+  onChange: (next: Sample) => void;
+  onRemove: () => void;
+}) {
+  const field = "h-9 min-w-0 rounded-md border border-border bg-background px-2 text-sm text-foreground";
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input aria-label={tr("Название эталона")} className={`${field} w-40`} placeholder={tr("AG-14")} value={sample.label} onChange={(event) => onChange({ ...sample, label: event.target.value })} />
+      <input aria-label={tr("Ссылка на эталон")} className={`${field} w-56`} placeholder={tr("job:AG-14")} value={sample.ref} onChange={(event) => onChange({ ...sample, ref: event.target.value })} />
+      <input aria-label={tr("Чем хорош эталон")} className={`${field} flex-1`} placeholder={tr("40 000 просмотров")} value={sample.note} onChange={(event) => onChange({ ...sample, note: event.target.value })} />
+      <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" onClick={onRemove}>{tr("Убрать")}</Button>
+    </div>
+  );
 }
 
 export function WorkProfilesPanel({ bbProjectId, notice }: { bbProjectId: string; notice: (text: string) => void }) {
@@ -65,7 +87,14 @@ export function WorkProfilesPanel({ bbProjectId, notice }: { bbProjectId: string
     return () => { live = false; };
   }, [rpc, bbProjectId]);
 
-  const known = useMemo(() => new Set((profiles ?? []).map((profile) => profile.key)), [profiles]);
+  /** Ровно тот текст, который придёт сотруднику: правишь форму — видишь промпт. */
+  const preview = useMemo(
+    () =>
+      draft && draft.title.trim() && draft.body.trim()
+        ? workProfileText({ key: draft.key.trim() || "…", title: draft.title.trim(), body: draft.body, samples: filledSamples(draft.samples), acceptance: draft.acceptance })
+        : null,
+    [draft],
+  );
 
   const save = async () => {
     if (!draft || pending) return;
@@ -78,7 +107,7 @@ export function WorkProfilesPanel({ bbProjectId, notice }: { bbProjectId: string
         title: draft.title,
         triggers: draft.triggers.split(",").map((item) => item.trim()).filter(Boolean),
         body: draft.body,
-        samples: parseSamples(draft.samples),
+        samples: filledSamples(draft.samples),
         acceptance: draft.acceptance,
       })) as Result<WorkProfileView>;
       if (!result.ok) {
@@ -100,6 +129,7 @@ export function WorkProfilesPanel({ bbProjectId, notice }: { bbProjectId: string
     try {
       await rpc.call("deleteWorkProfile", { bbProjectId, key });
       await load();
+      setDraft(null);
       notice(tr("Профиль удалён."));
     } finally {
       setPending(false);
@@ -110,81 +140,104 @@ export function WorkProfilesPanel({ bbProjectId, notice }: { bbProjectId: string
 
   return (
     <div className="space-y-4" data-testid="work-profiles">
-      <HintHeading
-        title="Профили работ"
-        hint={<>
-          <p>{tr("Как в этом проекте делают такой вид результата: голос канала, стиль превью, одобренные эталоны.")}</p>
-          <p>{tr("Список профилей приходит в каждый запуск проекта. Руководитель ставит профиль подзадаче, и его полный текст видит исполнитель — напоминать про стиль не нужно.")}</p>
-        </>}
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <HintHeading
+          title="Профили работ"
+          hint={<>
+            <p>{tr("Как в этом проекте делают такой вид результата: голос канала, стиль превью, одобренные эталоны.")}</p>
+            <p>{tr("Список профилей приходит в каждый запуск проекта. Руководитель ставит профиль подзадаче, и его полный текст видит исполнитель — напоминать про стиль не нужно.")}</p>
+          </>}
+        />
+        {!draft && <Button size="sm" onClick={() => setDraft({ ...EMPTY })}>{tr("Добавить профиль")}</Button>}
+      </div>
 
-      {profiles.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{tr("Профилей пока нет. Первый профиль имеет смысл завести для того, что делается регулярно: пост в канал, превью, письмо клиенту.")}</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">{tr("Ключ")}</th>
-                <th className="px-3 py-2 font-medium">{tr("Название")}</th>
-                <th className="px-3 py-2 font-medium">{tr("Признаки")}</th>
-                <th className="px-3 py-2 font-medium">{tr("Эталоны")}</th>
-                <th className="px-3 py-2 text-right font-medium"><span className="sr-only">{tr("Строка")}</span></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {profiles.map((profile) => (
-                <tr key={profile.key} className="hover:bg-muted/20">
-                  <td className="px-3 py-2 font-mono text-xs">{profile.key}</td>
-                  <td className="px-3 py-2">{profile.title}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{profile.triggers.join(", ") || "—"}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{profile.samples.length || "—"}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setDraft(toDraft(profile))}>{tr("Изменить")}</Button>
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={pending} onClick={() => void remove(profile.key)}>{tr("Убрать")}</Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {profiles.length === 0 && !draft ? (
+        <p className="max-w-prose text-sm text-muted-foreground">{tr("Профилей пока нет. Первый профиль имеет смысл завести для того, что делается регулярно: пост в канал, превью, письмо клиенту.")}</p>
+      ) : profiles.length > 0 ? (
+        <Collection
+          columns={["Профиль", "Признаки", "Эталоны", "Изменён"]}
+          rows={profiles.map((profile) => ({
+            id: profile.key,
+            name: (
+              <span>
+                <span className="block font-medium">{profile.title}</span>
+                <span className="block font-mono text-xs text-muted-foreground">{profile.key}</span>
+              </span>
+            ),
+            cells: [
+              profile.triggers.join(", ") || "—",
+              profile.samples.length ? String(profile.samples.length) : "—",
+              new Date(profile.updatedAt).toLocaleDateString(uiLocale()),
+            ],
+            open: () => setDraft(toDraft(profile)),
+          }))}
+        />
+      ) : null}
 
-      {draft ? (
-        <section className="space-y-3 rounded-lg border border-border p-3">
-          <TextField label="Ключ" value={draft.key} onChange={(key) => setDraft({ ...draft, key })} hint="Короткое имя латиницей: tg-post, zen-post, yt-thumbnail." maxLength={60} required />
-          <TextField label="Название" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} maxLength={120} required />
-          <TextField label="Признаки" value={draft.triggers} onChange={(triggers) => setDraft({ ...draft, triggers })} hint="Через запятую: по этим словам руководитель узнаёт такую работу." />
+      {draft && (
+        <section className="max-w-3xl space-y-4 rounded-lg border border-border bg-muted/20 p-5" aria-label={tr("Профиль работы")}>
+          <h3 className="text-sm font-semibold">
+            {draft.revision > 0 ? draft.title || draft.key : tr("Новый профиль работы")}
+            {draft.revision > 0 && <span className="ml-2 font-normal text-xs text-muted-foreground">{tr("правка {count}", { count: draft.revision })}</span>}
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField label="Ключ" value={draft.key} onChange={(key) => setDraft({ ...draft, key })} hint="Латиницей: tg-post, zen-post, yt-thumbnail." maxLength={60} required />
+            <TextField label="Название" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} placeholder="Пост в Telegram" maxLength={120} required />
+          </div>
+          <TextField label="Признаки" value={draft.triggers} onChange={(triggers) => setDraft({ ...draft, triggers })} placeholder="пост в телеграм, тг, пост в канал" hint="Через запятую: по этим словам руководитель узнаёт такую работу." />
           <TextField
             label="Как это делается"
             value={draft.body}
             onChange={(body) => setDraft({ ...draft, body })}
             multiline
-            rows={10}
+            rows={8}
             hint="Голос, стиль, длина, что никогда. Пишите так, как объяснили бы новому человеку."
             required
           />
-          <TextField
-            label="Эталоны"
-            value={draft.samples}
-            onChange={(samples) => setDraft({ ...draft, samples })}
-            multiline
-            rows={4}
-            hint="По строке: название | ссылка | чем хорош. Например «AG-14 | job:AG-14 | 40 000 просмотров»."
-          />
-          <TextField label="Добавка к критерию приёмки" value={draft.acceptance} onChange={(acceptance) => setDraft({ ...draft, acceptance })} multiline rows={3} />
-          <div className="flex flex-wrap gap-2">
+
+          <div className="space-y-2">
+            <HintHeading
+              level={3}
+              title="Эталоны"
+              hint={<p>{tr("Работы, которые вы одобрили: исполнитель держит эту планку. Ссылкой может быть ключ задачи, адрес поста или путь к файлу.")}</p>}
+            />
+            {draft.samples.map((sample, index) => (
+              <SampleRow
+                key={index}
+                sample={sample}
+                onChange={(next) => setDraft({ ...draft, samples: draft.samples.map((item, at) => (at === index ? next : item)) })}
+                onRemove={() => setDraft({ ...draft, samples: draft.samples.filter((_, at) => at !== index) })}
+              />
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setDraft({ ...draft, samples: [...draft.samples, { ...EMPTY_SAMPLE }] })}>{tr("Добавить эталон")}</Button>
+          </div>
+
+          <TextField label="Добавка к критерию приёмки" value={draft.acceptance} onChange={(acceptance) => setDraft({ ...draft, acceptance })} multiline rows={3} hint="Что проверяющий обязан проверить сверх критерия самой задачи." />
+
+          {preview && (
+            <details className="rounded-md border border-border bg-background p-3 text-sm">
+              <summary className="cursor-pointer text-sm font-medium">{tr("Что увидит сотрудник")}</summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-xs text-muted-foreground">{preview}</pre>
+            </details>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => void save()} disabled={pending || !draft.key.trim() || !draft.title.trim() || !draft.body.trim()}>{tr("Сохранить профиль")}</Button>
             <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>{tr("Отмена")}</Button>
+            {draft.revision > 0 && (
+              <Button size="sm" variant="ghost" className="ml-auto" disabled={pending} onClick={() => void remove(draft.key)}>{tr("Убрать профиль")}</Button>
+            )}
           </div>
         </section>
-      ) : (
-        <Button size="sm" variant="outline" onClick={() => setDraft({ ...EMPTY })} disabled={pending}>{tr("Добавить профиль")}</Button>
       )}
 
-      {known.size > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {tr("В задаче профиль ставится полем workProfileKey: «bb agency job update» с ключом профиля. Руководитель делает это сам, когда видит подходящую работу.")}
+      {profiles.length > 0 && !draft && (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          {tr("Профиль ставится задаче полем workProfileKey — это делает руководитель, когда видит подходящую работу.")}
+          <InfoHint title="Как профиль попадает в работу">
+            <p>{tr("Список профилей проекта приходит в каждый запуск: руководитель видит ключи и признаки.")}</p>
+            <p>{tr("Полный текст профиля получает только та задача, которой он назначен, вместе с эталонами и добавкой к приёмке.")}</p>
+          </InfoHint>
         </p>
       )}
     </div>

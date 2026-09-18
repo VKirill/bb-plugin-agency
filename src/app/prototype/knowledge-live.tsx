@@ -145,7 +145,7 @@ export function KnowledgeLivePage({
             {current.status !== "accepted" && <Button data-testid="knowledge-accept" onClick={() => void setItemStatus(current, "accepted")}>{tr("Принять материал")}</Button>}
             {current.status !== "archived" && <Button variant="ghost" onClick={() => void setItemStatus(current, "archived")}>{tr("В архив")}</Button>}
             <InfoHint title="Как материал доходит до запуска">
-              <p>{tr("Принятый материал добавляется в промпт каждого запуска своей области: знания Агентства — всем, отдела — задачам отдела, проекта — задачам в этой папке. До 8 000 символов на слой; что не поместилось, сотрудник найдёт через bb agency knowledge list.")}</p>
+              <p>{tr("Принятый материал попадает в промпт каждого запуска своей области строкой индекса: вид, название и сводка. Полный текст сотрудник берёт сам через bb agency knowledge get; целиком сразу приходят только закреплённые и важные записи.")}</p>
               <p>{tr("Это справка, не приказ: при противоречии с регламентом или поручением сотрудник задаёт вопрос.")}</p>
             </InfoHint>
           </div>
