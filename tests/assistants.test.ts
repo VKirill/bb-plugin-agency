@@ -167,4 +167,61 @@ describe("saving a department with assistants", () => {
     // An executor never carries the field, whatever the caller sends.
     expect(rows.find((row) => row.agentId === s.developer)?.helpsAgentId).toBeNull();
   });
+
+  it("retargets whom an existing assistant helps without changing the role", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const helper = s.store.provisionAgent(s.ctx, {
+      requestId: randomUUID(),
+      name: "Помощник",
+      state: "active",
+      version: {
+        version: 1,
+        role: "Секретарь руководителя",
+        instructions: "Читает и собирает.",
+        providerId: "claude-code",
+        model: "claude-haiku-4-5",
+        reasoningEffort: "low",
+        skillIds: [],
+        mcpIds: [],
+        policyVersionId: s.policyVersionId,
+      },
+    } as never);
+    if (!helper.ok) throw new Error(helper.error.message);
+    const department = s.store.getDepartment(s.departmentId)!;
+    const first = s.store.saveDepartmentProfile(s.ctx, {
+      requestId: randomUUID(),
+      expectedRevision: department.revision,
+      departmentId: s.departmentId,
+      name: department.name,
+      leadAgentId: department.leadAgentId,
+      memberships: [
+        { agentId: s.lead, role: "lead" },
+        { agentId: s.developer, role: "executor" },
+        { agentId: s.reviewer, role: "reviewer" },
+        { agentId: helper.value.agent.id, role: "assistant", helpsAgentId: s.developer },
+      ],
+    } as never);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const retargeted = s.store.saveDepartmentProfile(s.ctx, {
+      requestId: randomUUID(),
+      expectedRevision: first.value.department.revision,
+      departmentId: s.departmentId,
+      name: department.name,
+      leadAgentId: department.leadAgentId,
+      memberships: [
+        { agentId: s.lead, role: "lead" },
+        { agentId: s.developer, role: "executor" },
+        { agentId: s.reviewer, role: "reviewer" },
+        { agentId: helper.value.agent.id, role: "assistant", helpsAgentId: s.lead },
+      ],
+    } as never);
+    expect(retargeted.ok).toBe(true);
+    const rows = s.store.listMemberships(s.departmentId);
+    expect(rows.find((row) => row.agentId === helper.value.agent.id)).toMatchObject({
+      role: "assistant",
+      helpsAgentId: s.lead,
+    });
+  });
 });

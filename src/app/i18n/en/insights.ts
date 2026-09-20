@@ -102,6 +102,14 @@ export const EN_INSIGHTS: Record<string, string> = {
   "Штатный композер BB: текст идеи уже подставлен. Отправка откроет обычный чат, не скрытый запуск сотрудника.":
     "BB's official composer: the idea text is already filled in. Send opens an ordinary chat, not a hidden employee launch.",
   "Отметить сделанной": "Mark done",
+  "Итог": "Outcome",
+  "Закрыто": "Closed",
+  "Кратко напишите, что сделали. Дата и тред закроются вместе со статусом.":
+    "Briefly write what was done. The date and thread are stored with the status.",
+  "Что сделали": "What was done",
+  "Записать итог": "Save outcome",
+  "Напишите, что сделали, прежде чем отметить идею сделанной.": "Write what was done before marking the idea done.",
+  "Идея отмечена сделанной, итог записан.": "Idea marked done, the outcome is stored.",
   "Изменить идею": "Edit idea",
   "Название, проект и текст по регламенту: суть, зачем, контекст, следующий шаг. Файл появится в .bb/agency/ideas/ выбранного проекта.":
     "Title, project, and text by the regulation: gist, why, context, next step. The file will appear in .bb/agency/ideas/ of the chosen project.",

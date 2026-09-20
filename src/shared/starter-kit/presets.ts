@@ -65,6 +65,15 @@ export const LUNA: KitModel = {
   label: { ru: "GPT-5.6-Luna · быстрый режим · Codex", en: "GPT-5.6-Luna · fast mode · Codex" },
 };
 
+/** Секретарь руководителя: та же Luna, высокий reasoning в быстром режиме. */
+export const LUNA_HIGH: KitModel = {
+  providerId: "codex",
+  model: "gpt-5.6-luna",
+  reasoningEffort: "high",
+  serviceTier: "fast",
+  label: { ru: "GPT-5.6-Luna · высокий · быстрый режим · Codex", en: "GPT-5.6-Luna · high · fast mode · Codex" },
+};
+
 /** Редактура языка: вкус к формулировкам. */
 export const FABLE_EDIT: KitModel = {
   providerId: "claude-code",

@@ -98,6 +98,7 @@ describe("starter kit", () => {
     // The code is written by Grok in fast mode, planning and review go to other vendors.
     expect(preset("conveyor-coder")).toMatchObject({ providerId: "acp-cursor", model: "grok-4.6", reasoningEffort: "medium", serviceTier: "fast" });
     expect(preset("conveyor-lead")).toMatchObject({ providerId: "claude-code" });
+    expect(preset("conveyor-assistant")).toMatchObject({ providerId: "codex", model: "gpt-5.6-luna", reasoningEffort: "high", serviceTier: "fast" });
     expect(preset("conveyor-scout")).toMatchObject({ providerId: "codex", serviceTier: "fast" });
     expect(preset("conveyor-reviewer")).toMatchObject({ providerId: "codex", reasoningEffort: "high" });
     expect(conveyor.agents.every((agent) => agent.preset?.label.ru && agent.preset.label.en && !/[А-Яа-яЁё]/.test(agent.preset.label.en))).toBe(true);
@@ -131,8 +132,8 @@ describe("starter kit", () => {
   it("installs only the chosen departments, with default models, and never twice", () => {
     const t = setup();
     const installed = installStarterKit(t.ports, { keys: ["development"], language: "en" }, true);
-    expect(installed.ok && installed.value.installed.map((row) => [row.key, row.agents])).toEqual([["development", 4]]);
-    expect(t.names()).toEqual(expect.arrayContaining(["Development lead", "Lead developer", "Developer", "Code reviewer"]));
+    expect(installed.ok && installed.value.installed.map((row) => [row.key, row.agents])).toEqual([["development", 5]]);
+    expect(t.names()).toEqual(expect.arrayContaining(["Development lead", "Lead developer", "Developer", "Code reviewer", "Development lead assistant"]));
     const view = starterKitView(t.db, "en", NOW);
     expect(view.departments.find((item) => item.key === "development")?.installed?.language).toBe("en");
     expect(view.departments.find((item) => item.key === "research")?.installed).toBeNull();

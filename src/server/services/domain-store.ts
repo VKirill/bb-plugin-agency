@@ -524,7 +524,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           repos.membership.insert(row);
           continue;
         }
-        if (existing.role !== row.role) {
+        const sameHelps = (existing.helpsAgentId ?? null) === (row.helpsAgentId ?? null);
+        if (existing.role !== row.role || !sameHelps) {
           repos.membership.remove(department.id, row.agentId);
           repos.membership.insert(row);
         }

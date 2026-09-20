@@ -65,12 +65,14 @@ export function listSkillPool(db: SqlDatabase, departmentId: string): string[] {
 
 export function setSkillPool(
   db: SqlDatabase,
-  input: { departmentId: string; skillIds: readonly string[] },
+  input: { departmentId: string; skillIds: readonly string[]; mode?: "replace" | "merge" },
   actor: { agentId: string | null },
   now: string,
 ): DomainResult<{ skillIds: string[] }> {
   if (!hasTable(db, "agency_department_skill")) return fail("not_found", "Библиотека навыков ещё не создана.");
-  const wanted = [...new Set(input.skillIds.map((id) => id.trim()).filter(Boolean))];
+  const incoming = [...new Set(input.skillIds.map((id) => id.trim()).filter(Boolean))];
+  const current = listSkillPool(db, input.departmentId);
+  const wanted = input.mode === "merge" ? [...new Set([...current, ...incoming])] : incoming;
   if (wanted.length > 60) return fail("invalid_command", "В библиотеке отдела не больше 60 навыков: выберите то, чем отдел правда пользуется.");
   const apply = db.transaction(() => {
     db.prepare(`DELETE FROM agency_department_skill WHERE department_id = ?`).run(input.departmentId);

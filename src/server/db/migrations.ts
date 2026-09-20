@@ -33,7 +33,7 @@ import { SESSION_POLICY_MIGRATION } from "../delegation/session-policy.js";
 import { CLIENT_BOUNCE_MIGRATION } from "../runtime/client-bounce/service.js";
 import { AGENT_FALLBACK_LIST_MIGRATION, AGENT_FALLBACK_MIGRATION } from "../runtime/agent-fallback.js";
 import { DECISION_LOG_MIGRATION } from "../decisions/log.js";
-import { IDEAS_MIGRATION } from "../ideas/store.js";
+import { IDEA_CLOSE_MIGRATION, IDEAS_MIGRATION } from "../ideas/store.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -706,6 +706,7 @@ ALTER TABLE agency_knowledge_next RENAME TO agency_knowledge;`,
   `ALTER TABLE agency_job ADD COLUMN work_kind TEXT`,
   DECISION_LOG_MIGRATION,
   IDEAS_MIGRATION,
+  IDEA_CLOSE_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

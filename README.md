@@ -40,6 +40,35 @@ hands in a version, a reviewer checks it and the owner accepts it; the Agency
 creates and launches the next step for another department by itself; an employee
 whose workplace is a Mac mini tests a site in a real browser.
 
+## Starter departments
+
+The kit installs standing departments with a charter, a lead, executors, a reviewer
+and an assistant. What each department takes, who works inside it and which skills
+it may grant is in
+[skills/agency/references/departments.md](skills/agency/references/departments.md)
+(Russian, the skill the dispatcher reads). Phrase → department:
+[skills/agency/references/routing.md](skills/agency/references/routing.md).
+
+| Department | Takes | Does not take |
+| --- | --- | --- |
+| Product | Spec / `proposal.md` for a new program | Code |
+| Development | Feature / bugfix on an accepted spec | A new program without a spec |
+| Design | Screen, HTML prototype, image | CSS/React by the designer |
+| Texts and documentation | Docs, UI copy, post, article from an SEO brief | Inventing facts |
+| Advertising | Ads, Telegram Ads, Yandex Direct | Google Ads into RF; pressing launch |
+| SEO | Core, cocoon, article brief, URL audit | Writing the article |
+| Marketing | Offer, media plan, measurement plan | Ads, posts, on-site counters |
+| Content and social | Publication pack, listening, rewrite | “Write a post” as plain text; shooting from scratch |
+| Research and analytics | Comparison, audience language, corpus, fact-check | A post, a cocoon, buying access |
+| Owner office | No other department; cross-department whole | Doing another department's pool by hand |
+| Infrastructure and security | Deploy/rollback plan, backups, incident | On-site counters; irreversible without the owner |
+| Automation and agents | Skills, schedules, Agency automations | Product features “while we are here” |
+| Sales and customers | Offer, draft reply | Sending to the customer |
+| Administration | Contract read, invoice, checklist | Signature and payment |
+
+A launch grants **at most two** skills from that department's library. Money, the
+ad cabinet and publishing in the company's name stay with the owner.
+
 ## Architecture
 
 ### Boundaries

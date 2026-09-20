@@ -972,7 +972,7 @@ export function registerAgency(bb: BbPluginApi) {
         value: { departmentId: input.departmentId, skillIds: listSkillPool(db, input.departmentId), grants: listSkillGrants(db, { departmentId: input.departmentId, limit: 50 }) },
       };
     },
-    setSkillPool: async (input: { departmentId: string; skillIds: string[] }) => {
+    setSkillPool: async (input: { departmentId: string; skillIds: string[]; mode?: "replace" | "merge" }) => {
       const access = readOnly();
       if (!access.ok) return access;
       const callerAgentId = access.value.ctx.caller?.agentId ?? null;
@@ -1417,7 +1417,7 @@ export function registerAgency(bb: BbPluginApi) {
         value: presentIdea(saved.value, binding, false),
       };
     },
-    setIdeaStatus: async (input: { id: string; expectedRevision: number; status: "open" | "parked" | "done" | "archived" }) => {
+    setIdeaStatus: async (input: { id: string; expectedRevision: number; status: "open" | "parked" | "done" | "archived"; resolution?: string; closedThreadId?: string | null }) => {
       const access = readOnly();
       if (!access.ok) return access;
       const saved = setIdeaStatus(db, input, new Date().toISOString());

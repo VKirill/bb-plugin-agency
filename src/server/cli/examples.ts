@@ -382,7 +382,7 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   },
   setKnowledgeStatus: { id: "kno_aaaaaaaaaaaa", expectedRevision: 1, status: "archived" },
   getSkillPool: { departmentId: "dep_aaaaaaaaaaaa" },
-  setSkillPool: { departmentId: "dep_aaaaaaaaaaaa", skillIds: ["skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff"] },
+  setSkillPool: { departmentId: "dep_aaaaaaaaaaaa", skillIds: ["skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff"], mode: "merge" },
   listSkillGrants: { departmentId: "dep_aaaaaaaaaaaa" },
   getDecisionSettings: {},
   testDecisionModel: {},

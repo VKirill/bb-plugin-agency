@@ -72,7 +72,7 @@ function questions(): DecisionQuestion[] {
       choices: DECISIONS,
       descriptions: {
         accept: "Отдел берёт целиком одной задачей: весь бриф в его «Принимаем».",
-        split: "Резать на подзадачи — у себя и в другие отделы по «Принимаем». Смешанный продукт (текст + картинка + код в одном брифе) — тоже split, не return. Оценщик подзадачи не создаёт.",
+        split: "Резать на подзадачи — у себя и в другие отделы по «Принимаем». Смешанный продукт (текст + картинка + код в одном брифе) — тоже split, не return. Новая программа без принятого предложения — split в отдел спецификаций, не accept в разработку. Оценщик подзадачи не создаёт.",
         clarify: "Не хватает входа или решения владельца. Оценщик сам не спрашивает.",
         return: "Весь бриф мимо, собирать продукт не из чего или нет подходящего отдела. Оценщик сам не блокирует.",
       },
@@ -91,13 +91,16 @@ function state(job: {
   brief: string;
   acceptance: string;
   charter?: string;
+  workKind?: string | null;
 }): string {
   return [
     `Задача ${job.key}: ${job.title}`,
     `Бриф: ${clip(job.brief, 1_200)}`,
     `Критерии: ${clip(job.acceptance, 800)}`,
+    `Вид работы: ${job.workKind ?? "не указан"}`,
     ...(job.charter ? [`Регламент отдела: ${clip(job.charter, 800)}`] : []),
     "Смешанный продукт (несколько видов работы в одном брифе) — split, не return: чужие части уходят подзадачами в отделы, которые их принимают.",
+    "Новая программа или сервис (workKind new-program) без принятого proposal.md/spec.md — split в отдел спецификаций, не accept в отдел, который пишет код.",
   ].join("\n");
 }
 
@@ -120,7 +123,7 @@ export function activityHasIntake(activity: readonly { references: readonly { ty
  */
 export async function askIntakeDetailed(
   settings: DecisionSettings,
-  job: { key: string; title: string; brief: string; acceptance: string; charter?: string },
+  job: { key: string; title: string; brief: string; acceptance: string; charter?: string; workKind?: string | null },
   deps: { fetch?: typeof fetch; key?: string } = {},
 ): Promise<IntakeAskResult> {
   if (!settings.enabled || !settings.points.includes(INTAKE_POINT)) {
@@ -145,7 +148,7 @@ export async function askIntakeDetailed(
 
 export async function askIntake(
   settings: DecisionSettings,
-  job: { key: string; title: string; brief: string; acceptance: string; charter?: string },
+  job: { key: string; title: string; brief: string; acceptance: string; charter?: string; workKind?: string | null },
   deps: { fetch?: typeof fetch; key?: string } = {},
 ): Promise<IntakeProposal | null> {
   return (await askIntakeDetailed(settings, job, deps)).proposal;
@@ -195,6 +198,7 @@ export async function recordLeadIntake(deps: RecordLeadIntakeDeps): Promise<Reco
         title: job.title,
         brief: job.brief,
         acceptance: job.acceptance,
+        workKind: job.workKind,
         ...(process?.instructions ? { charter: process.instructions } : {}),
       }).then((proposal) =>
         proposal
@@ -206,6 +210,7 @@ export async function recordLeadIntake(deps: RecordLeadIntakeDeps): Promise<Reco
         title: job.title,
         brief: job.brief,
         acceptance: job.acceptance,
+        workKind: job.workKind,
         ...(process?.instructions ? { charter: process.instructions } : {}),
       });
   const proposal = asked.proposal;

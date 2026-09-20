@@ -399,6 +399,8 @@ export const EN_TEAM: Record<string, string> = {
     "The decision model reads the job and opens from here what the work would be noticeably worse without — so the result is better quality — for one launch and written into the log.",
   "Правит библиотеку владелец или руководитель этого отдела. Пусто — работают только профили сотрудников.":
     "The owner or this department's lead edits the library. Empty — only the employees' profiles apply.",
+  "Сохранение в карточке заменяет список целиком. Чтобы дописать навык, не затирая остальные, через CLI: pool-save с mode merge.":
+    "Saving in this card replaces the whole list. To add a skill without wiping the rest, use the CLI: pool-save with mode merge.",
   "Сохранить библиотеку":
     "Save the library",
   "В библиотеке: {count}":

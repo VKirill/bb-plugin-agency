@@ -91,6 +91,7 @@ describe("delegation instructions for ordinary sessions", () => {
     const text = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate");
     expect(text).toContain("## BB Agency: you are the project manager");
     expect(text).toContain("You do not implement");
+    expect(text).toContain("references/routing.md");
      expect(text).toContain("a native choice card opens in this chat");
     expect(text).toContain('"Программисты": Разрабатывает и проверяет код плагинов.');
     expect(text).toContain(`Lead: Fable (${seeded.lead.id})`);

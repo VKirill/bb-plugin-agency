@@ -11,7 +11,9 @@
 
 Перечень: «какие идеи», «что в туду», «напомни идеи» — сначала `bb agency idea list` по текущему
 проекту (`bb status --json` → `project.id` как `bbProjectId`). В ответе дай названия ссылками
-на markdown-файлы (`relativePath` или `projectPath`). По клику владелец читает файл.
+на `projectPath` — абсолютный путь на машине привязки. Не ставь в чат один `relativePath`
+(`.bb/agency/ideas/…`): BB откроет его из текущей рабочей папки треда, а не из корня проекта,
+и файл «не найдётся», если чат сидит во вложенном checkout.
 
 ## Куда класть
 
@@ -45,13 +47,20 @@
 Название — короткое, по сути, не «Идея из чата». `kind`: `idea` (мысль) или `todo` (надо сделать).
 Статус по умолчанию `open`. Не принимай идею как знание и не запускай сотрудника из этого файла.
 
+## Когда идея сделана
+
+Владелец сказал «готово», «сделали», «закрывай», «отметь реализованной» — не ограничивайся сменой статуса.
+`bb agency idea status` с `status: "done"`, `resolution` (что именно сделали, своими словами) и
+`closedThreadId` текущего чата (`bb status --json` → `thread.id`). Дату закрытия ставит сервер (`closedAt`).
+Без итога сервер не примет `done`. Не выдумывай тред и не подставляй тред-источник записи, если закрыли в другом чате.
+
 ## Команды
 
 ```bash
 bb agency idea save --input-json '{"expectedRevision":0,"title":"…","body":"## Суть\n…","kind":"idea","bindingId":"bnd_…","sectionId":"…","sectionLabel":"…","sourceThreadId":"thr_…"}'
 bb agency idea list --input-json '{"bbProjectId":"proj_…","status":"open"}'
 bb agency idea get --input-json '{"id":"ide_…"}'
-bb agency idea status --input-json '{"id":"ide_…","expectedRevision":1,"status":"parked"}'
+bb agency idea status --input-json '{"id":"ide_…","expectedRevision":1,"status":"done","resolution":"Сделали кнопку треда и выложили на git.","closedThreadId":"thr_…"}'
 ```
 
 На карточке идеи кнопка «Создать тред» открывает штатный композер BB с текстом

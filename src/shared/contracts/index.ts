@@ -332,6 +332,7 @@ export {
   listIdeasInputSchema,
   saveIdeaInputSchema,
   setIdeaStatusInputSchema,
+  type SetIdeaStatusInput,
   spawnIdeaThreadInputSchema,
   spawnedIdeaThreadSchema,
   type IdeaComposerRequest,

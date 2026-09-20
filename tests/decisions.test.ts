@@ -420,6 +420,23 @@ describe("intake assessment", () => {
     expect(traced.ms).toBeGreaterThanOrEqual(0);
   });
 
+  it("tells the model the work kind and not to accept a new program into code", async () => {
+    let body = "";
+    await askIntake(ready, { ...job, workKind: "new-program" }, {
+      key: "k",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        body = String(init?.body ?? "");
+        return chatReply({
+          size: { value: "L", confidence: 0.9 },
+          risk: { value: "medium", confidence: 0.88 },
+          decision: { value: "split", confidence: 0.85 },
+        });
+      }) as unknown as typeof fetch,
+    });
+    expect(body).toContain("new-program");
+    expect(body).toContain("отдел спецификаций");
+  });
+
   it("records a lead proposal and leaves an executor launch alone", async () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);

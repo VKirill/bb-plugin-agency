@@ -19,6 +19,9 @@ export const ideaItemSchema = z
     sectionId: knowledgeSectionIdSchema.nullable(),
     sectionLabel: z.string(),
     sourceThreadId: z.string().nullable(),
+    resolution: z.string(),
+    closedAt: z.string().nullable(),
+    closedThreadId: z.string().nullable(),
     relativePath: z.string(),
     fileHash: z.string().nullable(),
     fileWritten: z.boolean(),
@@ -64,6 +67,8 @@ export const setIdeaStatusInputSchema = z
     id: z.string().min(1),
     expectedRevision: z.number().int(),
     status: ideaStatusSchema,
+    resolution: z.string().trim().max(4000).optional(),
+    closedThreadId: z.string().trim().max(80).nullable().optional(),
   })
   .strict();
 
@@ -101,5 +106,6 @@ export type IdeaStatus = z.infer<typeof ideaStatusSchema>;
 export type IdeaItemView = z.infer<typeof ideaItemSchema>;
 export type SaveIdeaInput = z.infer<typeof saveIdeaInputSchema>;
 export type ListIdeasInput = z.infer<typeof listIdeasInputSchema>;
+export type SetIdeaStatusInput = z.infer<typeof setIdeaStatusInputSchema>;
 export type IdeaComposerRequest = z.infer<typeof ideaComposerRequestSchema>;
 export type SpawnIdeaThreadInput = z.infer<typeof spawnIdeaThreadInputSchema>;

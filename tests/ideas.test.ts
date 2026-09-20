@@ -7,7 +7,7 @@ import { openMigratedDatabase } from "../src/server/db";
 import { formatIdeaMarkdown } from "../src/server/ideas/format";
 import { getIdea, ideaRelativePath, listIdeas, saveIdea, setIdeaStatus } from "../src/server/ideas/store";
 import { buildIdeaThreadSpawn } from "../src/server/ideas/thread";
-import { ideaThreadComposerPrompt } from "../src/shared/idea-thread";
+import { ideaFileOpenPath, ideaThreadComposerPrompt } from "../src/shared/idea-thread";
 import { listIdeasInputSchema, saveIdeaInputSchema, spawnIdeaThreadInputSchema } from "../src/shared/rpc-contract";
 
 const NOW = "2026-09-20T11:00:00.000Z";
@@ -56,6 +56,23 @@ describe("склад идей", () => {
     const parked = setIdeaStatus(database, { id: saved.value.id, expectedRevision: saved.value.revision, status: "parked" }, NOW);
     expect(parked.ok && parked.value.status).toBe("parked");
     expect(setIdeaStatus(database, { id: saved.value.id, expectedRevision: saved.value.revision, status: "done" }, NOW).ok).toBe(false);
+    const done = setIdeaStatus(
+      database,
+      {
+        id: saved.value.id,
+        expectedRevision: parked.ok ? parked.value.revision : 0,
+        status: "done",
+        resolution: "Проверили карточку и поправили ссылку на файл.",
+        closedThreadId: "thr_irprd7iscv",
+      },
+      NOW,
+    );
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.value.resolution).toContain("Проверили карточку");
+    expect(done.value.closedAt).toBe(NOW);
+    expect(done.value.closedThreadId).toBe("thr_irprd7iscv");
+    expect(setIdeaStatus(database, { id: saved.value.id, expectedRevision: saved.value.revision, status: "done" }, NOW).ok).toBe(false);
   });
 
   it("собирает markdown с шапкой и заголовком", () => {
@@ -69,6 +86,9 @@ describe("склад идей", () => {
       sectionId: "sec_aaaaaaaaaaaaaaaa",
       sectionLabel: "Плагины",
       sourceThreadId: "thr_irprd7iscv",
+      resolution: "",
+      closedAt: null,
+      closedThreadId: null,
       relativePath: ideaRelativePath("ide_aaaaaaaaaaaaaaaaaaaaaaaa"),
       fileHash: null,
       revision: 1,
@@ -80,6 +100,28 @@ describe("склад идей", () => {
     expect(text).toContain("section: Плагины");
     expect(text).toContain("# Тема: склад");
     expect(text).toContain("## Суть");
+    const closed = formatIdeaMarkdown({
+      id: "ide_aaaaaaaaaaaaaaaaaaaaaaaa",
+      title: "Тема: склад",
+      body: "## Суть\nТекст.",
+      kind: "idea",
+      status: "done",
+      bindingId: BINDING,
+      sectionId: "sec_aaaaaaaaaaaaaaaa",
+      sectionLabel: "Плагины",
+      sourceThreadId: "thr_irprd7iscv",
+      resolution: "Сделали склад и кнопку треда.",
+      closedAt: NOW,
+      closedThreadId: "thr_irprd7iscv",
+      relativePath: ideaRelativePath("ide_aaaaaaaaaaaaaaaaaaaaaaaa"),
+      fileHash: null,
+      revision: 2,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    expect(closed).toContain("## Итог");
+    expect(closed).toContain("closedThread: thr_irprd7iscv");
+    expect(closed).toContain("@thread:thr_irprd7iscv");
   });
 
   it("маршрутизирует CLI и принимает примеры", () => {
@@ -96,6 +138,24 @@ describe("склад идей", () => {
     expect(spawnIdeaThreadInputSchema.safeParse(CLI_EXAMPLES.spawnIdeaThread).success).toBe(true);
   });
 
+  it("для ссылки в чате берёт абсолютный путь машины проекта", () => {
+    expect(ideaFileOpenPath({ relativePath: ".bb/agency/ideas/ide_x.md" })).toBe(".bb/agency/ideas/ide_x.md");
+    expect(
+      ideaFileOpenPath({
+        relativePath: ".bb/agency/ideas/ide_x.md",
+        projectPath: "/Users/vechkasov/Documents/BB-сервис/.bb/agency/ideas/ide_x.md",
+      }),
+    ).toBe("/Users/vechkasov/Documents/BB-сервис/.bb/agency/ideas/ide_x.md");
+    expect(
+      ideaThreadComposerPrompt({
+        title: "Склад",
+        body: "## Суть\nТекст.",
+        relativePath: ".bb/agency/ideas/ide_x.md",
+        projectPath: "/tmp/project/.bb/agency/ideas/ide_x.md",
+      }),
+    ).toContain("/tmp/project/.bb/agency/ideas/ide_x.md");
+  });
+
   it("собирает видимый spawn идеи и отклоняет пустое сообщение", () => {
     const idea = {
       id: "ide_aaaaaaaaaaaaaaaaaaaaaaaa",
@@ -107,6 +167,9 @@ describe("склад идей", () => {
       sectionId: "sec_aaaaaaaaaaaaaaaa",
       sectionLabel: "Плагины",
       sourceThreadId: null,
+      resolution: "",
+      closedAt: null,
+      closedThreadId: null,
       relativePath: ideaRelativePath("ide_aaaaaaaaaaaaaaaaaaaaaaaa"),
       fileHash: null,
       revision: 1,

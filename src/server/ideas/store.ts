@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fail, ok, type DomainResult } from "../../domain";
-import type { IdeaKind, IdeaStatus, SaveIdeaInput } from "../../shared/contracts/idea";
+import type { IdeaKind, IdeaStatus, SaveIdeaInput, SetIdeaStatusInput } from "../../shared/contracts/idea";
 import type { SqlDatabase } from "../db/sql";
 
 export const IDEAS_MIGRATION = `CREATE TABLE agency_idea (
@@ -20,6 +20,10 @@ export const IDEAS_MIGRATION = `CREATE TABLE agency_idea (
     updated_at TEXT NOT NULL
   )`;
 
+export const IDEA_CLOSE_MIGRATION = `ALTER TABLE agency_idea ADD COLUMN resolution TEXT NOT NULL DEFAULT '';
+ALTER TABLE agency_idea ADD COLUMN closed_at TEXT;
+ALTER TABLE agency_idea ADD COLUMN closed_thread_id TEXT`;
+
 export const IDEA_FILE_DIR = ".bb/agency/ideas";
 
 export type IdeaRecord = {
@@ -32,6 +36,9 @@ export type IdeaRecord = {
   sectionId: string | null;
   sectionLabel: string;
   sourceThreadId: string | null;
+  resolution: string;
+  closedAt: string | null;
+  closedThreadId: string | null;
   relativePath: string;
   fileHash: string | null;
   revision: number;
@@ -49,6 +56,9 @@ type Row = {
   section_id: string | null;
   section_label: string | null;
   source_thread_id: string | null;
+  resolution: string | null;
+  closed_at: string | null;
+  closed_thread_id: string | null;
   relative_path: string;
   file_hash: string | null;
   revision: number;
@@ -71,6 +81,9 @@ function fromRow(row: Row): IdeaRecord {
     sectionId: row.section_id,
     sectionLabel: row.section_label ?? "",
     sourceThreadId: row.source_thread_id,
+    resolution: row.resolution ?? "",
+    closedAt: row.closed_at,
+    closedThreadId: row.closed_thread_id,
     relativePath: row.relative_path,
     fileHash: row.file_hash,
     revision: row.revision,
@@ -176,14 +189,26 @@ export function saveIdea(db: SqlDatabase, input: SaveIdeaInput, now: string): Do
   return ok(getIdea(db, input.id)!);
 }
 
-export function setIdeaStatus(
-  db: SqlDatabase,
-  input: { id: string; expectedRevision: number; status: IdeaStatus },
-  now: string,
-): DomainResult<IdeaRecord> {
+export function setIdeaStatus(db: SqlDatabase, input: SetIdeaStatusInput, now: string): DomainResult<IdeaRecord> {
+  const current = getIdea(db, input.id);
+  if (!current) return fail("not_found", `idea ${input.id} not found`);
+  const resolution = input.resolution?.trim() ?? "";
+  if (input.status === "done" && !resolution) {
+    return fail("invalid_command", "Чтобы отметить идею сделанной, напишите что сделали и в каком треде закрыли.");
+  }
+  const closing = input.status === "done" || input.status === "archived";
+  const nextResolution = resolution || current.resolution;
+  const nextClosedAt = closing ? now : current.closedAt;
+  const nextClosedThreadId =
+    input.closedThreadId !== undefined ? input.closedThreadId?.trim() || null : current.closedThreadId;
   const changed = db
-    .prepare(`UPDATE agency_idea SET status = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?`)
-    .run(input.status, now, input.id, input.expectedRevision);
+    .prepare(
+      `UPDATE agency_idea SET
+        status = ?, resolution = ?, closed_at = ?, closed_thread_id = ?,
+        revision = revision + 1, updated_at = ?
+       WHERE id = ? AND revision = ?`,
+    )
+    .run(input.status, nextResolution, nextClosedAt, nextClosedThreadId, now, input.id, input.expectedRevision);
   if (changed.changes !== 1) return fail("revision_conflict", "Идея изменилась или не найдена: перечитайте и повторите.");
   return ok(getIdea(db, input.id)!);
 }

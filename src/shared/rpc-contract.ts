@@ -1341,7 +1341,13 @@ export const rpcContract = defineRpcContract({
     output: domainResultSchema(z.object({ departmentId: z.string(), skillIds: z.array(z.string()), grants: z.array(skillGrantSchema) }).strict()),
   },
   setSkillPool: {
-    input: z.object({ departmentId: z.string().min(1), skillIds: z.array(z.string().max(120)).max(60) }).strict(),
+    input: z
+      .object({
+        departmentId: z.string().min(1),
+        skillIds: z.array(z.string().max(120)).max(60),
+        mode: z.enum(["replace", "merge"]).optional(),
+      })
+      .strict(),
     output: domainResultSchema(z.object({ skillIds: z.array(z.string()) }).strict()),
   },
   listSkillGrants: {

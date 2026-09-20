@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { experimental_NewThreadComposer as NewThreadComposer, Markdown, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import { experimental_FileLink as FileLink, experimental_NewThreadComposer as NewThreadComposer, Markdown, useBbContext, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { ideaThreadComposerPrompt } from "../../shared/idea-thread";
 import type { IdeaItemView, rpcContract } from "../../shared/rpc-contract";
@@ -53,7 +53,10 @@ export function IdeasLivePage({
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState<IdeaDraft | null>(null);
   const [compose, setCompose] = useState<IdeaItemView | null>(null);
+  const [closing, setClosing] = useState<IdeaItemView | null>(null);
+  const [closeNote, setCloseNote] = useState("");
   const [pending, setPending] = useState(false);
+  const bbContext = useBbContext();
 
   const load = useCallback(async () => {
     const result = await api.listIdeas(null);
@@ -106,14 +109,38 @@ export function IdeasLivePage({
     void load();
   };
 
-  const setStatus = async (item: IdeaItemView, status: IdeaItemView["status"]) => {
-    const result = await api.setIdeaStatus({ id: item.id, expectedRevision: item.revision, status });
+  const setStatus = async (
+    item: IdeaItemView,
+    status: IdeaItemView["status"],
+    extras?: { resolution?: string; closedThreadId?: string | null },
+  ) => {
+    const result = await api.setIdeaStatus({
+      id: item.id,
+      expectedRevision: item.revision,
+      status,
+      resolution: extras?.resolution,
+      closedThreadId: extras?.closedThreadId,
+    });
     if (!result.ok) {
       notice(failureNotice(result.failure));
       return;
     }
-    notice(tr("Статус идеи обновлён."));
+    notice(status === "done" ? tr("Идея отмечена сделанной, итог записан.") : tr("Статус идеи обновлён."));
     void load();
+  };
+
+  const confirmDone = async () => {
+    if (!closing || pending) return;
+    const resolution = closeNote.trim();
+    if (!resolution) {
+      notice(tr("Напишите, что сделали, прежде чем отметить идею сделанной."));
+      return;
+    }
+    setPending(true);
+    await setStatus(closing, "done", { resolution, closedThreadId: bbContext.threadId });
+    setPending(false);
+    setClosing(null);
+    setCloseNote("");
   };
 
   const startThread = async (request: Record<string, unknown>) => {
@@ -197,16 +224,44 @@ export function IdeasLivePage({
             <div>
               <h2 className="text-base font-semibold">{current.title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">{`${tr(KIND_LABEL[current.kind])} · ${origin(current)} · ${tr(STATUS_LABEL[current.status])} · ${new Date(current.updatedAt).toLocaleDateString(uiLocale())}`}</p>
-              <p className="text-xs text-muted-foreground">{current.relativePath}</p>
+              {current.hostId && current.projectPath ? (
+                <p className="text-xs text-muted-foreground">
+                  <FileLink target={{ kind: "host", hostId: current.hostId, path: current.projectPath }}>{current.projectPath}</FileLink>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{current.relativePath}</p>
+              )}
             </div>
             <Button size="sm" variant="ghost" aria-label={tr("Закрыть идею")} onClick={() => openIdea()}>{tr("Закрыть")}</Button>
           </div>
           <Markdown content={current.body} />
+          {current.resolution ? (
+            <div className="mt-4 border-t border-border pt-4">
+              <h3 className="text-sm font-medium">{tr("Итог")}</h3>
+              <Markdown content={current.resolution} />
+              <p className="mt-2 text-xs text-muted-foreground">
+                {tr("Закрыто")}
+                {": "}
+                {current.closedAt ? new Date(current.closedAt).toLocaleString(uiLocale()) : "—"}
+                {current.closedThreadId ? ` · ${current.closedThreadId}` : ""}
+              </p>
+            </div>
+          ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button data-testid="idea-thread" onClick={() => setCompose(current)}>{tr("Создать тред")}</Button>
             <Button variant="outline" data-testid="idea-edit" onClick={() => setDraft({ id: current.id, revision: current.revision, title: current.title, body: current.body, kind: current.kind, status: current.status, bindingId: current.bindingId, sectionId: current.sectionId ?? "", sectionLabel: current.sectionLabel })}>{tr("Редактировать")}</Button>
             <Button variant="outline" onClick={() => openFile(current)}>{tr("Открыть файл")}</Button>
-            {current.status !== "done" && <Button variant="outline" onClick={() => void setStatus(current, "done")}>{tr("Отметить сделанной")}</Button>}
+            {current.status !== "done" && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setClosing(current);
+                  setCloseNote(current.resolution);
+                }}
+              >
+                {tr("Отметить сделанной")}
+              </Button>
+            )}
             {current.status !== "archived" && <Button variant="ghost" onClick={() => void setStatus(current, "archived")}>{tr("В архив")}</Button>}
           </div>
         </section>
@@ -238,6 +293,29 @@ export function IdeasLivePage({
           <DialogFooter>
             <Button variant="outline" disabled={pending} onClick={() => setDraft(null)}>{tr("Отмена")}</Button>
             <Button data-testid="idea-save" disabled={pending || !draft?.title.trim() || !draft.body.trim() || !draft.bindingId} onClick={() => void save()}>{pending ? tr("Сохраняем…") : tr("Сохранить идею")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(closing)} onOpenChange={(open) => { if (!open && !pending) setClosing(null); }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" data-testid="idea-done-dialog">
+          <DialogHeader>
+            <DialogTitle>{tr("Отметить сделанной")}</DialogTitle>
+            <DialogDescription>{tr("Кратко напишите, что сделали. Дата и тред закроются вместе со статусом.")}</DialogDescription>
+          </DialogHeader>
+          <TextField
+            label="Что сделали"
+            multiline
+            rows={5}
+            maxLength={4000}
+            required
+            value={closeNote}
+            onChange={setCloseNote}
+          />
+          <DialogFooter>
+            <Button variant="outline" disabled={pending} onClick={() => setClosing(null)}>{tr("Отмена")}</Button>
+            <Button data-testid="idea-done-save" disabled={pending || !closeNote.trim()} onClick={() => void confirmDone()}>
+              {pending ? tr("Сохраняем…") : tr("Записать итог")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

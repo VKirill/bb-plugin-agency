@@ -169,7 +169,7 @@ export interface AgencyApi {
     sectionLabel?: string;
     sourceThreadId?: string | null;
   }): Promise<MutationOutcome<IdeaItemView>>;
-  setIdeaStatus(input: { id: string; expectedRevision: number; status: IdeaItemView["status"] }): Promise<MutationOutcome<IdeaItemView>>;
+  setIdeaStatus(input: { id: string; expectedRevision: number; status: IdeaItemView["status"]; resolution?: string; closedThreadId?: string | null }): Promise<MutationOutcome<IdeaItemView>>;
   spawnIdeaThread(input: { id: string; request: Record<string, unknown> }): Promise<MutationOutcome<{ threadId: string }>>;
   listGoals(): Promise<MutationOutcome<GoalViewRecord[]>>;
   saveGoal(input: { id?: string; expectedRevision: number; title: string; description: string; status: GoalViewRecord["status"]; dueAt: string | null }): Promise<MutationOutcome<GoalViewRecord>>;

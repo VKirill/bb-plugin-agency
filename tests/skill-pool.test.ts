@@ -17,10 +17,24 @@ describe("the department's skill library", () => {
     expect(saved.ok && saved.value.skillIds).toEqual(["skill_drmax", "skill_ru"]);
     expect(listSkillPool(db, s.departmentId)).toEqual(["skill_drmax", "skill_ru"]);
 
-    // Библиотека — это набор целиком: сохранение заменяет её, а не дописывает.
+    // Библиотека — это набор целиком: сохранение без mode заменяет её, а не дописывает.
     setSkillPool(db, { departmentId: s.departmentId, skillIds: ["skill_ru"] }, { agentId: null }, NOW);
     expect(listSkillPool(db, s.departmentId)).toEqual(["skill_ru"]);
     expect(setSkillPool(db, { departmentId: s.departmentId, skillIds: Array.from({ length: 61 }, (_, index) => `s${index}`) }, { agentId: null }, NOW).ok).toBe(false);
+  });
+
+  it("merges new ids onto the current library instead of wiping it", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    setSkillPool(db, { departmentId: s.departmentId, skillIds: ["skill_drmax", "skill_ru"] }, { agentId: s.lead }, NOW);
+    const merged = setSkillPool(
+      db,
+      { departmentId: s.departmentId, skillIds: ["skill_app"], mode: "merge" },
+      { agentId: s.lead },
+      NOW,
+    );
+    expect(merged.ok && merged.value.skillIds.sort()).toEqual(["skill_app", "skill_drmax", "skill_ru"]);
+    expect(listSkillPool(db, s.departmentId).sort()).toEqual(["skill_app", "skill_drmax", "skill_ru"]);
   });
 
   it("writes every grant down: who got what, for which job and who decided", () => {
