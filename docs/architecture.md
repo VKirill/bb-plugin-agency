@@ -1,16 +1,17 @@
 # Архитектура Агентства
 
-Срез: 2026-09-14, source 0.1.0-alpha.12. [Этапы](roadmap.md), [данные](data-model.md),
+Срез: 2026-09-20, source **0.1.0-alpha.16**. [Этапы](roadmap.md), [данные](data-model.md),
 [API](bb-api.md). Корневой README — введение установки; здесь модули.
 
 ## Назначение и границы
 
 Агентство владеет сотрудниками, отделами, поручениями, версиями файлов и
 запуском **через свои RPC/CLI**. BB владеет провайдерами, машинами, тредами и UI.
-BB Tasks и Workflows — другие продукты. Notify — inbox, не spawn.
+BB Tasks и Workflows — другие продукты. Notify — inbox / очередь Telegram Projects, не spawn.
 
-Автоматический cron/webhook и event registry **ещё нет**. Ни webhook, ни UI
-realtime не вызывают spawn: только `prepareLaunch` через координатор.
+Cron и webhook **есть** в правилах отдела (2026-09-17): диспетчер ставит задачу
+руководителю. Ни webhook, ни UI realtime не вызывают spawn: только `prepareLaunch`
+через координатор.
 
 ```mermaid
 flowchart TD

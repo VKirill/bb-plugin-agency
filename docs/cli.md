@@ -1,6 +1,8 @@
 # CLI Агентства
 
-`bb agency` вызывает те же domain handlers и Zod-схемы, что и RPC. Отдельной бизнес-логики и прямого SQLite нет. Произвольный RPC закрыт allowlist. Spawn — только `launch prepare` после readiness; `status.execution` и notify не запуск.
+`bb agency` вызывает те же domain handlers и Zod-схемы, что и RPC. Отдельной бизнес-логики и прямого SQLite нет. Произвольный RPC закрыт allowlist. Spawn — только `launch prepare` после readiness; `status.execution` и notify не запуск. Полный список операций на этой сборке — `bb agency help` / `bb agency schema <operation>`, не перечень в разделе Allowlist (он исторический).
+
+Проверенные CLI запуска: Claude Code, Codex, Cursor, OpenCode, Antigravity — если CLI подключён в BB и разрешён политиками проекта и сотрудника.
 
 ## Где исполняется команда
 
@@ -21,7 +23,7 @@
 
 `listWorkspace`, `listBbCatalog`, `listCapabilityCatalog`, `getJob`, `getAgent`, `getDepartment`, `listArtifactVersions`, `createPolicyVersion`, `provisionAgent`, `saveAgentProfile`, `provisionDepartment`, `saveDepartmentProfile`, `addMembership`, `removeMembership`, `createProjectBinding`, `linkDepartment`, `createJob`, `updateJob`, `transitionJob`, `reportNeedsInput`, `answerNeedsInput`, `createArtifact`, `publishArtifactVersion`, `attachJobInput`, `acceptArtifactVersion`, `openArtifact`, `prepareLaunch`, `getLaunch`, `reconcileLaunch`, `interpretWorkerCompletion`, `listJobAttempts`, `getIsolationReadiness`, `createJobComment`.
 
-`getIsolationReadiness` принимает optional `jobId`. Live provider только из `assignedProvider` (`source=live_assigned_agent_version` = current AgentVersion назначенного сотрудника). Без `provenIsolationProviders` ответ невалиден. `prepareLaunch` сам отклоняет provider вне proven (`claude-code`), независимо от UI. Engines / ordinary 0.4.87 не готовность: GET 404 → spawn unavailable, CRUD жив.
+`getIsolationReadiness` принимает optional `jobId`. Live provider только из `assignedProvider` (`source=live_assigned_agent_version` = current AgentVersion назначенного сотрудника). Без пересечения политик spawn недоступен, CRUD жив. `prepareLaunch` отклоняет CLI вне политик проекта и сотрудника, независимо от UI.
 
 Не входят: `setCliPolicy`, Telegram, машины, `createAgentVersion`/`updateAgent` в обход save, создание BB project. `getLaunch` / `listJobAttempts` идут через binding scope; сырые internal reads не публикуются.
 

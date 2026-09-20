@@ -233,17 +233,23 @@ particular job, with a grant journal — which skill, to whom, for which job and
 decided. The Decision model settings hold both background models: the decision model
 with its decision points and the passport writer.
 
-The Agency creates nothing by itself. An empty Agency offers starter departments —
-development, a development conveyor, research and writing, each with a lead, executors,
-reviewers, a charter and job descriptions, in Russian or English — or you create your own
-departments, employees and rules from scratch. The conveyor department comes with a CLI per
-role: a strong model plans, a cheap one reads the code, a fast one writes it and a model from
-another vendor reviews it; when a CLI is not connected in BB that employee starts on the role
-default. How to build and tune such a department:
-[skills/agency/references/dev-conveyor.md](skills/agency/references/dev-conveyor.md) (Russian). Starter records are ordinary data: edit, archive
-or delete them; untouched ones switch language with one button. A department or an
-employee goes to the archive with its history kept, and is deleted only when it
-never worked.
+The Agency creates nothing by itself. An empty Agency offers **fourteen starter
+departments** (product, development and its conveyor, design, writing, advertising,
+SEO, marketing, social, research, owner office, infrastructure, automation, sales,
+administration), each with a lead, executors, a reviewer, an assistant, a charter
+and job descriptions in Russian or English — or you create your own. A launch
+grants **at most two** skills from that department's library. Writing, advertising,
+design, SEO, marketing, social and research have locked craft packs; infrastructure,
+automation, sales and the owner office still use the kit charter. What each desk
+takes: [departments.md](skills/agency/references/departments.md) (Russian). The
+conveyor department comes with a CLI per role: a strong model plans, a cheap one
+reads the code, a fast one writes it and a model from another vendor reviews it;
+when a CLI is not connected in BB that employee starts on the role default. How to
+build and tune such a department:
+[skills/agency/references/dev-conveyor.md](skills/agency/references/dev-conveyor.md)
+(Russian). Starter records are ordinary data: edit, archive or delete them;
+untouched ones switch language with one button. A department or an employee goes to
+the archive with its history kept, and is deleted only when it never worked.
 
 An implementation subtask carries an execution contract: what to read first, which interfaces
 and invariants to keep, which files it may change, what must not be touched and which checks
@@ -414,6 +420,8 @@ plugin is enabled again.
 
 The documents are in Russian. **Start with the [work plan and index](docs/README.md)**.
 
+- [What each starter department takes](skills/agency/references/departments.md) · [phrase → department](skills/agency/references/routing.md)
+- [Dispatcher skill](skills/agency/SKILL.md) (0.28.5) · [craft-pack protocol](skills/agency/references/craft-pack.md)
 - [Analysis, comparison with similar products and the development plan](docs/operating-model.md)
 - [Runtime readiness and limits](docs/implementation-readiness.md)
 - [File architecture and module boundaries](docs/architecture.md)

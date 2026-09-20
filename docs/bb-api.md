@@ -1,13 +1,13 @@
 # Проверенные контракты BB
 
-Проверка 14 сентября 2026: BB 0.43.1, закреплённый SDK 0.4.87.
-`bb plugin types --check` подтвердил совпадение pin/host SDK. Это проверка версии
+Проверка 20 сентября 2026: плагин **0.1.0-alpha.16**, BB ≥0.43.1, pin SDK `0.4.87`
+(хост может быть новее — `bb plugin types` обновляет pin). Это проверка версии
 SDK, не доказательство совместимости каждого CLI и всех runtime UI-пакетов.
 Точные сигнатуры: `node_modules/@get-bb/plugin-sdk/bundled-types/` — файлы
 `bb-plugin-sdk.d.ts`, `bb-plugin-sdk-app.d.ts`, `bb-plugin-sdk-host.d.ts`.
 Использовать публичный SDK и native shims; не импортировать приватное ядро BB.
 
-| Возможность | API / контракт | Используется в alpha.12 | Что ещё требуется |
+| Возможность | API / контракт | Используется в alpha.16 | Что ещё требуется |
 | --- | --- | --- | --- |
 | Backend | bb.server, factory(BbPluginApi), rpc.register | Да | Сервисы рабочих сущностей вместо демосостояния |
 | UI | definePluginApp, slots.navPanel, native компоненты/тема | Да | RPC данные, состояния загрузки/ошибки/конфликта |
