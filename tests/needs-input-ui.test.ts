@@ -11,7 +11,6 @@ import {
 import { nextLaunchAction, parseIsolationReadiness, parsePrepareLaunch } from "../src/app/data/launch-rpc";
 import {
   PRODUCT_ASSIGNEE_REQUIRED,
-  PRODUCT_HANDSHAKE_UNREADY,
   PRODUCT_LAUNCH_READY,
   PRODUCT_LAUNCH_STARTED,
   PRODUCT_LAUNCH_UNAVAILABLE,
@@ -84,7 +83,7 @@ describe("waiting_input launch wait", () => {
   it("does not prepare when job or durable needsInput is waiting_input", () => {
     const ready = {
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       hasLaunchId: true,
     };
@@ -98,33 +97,27 @@ describe("waiting_input launch wait", () => {
 describe("reasonCode-first launch copy", () => {
   it("prefers reasonCode over English technical reason", () => {
     expect(productLaunchCopy({
-      reasonCode: "handshake_unready",
-      reason: "GET /api/v1/system/experimental_thread-spawn-contract missing",
-    })).toBe(PRODUCT_HANDSHAKE_UNREADY);
+      reasonCode: "launch_not_authorized",
+      reason: "getIsolationReadiness without jobId does not authorize a launch",
+    })).toBe(PRODUCT_LAUNCH_UNAVAILABLE);
     expect(productLaunchCopy({
       reasonCode: "assignee_required",
       reason: "job.assignedAgentId is required",
     })).toBe(PRODUCT_ASSIGNEE_REQUIRED);
     expect(productLaunchCopy({
       reasonCode: "ok",
-      reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",
+      reason: "native threads.spawn (origin plugin, hidden visibility, pluginMetadata)",
     })).toBe(PRODUCT_LAUNCH_READY);
-    expect(productLaunchCopy({
-      reasonCode: "ok",
-      reason: "GET /api/v1/system/experimental_thread-spawn-contract",
-    })).not.toBe(PRODUCT_LAUNCH_UNAVAILABLE);
     expect(technicalLaunchReason({
-      reasonCode: "handshake_unready",
-      reason: "GET /api/v1/system/experimental_thread-spawn-contract missing",
-    })).toBe("GET /api/v1/system/experimental_thread-spawn-contract missing");
+      reasonCode: "launch_not_authorized",
+      reason: "job.assignedAgentId is required",
+    })).toBe("job.assignedAgentId is required");
     expect(productPrepareLaunchNotice({
-      handshakeReady: true,
       launched: { kind: "running" },
       reasonCode: "ok",
       reason: "verified bind applied",
     })).toBe(PRODUCT_LAUNCH_STARTED);
     expect(productPrepareLaunchNotice({
-      handshakeReady: true,
       launched: { kind: "running" },
       reasonCode: "ok",
       reason: "verified bind applied",
@@ -139,11 +132,8 @@ describe("reasonCode-first launch copy", () => {
 
   it("keeps reasonCode on readiness and prepare parse", () => {
     const readiness = parseIsolationReadiness({
-      handshakeReady: false,
-      executionAvailable: false,
-      isolationReady: false,
-      isolatedSpawnFields: false,
-      sdkTypedSpawnReady: false,
+      executionAvailable: true,
+      isolationReady: true,
       provenIsolationProviders: ["claude-code"],
       assignedProvider: null,
       launchAllowedForAssigned: false,
@@ -152,14 +142,13 @@ describe("reasonCode-first launch copy", () => {
     });
     expect(readiness?.reasonCode).toBe("assignee_required");
     const prepare = parsePrepareLaunch({
-      handshakeReady: false,
       snapshotId: "snp_1",
       digest: "d".repeat(64),
       attemptId: "run_1",
       launched: null,
-      reason: "typed runtime capability is not proven",
-      reasonCode: "handshake_unready",
+      reason: "spawn was not called",
+      reasonCode: "launch_not_authorized",
     });
-    expect(prepare?.reasonCode).toBe("handshake_unready");
+    expect(prepare?.reasonCode).toBe("launch_not_authorized");
   });
 });

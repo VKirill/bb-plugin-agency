@@ -23,7 +23,7 @@ import { parseJson, toJson, type SqlDatabase } from "./sql";
 function isClosedJobState(state: JobState): boolean {
   return state === "done" || state === "canceled";
 }
-import { optionalPluginIds, optionalReasoningEffort, optionalServiceTier, reasoningEffortSchema, serviceTierSchema } from "../../shared/contracts/versions";
+import { agentFallbackModelsSchema, optionalFallbackModels, optionalPluginIds, optionalReasoningEffort, optionalServiceTier, reasoningEffortSchema, serviceTierSchema, type AgentFallbackModel } from "../../shared/contracts/versions";
 
 type AgentRow = {
   id: string;
@@ -76,6 +76,9 @@ type JobRow = {
   due_at: string | null;
   contract_json?: string | null;
   work_profile_key?: string | null;
+  origin_thread_id?: string | null;
+  section_id?: string | null;
+  work_kind?: string | null;
   revision: number;
   updated_at: string;
 };
@@ -94,6 +97,11 @@ type AgentVersionRow = {
   reasoning_effort?: string | null;
   plugin_ids?: string | null;
   service_tier?: string | null;
+  fallback_provider_id?: string | null;
+  fallback_model?: string | null;
+  fallback_reasoning_effort?: string | null;
+  fallback_service_tier?: string | null;
+  fallback_models_json?: string | null;
 };
 
 type ActivityRow = {
@@ -120,6 +128,26 @@ function mapActivityRow(row: ActivityRow): Activity {
   };
 }
 
+/** The ordered list; a row written before the list existed keeps its single reserve as the first entry. */
+function storedFallbackModels(row: AgentVersionRow): AgentFallbackModel[] {
+  if (row.fallback_models_json) {
+    const parsed = agentFallbackModelsSchema.safeParse(parseJson(row.fallback_models_json));
+    return parsed.success ? parsed.data : [];
+  }
+  const providerId = row.fallback_provider_id?.trim();
+  const model = row.fallback_model?.trim();
+  if (!providerId || !model) return [];
+  if (providerId === row.provider_id && model === row.model) return [];
+  return [
+    {
+      providerId,
+      model,
+      ...optionalReasoningEffort(reasoningEffortSchema.safeParse(row.fallback_reasoning_effort).data),
+      ...optionalServiceTier(serviceTierSchema.safeParse(row.fallback_service_tier).data),
+    },
+  ];
+}
+
 export function mapStoredAgentVersion(row: AgentVersionRow): AgentVersion {
   const parsed = reasoningEffortSchema.safeParse(row.reasoning_effort);
   return {
@@ -136,6 +164,7 @@ export function mapStoredAgentVersion(row: AgentVersionRow): AgentVersion {
     ...optionalReasoningEffort(parsed.success ? parsed.data : undefined),
     ...optionalPluginIds(row.plugin_ids ? parseJson<string[]>(row.plugin_ids) : undefined),
     ...optionalServiceTier(serviceTierSchema.safeParse(row.service_tier).data),
+    ...optionalFallbackModels(storedFallbackModels(row)),
   };
 }
 
@@ -228,6 +257,8 @@ function mapJob(row: JobRow): Job {
     acceptance: row.acceptance,
     state: row.state,
     parentJobId: row.parent_job_id,
+    sectionId: row.section_id ?? null,
+    workKind: (row.work_kind ?? null) as Job["workKind"],
     assignedAgentId: row.assigned_agent_id,
     reviewerAgentIds: parseTeamIds(row.reviewer_agent_ids),
     observerAgentIds: parseTeamIds(row.observer_agent_ids),
@@ -235,6 +266,7 @@ function mapJob(row: JobRow): Job {
     dueAt: row.due_at,
     ...parseContract(row.contract_json),
     ...(row.work_profile_key ? { workProfileKey: row.work_profile_key } : {}),
+    ...(row.origin_thread_id ? { originThreadId: row.origin_thread_id } : {}),
     revision: row.revision,
     updatedAt: row.updated_at,
   };
@@ -322,6 +354,7 @@ export function createRepositories(db: SqlDatabase) {
         // Optional columns are written only when set, so a plain profile stays valid on an older schema.
         if (row.pluginIds?.length) columns.push(["plugin_ids", toJson(row.pluginIds)]);
         if (row.serviceTier) columns.push(["service_tier", row.serviceTier]);
+        if (row.fallbackModels?.length) columns.push(["fallback_models_json", toJson(row.fallbackModels)]);
         db.prepare(
           `INSERT INTO agency_agent_version (${columns.map(([name]) => name).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
         ).run(...columns.map(([, value]) => value));
@@ -514,8 +547,8 @@ export function createRepositories(db: SqlDatabase) {
           `INSERT INTO agency_job
             (id, key, binding_id, department_id, title, brief, acceptance, state, parent_job_id,
              assigned_agent_id, reviewer_agent_ids, observer_agent_ids, priority, due_at, revision, updated_at,
-             closed_at, contract_json, work_profile_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             closed_at, contract_json, work_profile_key, origin_thread_id, section_id, work_kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           row.id,
           row.key,
@@ -536,6 +569,9 @@ export function createRepositories(db: SqlDatabase) {
           isClosedJobState(row.state) ? row.updatedAt : null,
           contractJson(row.contract),
           row.workProfileKey ?? null,
+          row.originThreadId ?? null,
+          row.sectionId ?? null,
+          row.workKind ?? null,
         );
       },
       update(row: Job): void {
@@ -544,7 +580,7 @@ export function createRepositories(db: SqlDatabase) {
             closed_at = CASE WHEN ? = 0 THEN NULL WHEN state = ? THEN COALESCE(closed_at, ?) ELSE ? END,
             title = ?, brief = ?, acceptance = ?, state = ?, binding_id = ?, department_id = ?,
             assigned_agent_id = ?, reviewer_agent_ids = ?, observer_agent_ids = ?, priority = ?, due_at = ?, revision = ?, updated_at = ?,
-            contract_json = ?, work_profile_key = ?
+            contract_json = ?, work_profile_key = ?, origin_thread_id = ?, work_kind = ?
            WHERE id = ?`,
         ).run(
           isClosedJobState(row.state) ? 1 : 0,
@@ -566,6 +602,8 @@ export function createRepositories(db: SqlDatabase) {
           row.updatedAt,
           contractJson(row.contract),
           row.workProfileKey ?? null,
+          row.originThreadId ?? null,
+          row.workKind ?? null,
           row.id,
         );
       },

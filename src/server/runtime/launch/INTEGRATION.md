@@ -1,17 +1,12 @@
-# Wiring после live core probe
+# Wiring live spawn
 
-Сейчас (BB 0.43.1, SDK 0.4.87, production Mini): `isolatedSkillDelivery` / `skillIds` нет в `ThreadSpawnArgs`. AGY-16 живёт в отдельном worktree; production не переключён. Coordinator **не** вызывает spawn и не ставит execution available.
+Production (BB 0.43, public `threads.spawn`): hidden plugin thread. Coordinator **does** call spawn when the assigned CLI, host and policies are ready.
 
-После явного live probe на isolated instance (не `~/.bb` / не порт 38886):
-
-1. Зафиксировать, что `POST /api/v1/threads` и SDK `threads.spawn` принимают `isolatedSkillDelivery` + `skillIds` (`skill_`+64 hex) без unsafe cast.
-2. Поднять `isolatedSpawnFields` и `isolationReady` только на этом доказанном core, не на установленном 0.4.87.
-3. Реальный spawn-порт: host/path/model/skill/MCP **только** из `launchContractFromSnapshot`. Без fallback и без Agency `skl_*`.
-4. Native MCP registry по-прежнему не covered — `mcpIds` из snapshot не подставлять в несуществующий SDK-фильтр.
-5. `reconcileByLaunchId` — только если probe показал штатный lookup; не выдумывать idempotency `threads.spawn`.
-6. Job.running — отдельный domain callback после bind `threadId`, не внутри SDK.
-7. Register/RPC/UI не включать, пока probe + изоляция MCP не приняты отдельно.
-8. **Предел durability:** полный отказ SQLite не сохранит receipt. Coordinator всё равно возвращает точный `{ launchId, threadId, spawnKind }` с `persisted: false`. Это не строка после reopen. Hint можно upsert в `agency_launch_receipt`, но ручной recovery не биндит без `verifyConfirmedThread`. Deployed SDK **не умеет** доказать launchId/thread — recovery остаётся pending/unavailable, не running.
-9. `knownReceipt` не authority. Lookup должен сверить launchId/attempt и host/env/root/project/provider со **stored snapshot**. Вымышленный thread или чужая связка — reject. Не выдумывать SDK idempotency.
-
-Документ не является разрешением на живой запуск.
+1. `POST /api/v1/threads` / SDK `threads.spawn` with public fields only: `origin`, `originPluginId`, `visibility: hidden`, `pluginMetadata`, environment, provider, model, prompt. Unknown keys fail `.strict()` on 0.43.
+2. `executionAvailable` is native spawn (`NATIVE_SPAWN_READINESS`); there is no core capability probe.
+3. Real spawn-port: host/path/model **only** from `launchContractFromSnapshot`. Catalog skill ids stay in the snapshot and prompt, not as `skillIds` on the wire.
+4. Native MCP registry is still not covered — `mcpIds` from snapshot are not substituted into a non-existent SDK filter.
+5. `reconcileByLaunchId` lists hidden agency threads and matches `pluginMetadata.agencyLaunchId`. Do not invent `threads.spawn` idempotency.
+6. Job.running — separate domain callback after bind `threadId`, not inside SDK.
+7. **Durability:** a full SQLite outage cannot persist the receipt. Coordinator still returns the exact `{ launchId, threadId, spawnKind }` with `persisted: false`. That is not a row after reopen. Hint can upsert `agency_launch_receipt`, but manual recovery does not bind without `verifyConfirmedThread`.
+8. `knownReceipt` is not authority. Lookup must compare launchId/attempt and host/env/root/project/provider with the **stored snapshot**. A made-up or foreign thread is reject. Do not invent SDK idempotency.

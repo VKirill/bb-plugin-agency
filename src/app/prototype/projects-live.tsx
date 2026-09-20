@@ -11,6 +11,7 @@ import type { Agent, Group, Job } from "./data";
 import { JobsPage } from "./jobs";
 import { Button, Empty, HintHeading, Icon, InfoHint, PageHead, Rows, SearchInput, TabBar, Textarea } from "./shared";
 import { PassportPanel } from "./passport";
+import { SessionPolicyCard } from "./session-policy-card";
 import { WorkProfilesPanel } from "./work-profiles";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../../shared/rpc-contract";
@@ -147,6 +148,41 @@ export function folderName(root: string | undefined): string {
   return parts[parts.length - 1] ?? root;
 }
 
+function agentsFilePath(root?: string): string {
+  return `${(root || "").replace(/\/+$/, "")}/.bb/AGENTS.md`;
+}
+
+/** Long paths stay one line: the start hides, AGENTS.md / folder name stay visible. */
+function TruncatedPath({ path, className = "" }: { path: string; className?: string }) {
+  return (
+    <span className={`block min-w-0 truncate text-left font-mono ${className}`} dir="rtl" title={path}>
+      <span dir="ltr">{path}</span>
+    </span>
+  );
+}
+
+function AgentsFileChip({ root, onOpen }: { root?: string; onOpen?: () => void }) {
+  const path = agentsFilePath(root);
+  const inner = (
+    <>
+      <Icon name="FileText" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium leading-5">AGENTS.md</span>
+        <TruncatedPath path={path} className="text-[11px] text-muted-foreground" />
+      </span>
+    </>
+  );
+  const className = "flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-left";
+  if (onOpen) {
+    return (
+      <button type="button" className={`${className} hover:bg-muted/70`} onClick={onOpen} title={path} aria-label={tr("Открыть и править")}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={className} title={path}>{inner}</div>;
+}
+
 export function projectTitle(project: Group): string {
   const base = project.bbProjectName || project.name;
   const folder = folderName(project.root);
@@ -178,7 +214,7 @@ export function ProjectsPage({ projects, jobs, open, create }: { projects: Group
  },[active]);
  const taskCount=(project:Group)=>jobs.filter(job=>job.bindingId===project.id).length;
  const row=(project:Group)=><button key={project.id} onClick={()=>open(project.id)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
-  <span className="min-w-0"><span className="flex items-center gap-2 text-sm"><Icon name="Terminal" className="size-3.5 shrink-0 text-muted-foreground"/><span className="font-medium">{machineLabel(project)}</span><span className="truncate text-muted-foreground">{folderName(project.root)}</span></span><span className="mt-0.5 block truncate pl-5 font-mono text-xs text-muted-foreground">{project.root}</span></span>
+  <span className="min-w-0"><span className="flex items-center gap-2 text-sm"><Icon name="Terminal" className="size-3.5 shrink-0 text-muted-foreground"/><span className="font-medium">{machineLabel(project)}</span><span className="truncate text-muted-foreground">{folderName(project.root)}</span></span><TruncatedPath path={project.root||""} className="mt-0.5 pl-5 text-xs text-muted-foreground"/></span>
   <span className="text-xs tabular-nums text-muted-foreground">{tr("Задачи: {count}", { count: taskCount(project) })}</span>
  </button>;
  return <div className="space-y-4">
@@ -244,7 +280,13 @@ function ProjectRulesTab({ project, actions, archived, notice }: { project: Grou
   </>}>
    <Button size="sm" variant="ghost" disabled={loading||saving} onClick={()=>{void (async()=>{if(dirty&&!(await confirm.ask({title:tr("Загрузить файл заново?"),description:tr("Несохранённые изменения в редакторе пропадут."),confirmLabel:tr("Загрузить заново")})))return;void load();})();}}>{tr("Обновить")}</Button>
   </HintHeading>
-  <p className="break-all font-mono text-xs text-muted-foreground">{`${machineLabel(project)} · ${path}`}{file?.exists&&file.size!==null?` · ${tr("{size} байт", { size: file.size })}`:""}</p>
+  <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+   <Icon name="FileText" className="size-3.5 shrink-0" />
+   <span className="shrink-0">{machineLabel(project)}</span>
+   <span className="shrink-0">·</span>
+   <TruncatedPath path={path} className="flex-1 text-xs" />
+   {file?.exists&&file.size!==null?<span className="shrink-0">{tr("{size} байт", { size: file.size })}</span>:null}
+  </div>
   {loading&&!file?<p className="text-sm text-muted-foreground">{tr("Читаем файл на машине проекта…")}</p>:null}
   {error&&<p role="alert" className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">{error}</p>}
   {creating&&!dirty&&<div className="space-y-2 rounded-lg border border-dashed border-border p-4">
@@ -290,7 +332,7 @@ export function ProjectPage({ project, projects, departments, agents, jobs, setJ
  const waiting=projectJobs.filter(job=>job.state==="review"||job.state==="blocked"||job.state==="waiting_input").length;
  return <div className="space-y-5">
   <Button variant="ghost" size="sm" onClick={back}>{tr("← Проекты")}</Button>
-  <PageHead title={projectTitle(project)} description={`${machine} · ${project.root||project.description}`}>
+  <PageHead title={projectTitle(project)} description={`${machine} · ${folderName(project.root)||project.description||""}`}>
    <InfoHint title="Как работа попадает в проект">
     <p>{tr("1. Вы пишете задачу в чате этого BB-проекта или создаёте её здесь.")}</p>
     <p>{tr("2. Агент чата выбирает отдел по разделу «Принимаем» его регламента и ставит задачу руководителю отдела.")}</p>
@@ -315,9 +357,10 @@ export function ProjectPage({ project, projects, departments, agents, jobs, setJ
      <p>{tr("Для запуска на машине нужны: хост, подключённый к BB, установленный и авторизованный Claude Code и файл .bb/AGENTS.md в папке.")}</p>
      <p>{tr("Нужна работа в копии проекта на другой машине — подключите ту папку отдельным проектом.")}</p>
     </>}/>
-    <Rows rows={[["BB-проект",project.bbProjectName||project.bbProjectId||"—"],["Машина",machine],["Папка",<span className="font-mono text-xs">{project.root||"—"}</span>],["Окружение BB",project.environmentName||"—"]]}/>
+    <Rows rows={[["BB-проект",project.bbProjectName||project.bbProjectId||"—"],["Машина",machine],["Папка",<TruncatedPath path={project.root||"—"} className="max-w-[min(100%,28rem)] text-xs"/>],["Окружение BB",project.environmentName||"—"]]}/>
     {siblings.length>0&&<div className="pt-1"><p className="text-xs text-muted-foreground">{tr("Этот BB-проект подключён ещё здесь:")}</p><div className="mt-1 flex flex-wrap gap-2">{siblings.map(item=><Button key={item.id} size="sm" variant="outline" onClick={()=>openProject(item.id)}>{`${machineLabel(item)} · ${folderName(item.root)}${item.archivedAt?tr(" (отключён)"):""}`}</Button>)}</div></div>}
    </section>
+   {!archived && <SessionPolicyCard bbProjectId={project.bbProjectId} bindingId={project.id} archived={archived} notice={notice} />}
    <section aria-label={tr("Правила проекта")} className="space-y-2">
     <HintHeading title="Правила проекта" hint={<>
      <p>{tr("Общие требования ко всем задачам проекта: стек, стиль, что нельзя трогать.")}</p>
@@ -325,7 +368,7 @@ export function ProjectPage({ project, projects, departments, agents, jobs, setJ
      <p>{tr("Порядок слоёв: правила проекта → регламент отдела → должностная инструкция → поручение. Нижний слой дополняет верхний и не отменяет его.")}</p>
     </>}/>
     <p className="text-sm">{tr("Сотрудник читает при запуске:")}</p>
-    <p className="break-all rounded-md bg-muted/40 px-2 py-1.5 font-mono text-xs">{`${project.root||""}/.bb/AGENTS.md`}</p>
+    <AgentsFileChip root={project.root} onOpen={()=>setTab("Правила")} />
     <Button size="sm" variant="outline" onClick={()=>setTab("Правила")}>{tr("Открыть и править")}</Button>
    </section>
    <section aria-label={tr("Отделы проекта")} className="space-y-2 lg:col-span-2">

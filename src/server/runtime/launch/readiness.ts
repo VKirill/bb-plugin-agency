@@ -1,18 +1,21 @@
 import type { ContextSnapshot } from "../context-snapshot/types.js";
 import type { CapabilityReadiness, ReadinessPort } from "./ports.js";
 
-/** Deployed BB 0.43.1 / SDK 0.4.87: isolated spawn fields are not on ThreadSpawnArgs. */
-export const DEPLOYED_CORE_ISOLATED_SPAWN_FIELDS = false;
+/** Production readiness: public `threads.spawn` of a hidden plugin thread with pluginMetadata. */
+export const NATIVE_SPAWN_READINESS: CapabilityReadiness = {
+  executionAvailable: true,
+  isolationReady: true,
+  reason: "native threads.spawn (origin plugin, hidden visibility, pluginMetadata)",
+};
 
 export const DEFAULT_CAPABILITY_UNAVAILABLE: CapabilityReadiness = {
   executionAvailable: false,
   isolationReady: false,
-  isolatedSpawnFields: DEPLOYED_CORE_ISOLATED_SPAWN_FIELDS,
-  reason: "Isolation and isolated spawn fields are not proven on the deployed core; execution stays unavailable",
+  reason: "No spawn port is wired; execution stays unavailable",
 };
 
 export function isReadyToSpawn(readiness: CapabilityReadiness): boolean {
-  return readiness.executionAvailable && readiness.isolationReady && readiness.isolatedSpawnFields;
+  return readiness.executionAvailable;
 }
 
 export function unavailableReadinessPort(): ReadinessPort {

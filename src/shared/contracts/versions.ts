@@ -30,6 +30,46 @@ export const agentPluginIdsSchema = z
   .max(16)
   .refine((ids) => new Set(ids).size === ids.length, { message: "pluginIds must be unique" });
 
+/** How many reserves an employee profile keeps; the order is the priority. */
+export const AGENT_FALLBACK_LIMIT = 4;
+
+/** One owner-set reserve: a CLI and a model, never a catalog guess. */
+export const agentFallbackModelSchema = z
+  .object({
+    providerId: externalIdSchema,
+    model: z.string().trim().min(1).max(180),
+    reasoningEffort: reasoningEffortSchema.optional(),
+    /** Stored only when the provider supports service tiers. */
+    serviceTier: serviceTierSchema.optional(),
+  })
+  .strict();
+
+export const agentFallbackModelsSchema = z
+  .array(agentFallbackModelSchema)
+  .max(AGENT_FALLBACK_LIMIT)
+  .refine((list) => new Set(list.map(fallbackModelKey)).size === list.length, {
+    message: "fallbackModels must not repeat a CLI and model",
+  });
+
+export function fallbackModelKey(pick: { providerId: string; model: string }): string {
+  return `${pick.providerId.trim()}\u0000${pick.model.trim()}`;
+}
+
+function refineFallbackModels(
+  value: { providerId: string; model: string; fallbackModels?: { providerId: string; model: string }[] },
+  ctx: z.RefinementCtx,
+): void {
+  const primary = fallbackModelKey(value);
+  value.fallbackModels?.forEach((pick, index) => {
+    if (fallbackModelKey(pick) !== primary) return;
+    ctx.addIssue({
+      code: "custom",
+      path: ["fallbackModels", index],
+      message: "fallbackModels must not repeat the primary CLI and model",
+    });
+  });
+}
+
 export const agentVersionSchema = z
   .object({
     id: opaqueIdSchema,
@@ -46,8 +86,11 @@ export const agentVersionSchema = z
     /** Stored only when the provider supports service tiers. */
     serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
+    /** Owner-set reserves in priority order; tried when the primary cannot start. Omitted when empty. */
+    fallbackModels: agentFallbackModelsSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineFallbackModels);
 
 export const policyVersionSchema = z
   .object({
@@ -88,8 +131,10 @@ export const createAgentVersionCommandSchema = createCommandSchema
     /** Stored only when the provider supports service tiers. */
     serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
+    fallbackModels: agentFallbackModelsSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineFallbackModels);
 
 export const createPolicyVersionCommandSchema = createCommandSchema
   .extend({
@@ -127,8 +172,10 @@ export const agentVersionDraftSchema = z
     /** Stored only when the provider supports service tiers. */
     serviceTier: serviceTierSchema.optional(),
     pluginIds: agentPluginIdsSchema.optional(),
+    fallbackModels: agentFallbackModelsSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineFallbackModels);
 
 export const processVersionDraftSchema = z
   .object({
@@ -195,4 +242,39 @@ export function optionalReasoningEffort(
 
 export function optionalServiceTier(value: ServiceTier | undefined): { serviceTier: ServiceTier } | Record<string, never> {
   return value ? { serviceTier: value } : {};
+}
+
+export type AgentFallbackModel = z.infer<typeof agentFallbackModelSchema>;
+
+/** Stored only when the owner named at least one reserve, so older profiles and snapshots keep their shape. */
+export function optionalFallbackModels(
+  value: readonly AgentFallbackModel[] | undefined,
+): { fallbackModels: AgentFallbackModel[] } | Record<string, never> {
+  if (!value || !value.length) return {};
+  return {
+    fallbackModels: value.map((pick) => ({
+      providerId: pick.providerId.trim(),
+      model: pick.model.trim(),
+      ...optionalReasoningEffort(pick.reasoningEffort),
+      ...optionalServiceTier(pick.serviceTier),
+    })),
+  };
+}
+
+/** Same reserves in the same order: the order is the priority, so a reorder is a change. */
+export function sameFallbackModels(
+  left: readonly AgentFallbackModel[] | undefined,
+  right: readonly AgentFallbackModel[] | undefined,
+): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  return (
+    a.length === b.length &&
+    a.every(
+      (pick, index) =>
+        fallbackModelKey(pick) === fallbackModelKey(b[index]!) &&
+        (pick.reasoningEffort ?? "") === (b[index]!.reasoningEffort ?? "") &&
+        (pick.serviceTier ?? "") === (b[index]!.serviceTier ?? ""),
+    )
+  );
 }

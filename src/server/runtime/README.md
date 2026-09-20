@@ -2,15 +2,15 @@
 
 ## Границы
 
-- `isolation.ts` на обычном host: без proven provider → `execution` unavailable.
-  Это отказ, не sandbox. Изоляция **проверена только для claude-code** на
-  isolated instance с GET `/api/v1/system/experimental_thread-spawn-contract`.
-- `prepare-run/` — snapshot + reserve; spawn только после handshake.
+- `conveyor/` — станция закрывается приёмкой версии; ОТК и корень не ждут владельца.
+- `prepare-run/` — snapshot + reserve + пакет `.agency/jobs/<key>/TASK.md`; spawn через native `threads.spawn`.
 - `run-store` — ContextSnapshot + RunAttempt + receipt.
 - `launch/` — coordinator; `reconcile` не respawn.
 - `isolated-sdk/` — verify live thread, completion hash, watch.
 - `executing-activity/` — sidebar N: `threads.get` `active` + applied bind; без `listRunning`.
-- `needs-input/` — typed `reportNeedsInput` / `answerNeedsInput` + official `threads.send`. Watcher сюда не пишет.
+- `needs-input/` — typed `reportNeedsInput` / `answerNeedsInput` + official `threads.send` в рабочий тред.
+- `client-bounce/` — вопросы `waiting_input` и готовый продукт корня в чат заказчика (`originThreadId`).
+- `intake/` — размер/риск → цепочка (assistant/low vs executor+review).
 - `node_modules` host SDK 0.4.87 ≠ isolated patched tarball. Production rollout
   отдельно; этот каталог его не включает.
 

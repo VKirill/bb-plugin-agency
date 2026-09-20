@@ -78,6 +78,10 @@ export const workRulesSchema = z
     defaultServiceTierExecutor: serviceTierSchema.nullable(),
     defaultServiceTierReviewer: serviceTierSchema.nullable(),
     defaultServiceTierAssistant: serviceTierSchema.nullable(),
+    /** Agency-only: department that writes the spec. Null or empty turns the spec gate off. */
+    specDepartmentId: z.string().nullable(),
+    /** Agency-only: departments that need an accepted spec under a new-program root. Empty turns the gate off. */
+    specGatedDepartmentIds: z.array(z.string()),
   })
   .strict();
 
@@ -128,6 +132,8 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   defaultServiceTierExecutor: null,
   defaultServiceTierReviewer: null,
   defaultServiceTierAssistant: "fast",
+  specDepartmentId: null,
+  specGatedDepartmentIds: [],
 };
 
 /** Keys a department inherits from the agency and may override. */
@@ -185,6 +191,8 @@ export const AGENCY_ONLY_RULE_KEYS = [
   "defaultServiceTierLead",
   "defaultServiceTierExecutor",
   "defaultServiceTierReviewer",
+  "specDepartmentId",
+  "specGatedDepartmentIds",
 ] as const satisfies readonly WorkRuleKey[];
 
 export const workRulesScopeSchema = z.union([

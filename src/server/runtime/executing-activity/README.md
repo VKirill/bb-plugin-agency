@@ -11,7 +11,7 @@
 
 ## Честный executing (без изменений)
 
-`threads.get` `id`/`status`/`experimental_callerJobId`/`LaunchId`/`AttemptId`. `starting`/`idle` не N. Lookup throw → `{ available: false }`. Кандидаты: Job+attempt `running`, receipt confirmed + `job_bind_state = applied`, thread/launch ids совпали.
+`threads.get` `id`/`status` + `pluginMetadata.agencyJobId`/`agencyLaunchId`/`agencyAttemptId`. `starting`/`idle` не N. Lookup throw → `{ available: false }`. Кандидаты: Job+attempt `running`, receipt confirmed + `job_bind_state = applied`, thread/launch ids совпали.
 
 ## UI
 

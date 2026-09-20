@@ -9,7 +9,7 @@ import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { fail, ok, type DomainResult } from "../../domain";
 import { createSdkHostFilePortFromBinding, type HostFileRpcClient } from "../../host";
 import type { Job } from "../../shared/contracts/job";
-import { publicLaunchReasonCode, rpcContract } from "../../shared/rpc-contract";
+import { publicLaunchReasonCode, rpcContract, type IsolationReadiness } from "../../shared/rpc-contract";
 import { listStoredBindings } from "./catalog";
 import { resolveRpcAccess } from "./auth";
 import type { SqlDatabase } from "../db/sql";
@@ -21,16 +21,12 @@ import {
   pinCatalogRolesForPrepare,
   resolveCatalogRoles,
   type IsolatedCatalogRolesConfig,
-  createCoreCapabilityHandshakePort,
   createIsolatedSpawnPort,
   createIsolatedThreadVerifyPort,
   createSdkSkillCatalogPort,
   createStoreJobRunningPort,
-  handshakeAllowsSpawn,
-  officialSdkAllowsIsolatedSpawn,
   bindOfficialThreads,
   isolatedViewFromRecord,
-  SDK_ISOLATION_BLOCKER,
   resolveLiveAssignedProvider,
   type LiveAssignedProvider,
   readCompletionFromCore,
@@ -39,18 +35,26 @@ import {
   attemptStoreFromRunStore,
   createLaunchCoordinator,
   liveIdentityFromDatabase,
+  NATIVE_SPAWN_READINESS,
   type LaunchCoordinatorResult,
 } from "../runtime/launch";
 import {
   createJobInputPort,
   createPrepareRun,
-  isHandshakeReady,
-  readinessFromHandshake,
-  type IsolatedCapabilityHandshake,
-  type IsolatedCapabilityHandshakePort,
   type PrepareRunPublicInput,
+  type PreparedRun,
 } from "../runtime/prepare-run";
-import { createInternalRunStoreReads, createRunStore } from "../runtime/run-store";
+import { applyLaunchCandidate, launchCandidates, type LaunchCandidate } from "../runtime/agent-fallback";
+import {
+  fallbackLaunchText,
+  fallbackReadinessText,
+  launchOnFirstReadyCandidate,
+  refusalBelongsToCandidate,
+  refusedCandidatesError,
+  type TriedCandidate,
+} from "../runtime/prepare-run/model-candidates";
+import { uuidV5 } from "../runtime/launch/operation-ids";
+import { ACTIVE_RUN_ATTEMPT_STATES, createInternalRunStoreReads, createRunStore } from "../runtime/run-store";
 import { createCancelLaunchService } from "../runtime/cancel-launch";
 import { returnJobForRework } from "../runtime/rework/service";
 import { readProjectRulesFile } from "./project-rules";
@@ -153,7 +157,6 @@ export function createIsolatedLaunchRpc(deps: {
   store: DomainStore;
   db: SqlDatabase;
   documents: HostFileRpcClient;
-  handshake?: IsolatedCapabilityHandshakePort;
   loadCatalogRoles?: () => Promise<DomainResult<IsolatedCatalogRolesConfig | undefined>>;
   /** Machine readiness before a snapshot is reserved: online, provider CLI installed and allowed. */
   checkHost?: (input: { hostId: string; providerId: string }) => Promise<DomainResult<void>>;
@@ -169,14 +172,11 @@ export function createIsolatedLaunchRpc(deps: {
   }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
   /** Installed BB plugins: tools of the plugins an employee profile selects. */
   plugins?: PluginDirectory;
+  /** Job history line: a launch that went to a reserve says which model did not start. */
+  comment?: (job: Job, text: string) => void;
   onChanged?: () => void;
   send?: IsolatedSendPort;
 }): LaunchHandlers {
-  const handshake =
-    deps.handshake ??
-    createCoreCapabilityHandshakePort({
-      baseUrl: () => deps.bb.server.experimental_appUrl ?? deps.bb.server.loopbackBaseUrl,
-    });
   const runs = createRunStore(deps.db);
   const reads = createInternalRunStoreReads(deps.db);
   const catalog = createSdkSkillCatalogPort(deps.bb.sdk.skills);
@@ -205,11 +205,11 @@ export function createIsolatedLaunchRpc(deps: {
     };
   }
 
-  function buildCoordinator(supported: boolean, handshakeValue: IsolatedCapabilityHandshake) {
+  function buildCoordinator() {
     return createLaunchCoordinator({
       store: attemptStoreFromRunStore(runs, reads),
       liveIdentity: liveIdentityFromDatabase(deps.db),
-      readiness: { assess: () => readinessFromHandshake(handshakeValue) },
+      readiness: { assess: () => NATIVE_SPAWN_READINESS },
       spawn: createIsolatedSpawnPort(
         officialThreads,
         (contract) => {
@@ -220,9 +220,9 @@ export function createIsolatedLaunchRpc(deps: {
           const attempt = reads.getAttempt(systemCtx(), contract.attemptId);
           return attempt.ok ? attempt.value.jobId : "";
         },
-        supported,
+        true,
       ),
-      threadVerify: createIsolatedThreadVerifyPort(officialThreads, supported),
+      threadVerify: createIsolatedThreadVerifyPort(officialThreads, true),
       jobRunning: createStoreJobRunningPort(deps.store),
     });
   }
@@ -238,11 +238,10 @@ export function createIsolatedLaunchRpc(deps: {
   return {
     prepareLaunch: async (input) => {
       return withAccess<{
-        handshakeReady: boolean;
         snapshotId: string;
         digest: string;
         attemptId: string;
-        launched: LaunchCoordinatorResult | null;
+        launched: LaunchCoordinatorResult;
         reason: string;
         warnings?: string[];
       }>(async (ctx) => {
@@ -252,18 +251,8 @@ export function createIsolatedLaunchRpc(deps: {
         if (!assigned.ok) return assigned;
         const binding = deps.store.getBinding(job.bindingId);
         if (!binding) return fail("not_found", `binding ${job.bindingId} not found`);
-        if (deps.checkHost) {
-          const host = await deps.checkHost({ hostId: binding.hostId, providerId: assigned.value.providerId });
-          if (!host.ok) return host;
-        }
-        if (deps.checkModel) {
-          const model = await deps.checkModel({
-            hostId: binding.hostId,
-            providerId: assigned.value.providerId,
-            model: assigned.value.model,
-          });
-          if (!model.ok) return model;
-        }
+        const storedVersion = deps.store.getAgentVersion(assigned.value.agentVersionId);
+        if (!storedVersion) return fail("not_found", `agent version ${assigned.value.agentVersionId} not found`);
         const files = createSdkHostFilePortFromBinding(deps.documents, binding);
         if (!files.ok) return files;
         const listed = await catalog.list({
@@ -283,83 +272,108 @@ export function createIsolatedLaunchRpc(deps: {
             })
           : resolveCatalogRoles(listed.value);
         if (!roles.ok) return roles;
-        const prepare = createPrepareRun({
-          store: deps.store,
-          files: files.value,
-          catalog,
-          handshake,
-          runs,
-          jobInputs: createJobInputPort({ store: deps.store, db: deps.db, files: files.value }),
-          ...(deps.plugins ? { pluginTools: pluginToolsFrom(deps.plugins) } : {}),
-          ...(deps.briefing ? { briefing: deps.briefing } : {}),
-          roleInstructions: (jobId) => {
-            const role = readJobRoleContext(deps.db, jobId);
-            if (!role) return null;
-            // The owner's base instruction of this role type: one order of work for every job.
-            const playbook = listTemplates(deps.db).find((row) => row.key === PLAYBOOK_TEMPLATE[role.assigneeType])?.text ?? null;
-            return buildWorkerInstructions({ ...role, playbook });
-          },
-          server: {
-            applicable: DEFAULT_APPLICABLE,
-            catalogRoles: roles.value,
-          },
-        });
-        const publicInput: PrepareRunPublicInput = {
-          requestId: input.requestId,
-          jobId: input.jobId,
-          expectedRevision: input.expectedRevision,
-        };
         let warnings: string[] = [];
-        const prepared = await exclusive(async () => {
-          if (deps.checkLimits) {
-            const limits = await deps.checkLimits(job);
-            if (!limits.ok) return limits;
-            warnings = limits.value.warnings;
-          }
-          return prepare.prepare(ctx, publicInput);
-        });
-        if (!prepared.ok) return prepared;
-        const coreReady = prepared.value.handshakeReady && (await handshakeAllowsSpawn(handshake));
-        const sdkReady = officialSdkAllowsIsolatedSpawn();
-        const spawnAllowed = coreReady && sdkReady;
-        if (!spawnAllowed) {
-          return ok({
-            handshakeReady: prepared.value.handshakeReady,
-            snapshotId: prepared.value.reserved.snapshotId,
-            digest: prepared.value.reserved.digest,
-            attemptId: prepared.value.reserved.attempt.attemptId,
-            launched: null,
-            reasonCode: "handshake_unready" as const,
-            reason: !prepared.value.handshakeReady
-              ? "runtime handshake is not proven; spawn is not called"
-              : !sdkReady
-                ? SDK_ISOLATION_BLOCKER
-                : "runtime handshake is not proven; spawn is not called",
-          });
-        }
-        const launched = await buildCoordinator(true, prepared.value.handshake).launchPreparedRun(ctx, {
-          requestId: input.requestId,
-          snapshotId: prepared.value.reserved.snapshotId,
-          digest: prepared.value.reserved.digest,
-          attemptId: prepared.value.reserved.attempt.attemptId,
-          attestation: {
-            accessVerified: true,
-            revisionsVerified: true,
-            expectedJobRevision: prepared.value.snapshot.job.revision,
-            expectedBindingRevision: prepared.value.snapshot.binding.revision,
+        type Launched = { prepared: PreparedRun; launched: LaunchCoordinatorResult };
+        // The primary first, then the owner's reserves: the first pair this machine can start wins.
+        const walk = await launchOnFirstReadyCandidate<Launched>({
+          candidates: launchCandidates(deps.db, assigned.value.agentId, storedVersion, new Date().toISOString()),
+          check: async (candidate) => {
+            if (deps.checkHost) {
+              const host = await deps.checkHost({ hostId: binding.hostId, providerId: candidate.providerId });
+              if (!host.ok) return host;
+            }
+            if (deps.checkModel) {
+              const model = await deps.checkModel({ hostId: binding.hostId, providerId: candidate.providerId, model: candidate.model });
+              if (!model.ok) return model;
+            }
+            return ok(undefined);
           },
-          claimedBbProjectId: prepared.value.snapshot.binding.bbProjectId,
+          launch: async (candidate, position) => {
+            // A reserve is a new attempt of the same request: its operations get their own ids.
+            const requestId = position === 0 ? input.requestId : uuidV5(input.requestId, `agency.launch.candidate.${position}`);
+            const prepare = createPrepareRun({
+              store: deps.store,
+              files: files.value,
+              catalog,
+              runs,
+              jobInputs: createJobInputPort({ store: deps.store, db: deps.db, files: files.value }),
+              effectiveAgentVersion: (version) => applyLaunchCandidate(version, candidate),
+              hasLiveAttempt: (jobId) => {
+                const attempts = reads.listAttempts(systemCtx(), jobId);
+                return !attempts.ok || attempts.value.some((attempt) => (ACTIVE_RUN_ATTEMPT_STATES as readonly string[]).includes(attempt.state));
+              },
+              // The gate holds the limit check and the reservation only: the snapshot is compiled
+              // before it and the thread is spawned after it, so launches of other jobs go on meanwhile.
+              reserveGate: (reserve) =>
+                exclusive(async () => {
+                  if (deps.checkLimits) {
+                    const limits = await deps.checkLimits(job);
+                    if (!limits.ok) return limits;
+                    warnings = limits.value.warnings;
+                  }
+                  return reserve();
+                }),
+              ...(deps.plugins ? { pluginTools: pluginToolsFrom(deps.plugins) } : {}),
+              ...(deps.briefing ? { briefing: deps.briefing } : {}),
+              roleInstructions: (jobId) => {
+                const role = readJobRoleContext(deps.db, jobId);
+                if (!role) return null;
+                // The owner's base instruction of this role type: one order of work for every job.
+                const playbook = listTemplates(deps.db).find((row) => row.key === PLAYBOOK_TEMPLATE[role.assigneeType])?.text ?? null;
+                return buildWorkerInstructions({ ...role, playbook });
+              },
+              server: {
+                applicable: DEFAULT_APPLICABLE,
+                catalogRoles: roles.value,
+              },
+            });
+            const publicInput: PrepareRunPublicInput = {
+              requestId,
+              jobId: input.jobId,
+              expectedRevision: input.expectedRevision,
+            };
+            // A refusal that is already known costs nothing: no files read, no briefing asked.
+            if (deps.checkLimits) {
+              const early = await deps.checkLimits(job);
+              if (!early.ok) return early;
+            }
+            const prepared = await prepare.prepare(ctx, publicInput);
+            if (!prepared.ok) return prepared;
+            const launched = await buildCoordinator().launchPreparedRun(ctx, {
+              requestId,
+              snapshotId: prepared.value.reserved.snapshotId,
+              digest: prepared.value.reserved.digest,
+              attemptId: prepared.value.reserved.attempt.attemptId,
+              attestation: {
+                accessVerified: true,
+                revisionsVerified: true,
+                expectedJobRevision: prepared.value.snapshot.job.revision,
+                expectedBindingRevision: prepared.value.snapshot.binding.revision,
+              },
+              claimedBbProjectId: prepared.value.snapshot.binding.bbProjectId,
+            });
+            if (!launched.ok) return launched;
+            return ok({ prepared: prepared.value, launched: launched.value });
+          },
+          // Only a spawn BB refused outright leaves no thread behind; an unknown outcome is never retried on another model.
+          spawnRefusal: (value) =>
+            value.launched.kind === "failed" && !value.launched.attempt.threadId
+              ? { code: value.launched.code, message: value.launched.message }
+              : null,
         });
-        if (!launched.ok) return launched;
+        if (!walk.result.ok) return walk.result;
+        const { prepared, launched } = walk.result.value;
+        const modelNote = walk.used && walk.tried.length ? fallbackLaunchText({ jobKey: job.key, tried: walk.tried, used: walk.used }) : null;
+        if (modelNote && launched.kind === "running") deps.comment?.(job, modelNote);
         deps.onChanged?.();
         return ok({
-          handshakeReady: true,
-          snapshotId: prepared.value.reserved.snapshotId,
-          digest: prepared.value.reserved.digest,
-          attemptId: prepared.value.reserved.attempt.attemptId,
-          launched: launched.value,
+          snapshotId: prepared.reserved.snapshotId,
+          digest: prepared.reserved.digest,
+          attemptId: prepared.reserved.attempt.attemptId,
+          launched,
           reasonCode: "ok" as const,
-          reason: launched.value.kind === "running" ? "verified bind applied" : launched.value.kind,
+          reason: launched.kind === "running" ? "verified bind applied" : launched.kind,
+          ...(walk.used ? { model: { providerId: walk.used.providerId, model: walk.used.model, source: walk.used.source } } : {}),
           ...(warnings.length ? { warnings } : {}),
         });
       });
@@ -373,10 +387,7 @@ export function createIsolatedLaunchRpc(deps: {
     },
     reconcileLaunch: async (input) => {
       return withAccess(async (ctx) => {
-        const supported = await handshakeAllowsSpawn(handshake);
-        const probed = await handshake.probe();
-        if (!probed.ok) return probed;
-        const result = await buildCoordinator(supported, probed.value).reconcileLaunch(ctx, {
+        const result = await buildCoordinator().reconcileLaunch(ctx, {
           requestId: input.requestId,
           attemptId: input.attemptId,
           launchId: input.launchId,
@@ -522,15 +533,12 @@ export function createIsolatedLaunchRpc(deps: {
 
     getIsolationReadiness: async (input) => {
       return withAccess(async (ctx) => {
-        const probed = await handshake.probe();
-        if (!probed.ok) return probed;
-        const ready = readinessFromHandshake(probed.value);
-        const sdkTypedSpawnReady = officialSdkAllowsIsolatedSpawn();
-        const handshakeReady = isHandshakeReady(probed.value);
+        const ready = NATIVE_SPAWN_READINESS;
         let assignedProvider: LiveAssignedProvider | null = null;
         let assignedReason: string | null = null;
         let assignedErrorCode: string | null = null;
         let warnings: string[] = [];
+        let modelWarnings: string[] = [];
         if (input.jobId) {
           const job = deps.store.getJob(input.jobId);
           if (!job) return fail("not_found", `job ${input.jobId} not found`);
@@ -546,33 +554,46 @@ export function createIsolatedLaunchRpc(deps: {
           if (assignedErrorCode === "agent_inactive") {
             assignedReason = "Исполнитель приостановлен: включите его профиль или назначьте другого сотрудника.";
           }
-          // What the launch itself would check, said before the button is pressed.
+          // What the launch itself would check, said before the button is pressed: the primary,
+          // then the owner's reserves — the first pair this machine can start is the one named.
           const binding = deps.store.getBinding(job.bindingId);
-          if (!assignedErrorCode && binding && assignedProvider) {
-            const blocked = providerPolicyBlock(deps.store, binding.policyVersionId, assignedProvider);
-            if (blocked) {
-              assignedErrorCode = "provider_constraint_mismatch";
-              assignedReason = blocked;
-            }
-          }
-          if (!assignedErrorCode && binding && assignedProvider) {
-            if (deps.checkHost) {
-              const host = await deps.checkHost({ hostId: binding.hostId, providerId: assignedProvider.providerId });
-              if (!host.ok) {
-                assignedErrorCode = host.error.code;
-                assignedReason = host.error.message;
+          const storedVersion = assignedProvider ? deps.store.getAgentVersion(assignedProvider.agentVersionId) : undefined;
+          if (!assignedErrorCode && binding && assignedProvider && storedVersion) {
+            const live = assignedProvider;
+            const refused: TriedCandidate[] = [];
+            let chosen: LaunchCandidate | null = null;
+            for (const candidate of launchCandidates(deps.db, live.agentId, storedVersion, new Date().toISOString())) {
+              const pair = { ...live, providerId: candidate.providerId, model: candidate.model };
+              const blocked = providerPolicyBlock(deps.store, binding.policyVersionId, pair);
+              let error = blocked ? { code: "provider_constraint_mismatch", message: blocked } : null;
+              if (!error && deps.checkHost) {
+                const host = await deps.checkHost({ hostId: binding.hostId, providerId: candidate.providerId });
+                if (!host.ok) error = host.error;
               }
-            }
-            if (!assignedErrorCode && deps.checkModel) {
-              const model = await deps.checkModel({
-                hostId: binding.hostId,
-                providerId: assignedProvider.providerId,
-                model: assignedProvider.model,
-              });
-              if (!model.ok) {
-                assignedErrorCode = model.error.code;
-                assignedReason = model.error.message;
+              if (!error && deps.checkModel) {
+                const model = await deps.checkModel({ hostId: binding.hostId, providerId: candidate.providerId, model: candidate.model });
+                if (!model.ok) error = model.error;
               }
+              if (!error) {
+                chosen = candidate;
+                assignedProvider = pair;
+                break;
+              }
+              // The machine is off or the like: no other model helps, the reason stands alone.
+              if (!refusalBelongsToCandidate(error)) {
+                refused.length = 0;
+                refused.push({ candidate, error });
+                break;
+              }
+              refused.push({ candidate, error });
+            }
+            if (!chosen && refused.length) {
+              const combined = refusedCandidatesError(refused);
+              assignedErrorCode = combined.code;
+              assignedReason = combined.message;
+            } else if (chosen && refused.length) {
+              modelWarnings = [fallbackReadinessText({ tried: refused, used: chosen })];
+              warnings = modelWarnings;
             }
             if (!assignedErrorCode) {
               const rules = await readProjectRulesFile(deps.documents, binding);
@@ -587,42 +608,29 @@ export function createIsolatedLaunchRpc(deps: {
                 assignedErrorCode = limits.error.code;
                 assignedReason = limits.error.message;
               } else {
-                warnings = limits.value.warnings;
+                warnings = [...modelWarnings, ...limits.value.warnings];
               }
             }
           }
         } else {
           assignedReason = "getIsolationReadiness without jobId does not authorize a launch";
         }
-        const launchAllowedForAssigned = Boolean(
-          handshakeReady && sdkTypedSpawnReady && assignedProvider && !assignedReason,
-        );
-        const reason = assignedReason
-          ? assignedReason
-          : !handshakeReady
-            ? ready.reason
-            : !sdkTypedSpawnReady
-              ? SDK_ISOLATION_BLOCKER
-              : ready.reason;
+        const launchAllowedForAssigned = Boolean(assignedProvider && !assignedReason);
+        const reason = assignedReason ?? ready.reason;
         return ok({
-          handshakeReady,
-          executionAvailable: ready.executionAvailable && sdkTypedSpawnReady,
-          isolationReady: ready.isolationReady && sdkTypedSpawnReady,
-          isolatedSpawnFields: ready.isolatedSpawnFields && sdkTypedSpawnReady,
-          sdkTypedSpawnReady,
+          executionAvailable: ready.executionAvailable,
+          isolationReady: ready.isolationReady,
           assignedProvider,
           launchAllowedForAssigned,
           reasonCode: publicLaunchReasonCode({
             assignedErrorCode,
-            handshakeReady,
-            sdkTypedSpawnReady,
             launchAllowed: launchAllowedForAssigned,
             hasJobId: Boolean(input.jobId),
           }),
           reason,
           ...(warnings.length ? { warnings } : {}),
           ...(assignedErrorCode && WAIT_CODES.has(assignedErrorCode) ? { waitable: true } : {}),
-        });
+        } satisfies IsolationReadiness);
       });
     },
 

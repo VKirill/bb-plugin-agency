@@ -10,12 +10,12 @@
 **1. Постоянные данные и UI.** CRUD, revision/CAS, список/карточка на RPC,
 артефакты на host binding, preview, published ≠ accepted. Деморежим отделён.
 
-**2. Запуск на любом CLI (готово).** GET spawn-contract; CLI, модель, рассуждение и
-быстрый режим из профиля. Claude Code, Codex, Cursor, OpenCode и Antigravity проверены
-живым запуском. Обычный host 0.4.87 без контракта: spawn unavailable. Файловая
+**2. Запуск на любом CLI (готово).** Native `threads.spawn`; CLI, модель, рассуждение и
+быстрый режим из профиля. Claude Code, Codex, Cursor, OpenCode и Antigravity.
+Идентичность запуска — `pluginMetadata` и база Агентства. Файловая
 песочница и обходы shell — не закрыты.
 
-**3. Ручной цикл (частично).** prepare → spawn (isolated) → bind → watch
+**3. Ручной цикл (частично).** prepare → spawn → bind → watch
 (`idle`+hash → review / `awaiting_review`) или `reportNeedsInput` → `waiting_input`
 → `answerNeedsInput` (тот же thread, official send).
 Accept — отдельная команда. `runSucceeded` всегда false.

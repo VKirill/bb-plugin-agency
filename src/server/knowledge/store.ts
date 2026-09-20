@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { fail, ok, type DomainResult } from "../../domain";
+import type { KnowledgeScopeKind } from "../../shared/contracts/knowledge-scope";
 import type { SqlDatabase } from "../db/sql";
 
 /**
- * Knowledge: materials the owner accepted for the Agency, a department or a
- * project. An accepted material reaches every launch in its scope as part of the
- * prompt; a proposal (from an employee or an unreviewed edit) waits for the
- * owner. Archived materials stay for history and reach nobody.
+ * Knowledge: materials the owner accepted for the Agency, a department, a
+ * project or a section. An accepted material reaches every launch in its scope as
+ * part of the prompt; a proposal (from an employee or an unreviewed edit) waits
+ * for the owner. Archived materials stay for history and reach nobody.
  */
 
 export const KNOWLEDGE_MIGRATION = `CREATE TABLE agency_knowledge (
@@ -23,7 +24,7 @@ export const KNOWLEDGE_MIGRATION = `CREATE TABLE agency_knowledge (
     updated_at TEXT NOT NULL
   )`;
 
-export type KnowledgeScopeKind = "agency" | "department" | "project";
+export type { KnowledgeScopeKind };
 export type KnowledgeStatus = "proposal" | "accepted" | "archived";
 
 /** Как обращаться с записью: факт проверяют, процедуре следуют, предпочтение соблюдают. */
@@ -50,6 +51,7 @@ export type KnowledgeItem = {
   source: string;
   scopeKind: KnowledgeScopeKind;
   scopeId: string | null;
+  parentBindingId: string | null;
   status: KnowledgeStatus;
   proposedBy: string | null;
   revision: number;
@@ -71,6 +73,7 @@ type Row = {
   source: string;
   scope_kind: KnowledgeScopeKind;
   scope_id: string | null;
+  parent_binding_id?: string | null;
   status: KnowledgeStatus;
   proposed_by: string | null;
   revision: number;
@@ -92,6 +95,7 @@ const toItem = (row: Row): KnowledgeItem => ({
   source: row.source,
   scopeKind: row.scope_kind,
   scopeId: row.scope_id,
+  parentBindingId: row.parent_binding_id ?? null,
   status: row.status,
   proposedBy: row.proposed_by,
   revision: row.revision,
@@ -105,10 +109,19 @@ function firstLine(body: string): string {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
-export function listKnowledge(db: SqlDatabase, filter: { scopeKind?: KnowledgeScopeKind; scopeId?: string; status?: KnowledgeStatus } = {}): KnowledgeItem[] {
+export function listKnowledge(
+  db: SqlDatabase,
+  filter: { scopeKind?: KnowledgeScopeKind; scopeId?: string; parentBindingId?: string | null; status?: KnowledgeStatus } = {},
+): KnowledgeItem[] {
   return (db.prepare(`SELECT * FROM agency_knowledge ORDER BY updated_at DESC`).all() as Row[])
     .map(toItem)
-    .filter((item) => (!filter.scopeKind || item.scopeKind === filter.scopeKind) && (!filter.scopeId || item.scopeId === filter.scopeId) && (!filter.status || item.status === filter.status));
+    .filter(
+      (item) =>
+        (!filter.scopeKind || item.scopeKind === filter.scopeKind) &&
+        (!filter.scopeId || item.scopeId === filter.scopeId) &&
+        (filter.parentBindingId === undefined || item.parentBindingId === filter.parentBindingId) &&
+        (!filter.status || item.status === filter.status),
+    );
 }
 
 export type SaveKnowledgeInput = {
@@ -124,6 +137,7 @@ export type SaveKnowledgeInput = {
   source: string;
   scopeKind: KnowledgeScopeKind;
   scopeId: string | null;
+  parentBindingId?: string | null;
 };
 
 /**
@@ -137,8 +151,15 @@ export function saveKnowledge(db: SqlDatabase, input: SaveKnowledgeInput, actor:
   const source = input.source.trim();
   if (!title || !body || !source) return fail("invalid_command", "Нужны название, текст и источник материала.");
   if (body.length > 20_000) return fail("invalid_command", "Материал длиннее 20 000 символов: сократите или разделите его.");
-  if (input.scopeKind === "agency" ? input.scopeId !== null : !input.scopeId) {
-    return fail("invalid_command", "Область: Агентство без id, отдел или проект — с id.");
+  const parentBindingId = input.parentBindingId ?? null;
+  if (input.scopeKind === "section") {
+    if (!input.scopeId) return fail("invalid_command", "Область раздела: нужен идентификатор раздела.");
+    if (!parentBindingId) return fail("invalid_command", "Область раздела: нужен идентификатор привязки проекта-родителя.");
+  } else {
+    if (parentBindingId) return fail("invalid_command", "Идентификатор привязки проекта-родителя задают только записи раздела.");
+    if (input.scopeKind === "agency" ? input.scopeId !== null : !input.scopeId) {
+      return fail("invalid_command", "Область: Агентство без id, отдел или проект — с id.");
+    }
   }
   const status: KnowledgeStatus = actor.proposedBy ? "proposal" : "accepted";
   const summary = (input.summary ?? "").trim() || firstLine(body);
@@ -154,9 +175,9 @@ export function saveKnowledge(db: SqlDatabase, input: SaveKnowledgeInput, actor:
     if (twin) return fail("conflict", `Материал «${title}» в этой области уже есть (${twin.id}): измените его, а не заводите второй.`);
     const id = `kno_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     db.prepare(
-      `INSERT INTO agency_knowledge (id, title, summary, body, kind, importance, pinned, write_reason, source, scope_kind, scope_id, status, proposed_by, revision, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-    ).run(id, title, summary, body, kind, importance, pinned, writeReason, source, input.scopeKind, input.scopeId, status, actor.proposedBy, now, now);
+      `INSERT INTO agency_knowledge (id, title, summary, body, kind, importance, pinned, write_reason, source, scope_kind, scope_id, parent_binding_id, status, proposed_by, revision, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    ).run(id, title, summary, body, kind, importance, pinned, writeReason, source, input.scopeKind, input.scopeId, parentBindingId, status, actor.proposedBy, now, now);
     return ok(toItem(db.prepare(`SELECT * FROM agency_knowledge WHERE id = ?`).get(id) as Row));
   }
   const current = db.prepare(`SELECT * FROM agency_knowledge WHERE id = ?`).get(input.id) as Row | undefined;
@@ -164,10 +185,10 @@ export function saveKnowledge(db: SqlDatabase, input: SaveKnowledgeInput, actor:
   if (current.revision !== input.expectedRevision) return fail("revision_conflict", "Материал изменился: перечитайте и повторите.");
   const changed = db
     .prepare(
-      `UPDATE agency_knowledge SET title = ?, summary = ?, body = ?, kind = ?, importance = ?, pinned = ?, write_reason = ?, source = ?, scope_kind = ?, scope_id = ?, status = ?, proposed_by = ?, revision = revision + 1, updated_at = ?
+      `UPDATE agency_knowledge SET title = ?, summary = ?, body = ?, kind = ?, importance = ?, pinned = ?, write_reason = ?, source = ?, scope_kind = ?, scope_id = ?, parent_binding_id = ?, status = ?, proposed_by = ?, revision = revision + 1, updated_at = ?
        WHERE id = ? AND revision = ?`,
     )
-    .run(title, summary, body, kind, importance, pinned, writeReason, source, input.scopeKind, input.scopeId, status, actor.proposedBy ?? current.proposed_by, now, input.id, input.expectedRevision);
+    .run(title, summary, body, kind, importance, pinned, writeReason, source, input.scopeKind, input.scopeId, parentBindingId, status, actor.proposedBy ?? current.proposed_by, now, input.id, input.expectedRevision);
   if (changed.changes !== 1) return fail("revision_conflict", "Материал изменился: перечитайте и повторите.");
   return ok(toItem(db.prepare(`SELECT * FROM agency_knowledge WHERE id = ?`).get(input.id) as Row));
 }
@@ -203,6 +224,14 @@ export function knowledgeOrder(left: KnowledgeItem, right: KnowledgeItem): numbe
   );
 }
 
+function knowledgeListCommand(scopeKind: KnowledgeScopeKind, scopeId: string | null, parentBindingId?: string | null): string {
+  if (scopeKind !== "section" || !scopeId) return `bb agency knowledge list --input-json '{}'`;
+  const filter = parentBindingId
+    ? { scopeKind: "section", scopeId, parentBindingId }
+    : { scopeKind: "section", scopeId };
+  return `bb agency knowledge list --input-json '${JSON.stringify(filter)}'`;
+}
+
 /** Accepted materials of one scope as a prompt block: an index cut to its limit, full text for the few. */
 export function knowledgeBlock(
   db: SqlDatabase,
@@ -210,12 +239,21 @@ export function knowledgeBlock(
   scopeId: string | null,
   /** Записи, которые оценщик отобрал под задачу: тогда в индекс идут они, закреплённые и важные. */
   focus?: ReadonlySet<string> | null,
+  parentBindingId?: string | null,
 ): { text: string; ids: { id: string; hash: string }[] } {
   // A database opened by an older migration step has no knowledge table yet.
   if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agency_knowledge'`).get()) return { text: "", ids: [] };
-  const items = (db
-    .prepare(`SELECT * FROM agency_knowledge WHERE status = 'accepted' AND scope_kind = ? AND COALESCE(scope_id, '') = ?`)
-    .all(scopeKind, scopeId ?? "") as Row[])
+  const items = (
+    parentBindingId
+      ? (db
+          .prepare(
+            `SELECT * FROM agency_knowledge WHERE status = 'accepted' AND scope_kind = ? AND COALESCE(scope_id, '') = ? AND parent_binding_id = ?`,
+          )
+          .all(scopeKind, scopeId ?? "", parentBindingId) as Row[])
+      : (db
+          .prepare(`SELECT * FROM agency_knowledge WHERE status = 'accepted' AND scope_kind = ? AND COALESCE(scope_id, '') = ?`)
+          .all(scopeKind, scopeId ?? "") as Row[])
+  )
     .map(toItem)
     .sort(knowledgeOrder);
   if (!items.length) return { text: "", ids: [] };
@@ -234,11 +272,12 @@ export function knowledgeBlock(
     used += line.length + 1;
   }
   // В снимок запуска попадает то, что сотрудник правда увидел: остальное он и не читал.
+  const listCommand = knowledgeListCommand(scopeKind, scopeId, parentBindingId);
   const tail = shown.length < items.length
     ? [
         focus
-          ? `Показаны записи под эту задачу: ${shown.length} из ${items.length}. Остальные — bb agency knowledge list --input-json '{}'.`
-          : `Показано ${shown.length} из ${items.length}: остальное — bb agency knowledge list --input-json '{}'.`,
+          ? `Показаны записи под эту задачу: ${shown.length} из ${items.length}. Остальные — ${listCommand}.`
+          : `Показано ${shown.length} из ${items.length}: остальное — ${listCommand}.`,
       ]
     : [];
   const full: string[] = [];

@@ -8,9 +8,15 @@ import type {
   ThreadVerifyPort,
 } from "../launch/ports.js";
 import type { ContextSnapshot } from "../context-snapshot/types.js";
-import type { IsolatedThreadListArgs, IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
+import { AGENCY_PLUGIN_ID, type IsolatedThreadListArgs, type IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
 import { spawnArgsFromContract } from "./spawn-args.js";
 import type { ContinuationPresence, IsolatedSendOutcome, IsolatedThreadSendArgs } from "./send-port.js";
+
+export type AgencyPluginMetadata = {
+  agencyLaunchId?: string;
+  agencyAttemptId?: string;
+  agencyJobId?: string;
+};
 
 export type IsolatedThreadView = {
   id: string;
@@ -19,9 +25,7 @@ export type IsolatedThreadView = {
   providerId?: string;
   model?: string;
   environmentId?: string | null;
-  experimental_callerLaunchId?: string;
-  experimental_callerAttemptId?: string;
-  experimental_callerJobId?: string;
+  pluginMetadata?: AgencyPluginMetadata;
   host?: { id: string } | null;
   environment?: { id?: string; hostId?: string; path?: string | null } | null;
   /** Epoch ms of the last thread update; a sign of life for the run watch. */
@@ -33,15 +37,37 @@ export type IsolatedThreadsApi = {
   spawn(args: IsolatedThreadSpawnArgs): Promise<{ id: string }>;
   get(args: { threadId: string; include?: string }): Promise<IsolatedThreadView>;
   list(args?: IsolatedThreadListArgs): Promise<readonly IsolatedThreadView[]>;
-  send?(args: IsolatedThreadSendArgs): Promise<
-    IsolatedSendOutcome
-  >;
+  getPluginMetadata?(threadId: string): Promise<AgencyPluginMetadata | undefined>;
+  send?(args: IsolatedThreadSendArgs): Promise<IsolatedSendOutcome>;
   hasContinuation?(
     threadId: string,
     token: string,
     queuedMessageId?: string | null,
   ): Promise<ContinuationPresence>;
 };
+
+function present(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Launch identity of a thread: only this plugin's pluginMetadata. */
+export function callerIdsFromThread(thread: IsolatedThreadView): {
+  launchId?: string;
+  attemptId?: string;
+  jobId?: string;
+} {
+  return {
+    launchId: present(thread.pluginMetadata?.agencyLaunchId) ? thread.pluginMetadata.agencyLaunchId : undefined,
+    attemptId: present(thread.pluginMetadata?.agencyAttemptId) ? thread.pluginMetadata.agencyAttemptId : undefined,
+    jobId: present(thread.pluginMetadata?.agencyJobId) ? thread.pluginMetadata.agencyJobId : undefined,
+  };
+}
+
+async function threadWithMetadata(threads: IsolatedThreadsApi, thread: IsolatedThreadView): Promise<IsolatedThreadView> {
+  if (thread.pluginMetadata || !threads.getPluginMetadata || !thread.id) return thread;
+  const pluginMetadata = await threads.getPluginMetadata(thread.id);
+  return pluginMetadata ? { ...thread, pluginMetadata } : thread;
+}
 
 export function createIsolatedSpawnPort(
   threads: IsolatedThreadsApi,
@@ -55,8 +81,8 @@ export function createIsolatedSpawnPort(
       if (!supported) {
         return {
           kind: "rejected",
-          code: "sdk_isolated_fields_unsupported",
-          message: "runtime handshake is not proven; spawn is not called",
+          code: "sdk_spawn_unsupported",
+          message: "native threads.spawn is not available; spawn is not called",
         };
       }
       const snapshot = loadSnapshot(request);
@@ -85,15 +111,19 @@ export function createIsolatedSpawnPort(
       if (!supported) return { kind: "unsupported" };
       try {
         const listed = await threads.list({
-          experimental_callerLaunchId: launchId,
           includeHidden: true,
+          originPluginId: AGENCY_PLUGIN_ID,
         });
-        const items = [...listed];
-        if (items.length === 0) return { kind: "unsupported" };
-        if (items.length > 1) {
+        const matches: IsolatedThreadView[] = [];
+        for (const row of listed) {
+          const enriched = await threadWithMetadata(threads, row);
+          if (callerIdsFromThread(enriched).launchId === launchId) matches.push(enriched);
+        }
+        if (matches.length === 0) return { kind: "unsupported" };
+        if (matches.length > 1) {
           return { kind: "rejected", code: "caller_launch_ambiguous", message: "list returned more than one thread" };
         }
-        const id = items[0]?.id;
+        const id = matches[0]?.id;
         if (!id) return { kind: "unknown", code: "reconcile_id_missing", message: "listed thread has no id" };
         return { kind: "confirmed", threadId: id };
       } catch (error) {
@@ -105,10 +135,6 @@ export function createIsolatedSpawnPort(
       }
     },
   };
-}
-
-function present(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 export function identityFromServerThread(
@@ -159,7 +185,7 @@ export function createIsolatedThreadVerifyPort(threads: IsolatedThreadsApi, supp
         return {
           kind: "unavailable",
           code: "sdk_thread_lookup_unsupported",
-          message: "runtime handshake is not proven; thread identity is not confirmed",
+          message: "native thread lookup is not available; thread identity is not confirmed",
         };
       }
       if (!receipt.threadId) {
@@ -170,27 +196,31 @@ export function createIsolatedThreadVerifyPort(threads: IsolatedThreadsApi, supp
         };
       }
       try {
-        const thread = await threads.get({ threadId: receipt.threadId, include: "environment,host" });
-        if (thread.experimental_callerLaunchId !== receipt.launchId) {
-          return { kind: "rejected", code: "caller_launch_mismatch", message: "experimental_callerLaunchId does not match" };
+        const loaded = await threadWithMetadata(
+          threads,
+          await threads.get({ threadId: receipt.threadId, include: "environment,host" }),
+        );
+        const ids = callerIdsFromThread(loaded);
+        if (ids.launchId !== receipt.launchId) {
+          return { kind: "rejected", code: "caller_launch_mismatch", message: "thread launch id does not match" };
         }
-        if (thread.experimental_callerAttemptId !== receipt.attemptId) {
-          return { kind: "rejected", code: "caller_attempt_mismatch", message: "experimental_callerAttemptId does not match" };
+        if (ids.attemptId !== receipt.attemptId) {
+          return { kind: "rejected", code: "caller_attempt_mismatch", message: "thread attempt id does not match" };
         }
-        if (!present(thread.experimental_callerJobId)) {
+        if (!present(ids.jobId)) {
           return {
             kind: "rejected",
             code: "caller_job_missing",
-            message: "receipt has jobId but threads.get omitted experimental_callerJobId",
+            message: "receipt has jobId but the thread omitted agencyJobId",
           };
         }
-        if (thread.experimental_callerJobId !== receipt.jobId) {
-          return { kind: "rejected", code: "caller_job_mismatch", message: "experimental_callerJobId does not match the receipt job" };
+        if (ids.jobId !== receipt.jobId) {
+          return { kind: "rejected", code: "caller_job_mismatch", message: "thread job id does not match the receipt job" };
         }
-        const extracted = identityFromServerThread(thread);
+        const extracted = identityFromServerThread(loaded);
         if (extracted.kind !== "fields") return extracted;
         const identity = {
-          threadId: thread.id,
+          threadId: loaded.id,
           launchId: receipt.launchId,
           attemptId: receipt.attemptId,
           hostId: extracted.fields.hostId,
@@ -205,7 +235,7 @@ export function createIsolatedThreadVerifyPort(threads: IsolatedThreadsApi, supp
         if (extracted.fields.providerId !== storedSnapshot.agentVersion.providerId) {
           return { kind: "rejected", code: "live_provider_mismatch", message: "thread providerId does not match snapshot" };
         }
-        if (present(thread.model) && thread.model !== storedSnapshot.agentVersion.model) {
+        if (present(loaded.model) && loaded.model !== storedSnapshot.agentVersion.model) {
           return { kind: "rejected", code: "live_model_mismatch", message: "thread model does not match snapshot" };
         }
         return { kind: "confirmed", identity };

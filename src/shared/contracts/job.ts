@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { displayNameSchema, jobKeySchema, opaqueIdSchema, utcInstantSchema } from "./ids";
 import { jobTeamAgentIdsSchema } from "./job-team";
+import { knowledgeSectionIdSchema } from "./knowledge-scope";
 import { changeCommandSchema, createCommandSchema, revisionedRecordSchema } from "./revision";
 
 export const jobStateSchema = z.enum([
@@ -15,6 +16,10 @@ export const jobStateSchema = z.enum([
 ]);
 
 export const jobPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
+
+export const WORK_KINDS = ["new-program", "feature", "bugfix"] as const;
+export const workKindSchema = z.enum(WORK_KINDS);
+export type WorkKind = z.infer<typeof workKindSchema>;
 
 const contractLineSchema = z.string().trim().min(1).max(500);
 
@@ -73,6 +78,10 @@ export const jobSchema = revisionedRecordSchema
     acceptance: z.string().trim().min(1).max(20_000),
     state: jobStateSchema,
     parentJobId: opaqueIdSchema.nullable(),
+    /** project-folders section id; opaque string, not validated against that plugin. */
+    sectionId: knowledgeSectionIdSchema.nullable().optional(),
+    /** How the work is classified; absent on older jobs. */
+    workKind: workKindSchema.nullable().optional(),
     assignedAgentId: opaqueIdSchema.nullable(),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
@@ -82,6 +91,8 @@ export const jobSchema = revisionedRecordSchema
     contract: jobContractSchema.optional(),
     /** Work profile of the project this job follows: voice, style, approved samples. */
     workProfileKey: z.string().trim().max(60).nullable().optional(),
+    /** BB thread that commissioned the job. waiting_input questions bounce here. */
+    originThreadId: z.string().trim().min(8).max(80).optional(),
     /** When the job last entered done/canceled. Listed in the workspace snapshot only. */
     closedAt: utcInstantSchema.nullable().optional(),
   })
@@ -137,6 +148,8 @@ export const createJobCommandSchema = createCommandSchema
     brief: z.string().trim().min(1).max(20_000),
     acceptance: z.string().trim().min(1).max(20_000),
     parentJobId: opaqueIdSchema.nullable().default(null),
+    sectionId: knowledgeSectionIdSchema.nullable().optional(),
+    workKind: workKindSchema.nullable().optional(),
     assignedAgentId: opaqueIdSchema.nullable().default(null),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
@@ -144,6 +157,7 @@ export const createJobCommandSchema = createCommandSchema
     dueAt: utcInstantSchema.nullable().default(null),
     contract: jobContractSchema.nullable().optional(),
     workProfileKey: z.string().trim().max(60).nullable().optional(),
+    originThreadId: z.string().trim().min(8).max(80).optional(),
     /**
      * Without assignedAgentId: let the server pick. `lead` — the department lead;
      * `executor` / `reviewer` — the active launchable member of that role type
@@ -169,6 +183,8 @@ export const updateJobCommandSchema = changeCommandSchema
     /** null clears the contract. */
     contract: jobContractSchema.nullable().optional(),
     workProfileKey: z.string().trim().max(60).nullable().optional(),
+    workKind: workKindSchema.nullable().optional(),
+    originThreadId: z.string().trim().min(8).max(80).optional(),
   })
   .strict();
 

@@ -45,12 +45,15 @@ bb agency department create --input-json '{...provisionDepartment}'
 bb agency project bind --input-json '{...createProjectBinding}'   # существующий каталог
 bb agency project link-department --input-json '{...}'
 bb agency workspace --binding-id <bindingId>
-bb agency job create --input-json '{"requestId":"<uuid>","bindingId":"<id>","departmentId":"<id>","assignedAgentId":"<руководитель>","title":"...","brief":"...","acceptance":"..."}'
+bb agency job create --input-json '{"requestId":"<uuid>","bindingId":"<id>","departmentId":"<id>","assignedAgentId":"<руководитель>","title":"...","brief":"...","acceptance":"...","workKind":"feature"}'
+bb agency rules save --input-json '{"requestId":"<uuid>","scope":"agency","expectedRevision":<из rules get>,"rules":{"specDepartmentId":"dep_…","specGatedDepartmentIds":["dep_…"]}}'
 bb agency job assign --input-json '{...updateJob, assignedAgentId}'
 bb agency job get --job-id <id>
 bb agency job attach-input --input-json '{...attachJobInput}'
 bb agency job report-needs-input --input-json '{...reportNeedsInput}'
 bb agency job answer-needs-input --input-json '{...answerNeedsInput}'
+bb agency job ask-owner
+# native composer choice card in this chat; optional --input-json '{"questions":[...]}'
 bb agency job attempts --input-json '{"jobId":"<id>"}'
 bb agency job comment --input-json '{"requestId":"<uuid>","jobId":"<id>","comment":"..."}'
 bb agency launch readiness --json
@@ -66,11 +69,13 @@ bb agency call saveAgentProfile --input-json '{...}'
 
 `skillIds` — только ID из `bb agency catalog` / `listCapabilityCatalog`, формат `skill_` + 64 hex (например agency `skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff`). Имя навыка и вымышленные `skl_*` не принимаются. Пока `mcpDiscovery=unavailable`, `mcpIds` — `[]`.
 
+`workKind` у `job create` — необязательное `new-program` / `feature` / `bugfix`. `specDepartmentId` и `specGatedDepartmentIds` в `rules save` (scope `agency`): id отдела спецификаций и отделов, которым нужна принятая спецификация под корнем `new-program`. Пусто — правило выключено.
+
 Перед `prepareLaunch` привяжите published input отдельной командой `job attach-input` (`attachJobInput`). Caller не передаёт `hostId` / `canonicalRoot`. `prepareLaunch` читает только сохранённые pin. Published ≠ accepted.
 
 `job report-needs-input` — typed wait: проверенные job/attempt/thread/launch и `questions` с source refs. Не `transitionJob`. Не accept. UI читает тот же набор из `getJob.needsInput`.
 
-`launch get` читает квитанцию, не invent attempt. `job attempts` / `launch attempts` — scoped `listJobAttempts`. `launch reconcile` сверяет thread, не делает второй spawn. `launch prepare` — текущий instance, не ярлык «clone 0431». Готовность spawn — только `launch readiness` / `getIsolationReadiness` этого процесса (GET spawn-contract + proven provider). Help не пишет «исполнение недоступно». `engines.bb` и обычный host 0.4.87 не готовность. GET 404 → spawn unavailable, CRUD остаётся. Изоляция проверена только для `claude-code`.
+`launch get` читает квитанцию, не invent attempt. `job attempts` / `launch attempts` — scoped `listJobAttempts`. `launch reconcile` сверяет thread, не делает второй spawn. `launch prepare` — текущий instance, native `threads.spawn`. Готовность — `launch readiness` / `getIsolationReadiness` этого процесса (CLI в BB, политики). Help не пишет «исполнение недоступно». Произвольный RPC закрыт allowlist.
 
 `bb agency project create` намеренно не поддержан.
 

@@ -4,7 +4,11 @@ import { openMigratedDatabase } from "../src/server/db";
 import { getDecisionSettings, saveDecisionSettings } from "../src/server/decisions/settings";
 import { askDecisions } from "../src/server/decisions/client";
 import { askMemoryGate } from "../src/server/decisions/memory-gate";
-import { askBriefing, BRIEFING_POINT } from "../src/server/decisions/briefing";
+import { askBriefing, askBriefingDetailed, BRIEFING_POINT } from "../src/server/decisions/briefing";
+import { askIntake, askIntakeDetailed, activityHasIntake, recordLeadIntake, INTAKE_POINT } from "../src/server/decisions/intake";
+import { askHandInGate, HAND_IN_GATE_POINT } from "../src/server/decisions/hand-in-gate";
+import { appendDecisionLog, listDecisionLog } from "../src/server/decisions/log";
+import { probeDecisionPoints } from "../src/server/decisions/probe";
 import { DEFAULT_DECISION_SETTINGS, type DecisionSettings } from "../src/shared/decisions";
 import { proposeLessonForJob } from "../src/server/knowledge/lessons";
 import { listKnowledge } from "../src/server/knowledge/store";
@@ -267,18 +271,52 @@ describe("the launch briefing", () => {
       fetch: (async () => chatReply({ s0: { value: true, confidence: 0.3 } })) as unknown as typeof fetch,
     });
     expect(unsure).toBeNull();
+
+    // Живой AG-78: ru-text да@64 при пороге 0.65 выбрасывался. 0.6 это оставляет.
+    const barely = await askBriefing(ready, { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [] }, {
+      key: "k",
+      fetch: (async () => chatReply({ s0: { value: true, confidence: 0.64 } })) as unknown as typeof fetch,
+    });
+    expect(barely?.skills.map((skill) => skill.name)).toEqual(["ru-text"]);
   });
 
-  it("drops a pick that covers half the list: that is not a hint, that is the list again", async () => {
+  it("keeps a short skill list even when every skill is needed: that is the hint", async () => {
     const briefing = await askBriefing(
       ready,
-      { job, skills: [{ id: "s1", name: "ru-text" }, { id: "s2", name: "dataviz" }], lessons: [lesson("kno_1", "Первая"), lesson("kno_2", "Вторая"), lesson("kno_3", "Третья"), lesson("kno_4", "Четвёртая")] },
+      { job, skills: [{ id: "s1", name: "ru-text" }, { id: "s2", name: "telegram-ads" }], lessons: [] },
       {
         key: "k",
         fetch: (async () =>
           chatReply({
             s0: { value: true, confidence: 0.9 },
             s1: { value: true, confidence: 0.9 },
+          })) as unknown as typeof fetch,
+      },
+    );
+    expect(briefing?.skills.map((skill) => skill.name)).toEqual(["ru-text", "telegram-ads"]);
+  });
+
+  it("drops a pick that covers more than half of a long list: that is not a hint, that is the list again", async () => {
+    const briefing = await askBriefing(
+      ready,
+      {
+        job,
+        skills: [
+          { id: "s1", name: "ru-text" },
+          { id: "s2", name: "dataviz" },
+          { id: "s3", name: "seo" },
+          { id: "s4", name: "ads" },
+        ],
+        lessons: [lesson("kno_1", "Первая"), lesson("kno_2", "Вторая"), lesson("kno_3", "Третья"), lesson("kno_4", "Четвёртая")],
+      },
+      {
+        key: "k",
+        fetch: (async () =>
+          chatReply({
+            s0: { value: true, confidence: 0.9 },
+            s1: { value: true, confidence: 0.9 },
+            s2: { value: true, confidence: 0.9 },
+            s3: { value: false, confidence: 0.9 },
             k0: { value: true, confidence: 0.9 },
             k1: { value: false, confidence: 0.9 },
             k2: { value: false, confidence: 0.9 },
@@ -286,7 +324,7 @@ describe("the launch briefing", () => {
           })) as unknown as typeof fetch,
       },
     );
-    // Оба навыка «нужны» — сигнала нет; одна запись из четырёх — сигнал есть.
+    // Три из четырёх навыков «нужны» — сигнала нет; одна запись из четырёх — сигнал есть.
     expect(briefing?.skills).toEqual([]);
     expect(briefing?.lessons.map((item) => item.id)).toEqual(["kno_1"]);
     expect(briefing?.text).not.toContain("Навыки");
@@ -326,5 +364,195 @@ describe("the launch briefing", () => {
     expect(await askBriefing({ ...CHAT, points: [] }, { job, skills: [{ id: "s", name: "ru-text" }], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
     expect(await askBriefing(ready, { job, skills: [], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect((await askBriefingDetailed(ready, { job, skills: [], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).reason).toBe("empty");
+  });
+
+  it("records silence with answers when the model picks nothing", async () => {
+    const silent = await askBriefingDetailed(ready, { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [] }, {
+      key: "k",
+      fetch: (async () => chatReply({ s0: { value: false, confidence: 0.99 } })) as unknown as typeof fetch,
+    });
+    expect(silent.briefing).toBeNull();
+    expect(silent.reason).toBe("silent");
+    expect(silent.answers).toContain("s0=false");
+    expect(silent.candidates).toEqual({ skills: 1, pool: 0, lessons: 0 });
   });
 });
+
+describe("intake assessment", () => {
+  const job = { key: "AG-40", title: "Кнопка цвета", brief: "Поменять цвет кнопки в карточке.", acceptance: "Цвет совпадает с макетом." };
+  const ready = { ...CHAT, points: [INTAKE_POINT] };
+
+  it("writes only when all three answers are confident", async () => {
+    const proposal = await askIntake(ready, job, {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          size: { value: "S", confidence: 0.9 },
+          risk: { value: "low", confidence: 0.88 },
+          decision: { value: "accept", confidence: 0.85 },
+        })) as unknown as typeof fetch,
+    });
+    expect(proposal).toEqual({ size: "S", risk: "low", decision: "accept", ms: expect.any(Number), answers: "size=S@90,risk=low@88,decision=accept@85" });
+
+    const partial = await askIntake(ready, job, {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          size: { value: "L", confidence: 0.9 },
+          risk: { value: "high", confidence: 0.2 },
+          decision: { value: "split", confidence: 0.9 },
+        })) as unknown as typeof fetch,
+    });
+    expect(partial).toBeNull();
+
+    const traced = await askIntakeDetailed(ready, job, {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          size: { value: "L", confidence: 0.9 },
+          risk: { value: "high", confidence: 0.2 },
+          decision: { value: "split", confidence: 0.9 },
+        })) as unknown as typeof fetch,
+    });
+    expect(traced.reason).toBe("unconfident");
+    expect(traced.answers).toContain("size=L@90");
+    expect(traced.ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("records a lead proposal and leaves an executor launch alone", async () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const leadJob = s.job("Вход", s.lead);
+    const traces: Array<{ outcome: string; detail: string }> = [];
+    const written = await recordLeadIntake({
+      settings: ready,
+      job: leadJob,
+      store: s.store,
+      ctx: s.ctx,
+      log: (entry) => traces.push({ outcome: entry.outcome, detail: entry.detail }),
+      ask: async () => ({ size: "M", risk: "medium", decision: "split", ms: 12, answers: "size=M@90" }),
+    });
+    expect(written).toBe("written");
+    expect(traces).toEqual([{ outcome: "written", detail: "M/medium/split" }]);
+    expect(activityHasIntake(s.store.listActivity(leadJob.id))).toBe(true);
+    const again = await recordLeadIntake({
+      settings: ready,
+      job: leadJob,
+      store: s.store,
+      ctx: s.ctx,
+      ask: async () => ({ size: "S", risk: "low", decision: "accept", ms: 8, answers: "" }),
+    });
+    expect(again).toBe("skipped");
+
+    const execJob = s.job("Код", s.developer);
+    const skipped = await recordLeadIntake({
+      settings: ready,
+      job: execJob,
+      store: s.store,
+      ctx: s.ctx,
+      ask: async () => ({ size: "S", risk: "low", decision: "accept", ms: 8, answers: "" }),
+    });
+    expect(skipped).toBe("skipped");
+    expect(activityHasIntake(s.store.listActivity(execJob.id))).toBe(false);
+    db.close();
+  });
+});
+
+describe("hand-in gate", () => {
+  const job = { key: "AG-41", title: "Реализация", brief: "Сделать кнопку.", acceptance: "Тесты зелёные, отчёт опубликован." };
+  const ready = { ...CHAT, points: [HAND_IN_GATE_POINT] };
+
+  it("returns rework only on confident junk and stays silent otherwise", async () => {
+    const junk = await askHandInGate(ready, job, "готово наверное", {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          complete: { value: false, confidence: 0.92 },
+          junk: { value: true, confidence: 0.9 },
+          verdict: { value: "rework", confidence: 0.88 },
+        })) as unknown as typeof fetch,
+    });
+    expect(junk?.action).toBe("rework");
+    if (junk?.action === "rework") expect(junk.remark).toContain("Оценщик");
+
+    const proceed = await askHandInGate(ready, job, "Отчёт опубликован, npm test зелёный.", {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          complete: { value: true, confidence: 0.9 },
+          junk: { value: false, confidence: 0.91 },
+          verdict: { value: "proceed", confidence: 0.87 },
+        })) as unknown as typeof fetch,
+    });
+    expect(proceed?.action).toBe("proceed");
+
+    const unsure = await askHandInGate(ready, job, "Сдал.", {
+      key: "k",
+      fetch: (async () =>
+        chatReply({
+          complete: { value: false, confidence: 0.2 },
+          junk: { value: true, confidence: 0.3 },
+          verdict: { value: "rework", confidence: 0.4 },
+        })) as unknown as typeof fetch,
+    });
+    expect(unsure?.action).toBe("proceed");
+  });
+});
+
+describe("decision log", () => {
+  it("stores a row without the brief and keeps newest first", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    expect(appendDecisionLog(db, { point: "intake", jobKey: "AG-1", outcome: "written", detail: "S/low/accept", answers: "size=S@91", ms: 40 }, NOW)?.outcome).toBe("written");
+    appendDecisionLog(db, { point: "hand-in-gate", jobKey: "AG-2", outcome: "rework", detail: "junk", ms: 55 }, "2026-09-20T10:01:00.000Z");
+    const rows = listDecisionLog(db, 10);
+    expect(rows.map((row) => row.point)).toEqual(["hand-in-gate", "intake"]);
+    expect(JSON.stringify(rows)).not.toMatch(/секрет|sk-|brief/i);
+    db.close();
+  });
+
+  it("probes intake and both hand-ins on the live question shape", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const text = String(init?.body ?? "");
+      if (text.includes("Какой это размер")) {
+        return chatReply({
+          size: { value: "S", confidence: 0.9 },
+          risk: { value: "low", confidence: 0.9 },
+          decision: { value: "accept", confidence: 0.9 },
+        });
+      }
+      if (text.includes("типа готово")) {
+        return chatReply({
+          complete: { value: false, confidence: 0.9 },
+          junk: { value: true, confidence: 0.9 },
+          verdict: { value: "rework", confidence: 0.9 },
+        });
+      }
+      if (text.includes("Нужен ли навык") || text.includes("Поможет ли навык")) {
+        return chatReply({
+          s0: { value: true, confidence: 0.9 },
+          p0: { value: true, confidence: 0.92 },
+        });
+      }
+      return chatReply({
+        complete: { value: true, confidence: 0.9 },
+        junk: { value: false, confidence: 0.9 },
+        verdict: { value: "proceed", confidence: 0.9 },
+      });
+    });
+    const probed = await probeDecisionPoints(
+      { ...CHAT, points: [INTAKE_POINT, HAND_IN_GATE_POINT] },
+      { key: "k", fetch: fetchMock as unknown as typeof fetch },
+    );
+    expect(probed.intake).toMatchObject({ size: "S", decision: "accept" });
+    expect(probed.intakeTrace.reason).toBe("proposal");
+    expect(probed.junk?.action).toBe("rework");
+    expect(probed.solid?.action).toBe("proceed");
+    expect(probed.briefing.reason).toBe("hint");
+    expect(probed.briefing.skills).toEqual(["ru-text"]);
+    expect(probed.briefing.granted).toEqual(["telegram-rich-messages"]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+

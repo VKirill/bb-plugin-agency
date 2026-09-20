@@ -54,7 +54,7 @@ describe("JobNeedsInputPanel", () => {
     expect(panel?.textContent).toContain("Какой acceptance выполнять");
     // The owner sees plain words, not wait and thread ids.
     expect(panel?.textContent).not.toContain(record.waitId);
-    expect(panel?.textContent).toContain("ждёт ответа");
+    expect(panel?.textContent).toContain("чат, откуда ставили задачу");
     expect(container.querySelector('[data-testid="needs-input-comment-hint"]')?.textContent).toBe(NEEDS_INPUT_COMMENT_HINT);
     await act(async () => {
       container.querySelector('[data-testid="needs-input-send"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

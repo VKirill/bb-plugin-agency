@@ -75,7 +75,19 @@ import {
   bindingLifecycleCommandSchema,
   setDepartmentAvailabilityCommandSchema,
   unlinkDepartmentCommandSchema,
+  getSessionPolicyInputSchema,
+  saveSessionPolicyInputSchema,
+  sessionPolicyViewSchema,
+  knowledgeScopeKindSchema,
+  ideaItemSchema,
+  listIdeasInputSchema,
+  saveIdeaInputSchema,
+  setIdeaStatusInputSchema,
+  spawnIdeaThreadInputSchema,
+  spawnedIdeaThreadSchema,
 } from "./contracts";
+
+export { knowledgeScopeKindSchema, ideaItemSchema, listIdeasInputSchema, saveIdeaInputSchema, setIdeaStatusInputSchema, spawnIdeaThreadInputSchema, spawnedIdeaThreadSchema };
 
 export {
   answerNeedsInputRpcSchema,
@@ -341,6 +353,19 @@ export const decisionSettingsSchema = z
   })
   .strict();
 
+export const decisionLogSchema = z
+  .object({
+    id: z.string(),
+    createdAt: z.string(),
+    point: z.string(),
+    jobKey: z.string().nullable(),
+    outcome: z.string(),
+    detail: z.string(),
+    answers: z.string(),
+    ms: z.number().int(),
+  })
+  .strict();
+
 export const decisionViewSchema = z
   .object({
     settings: decisionSettingsSchema,
@@ -349,6 +374,7 @@ export const decisionViewSchema = z
     keyProblem: z.string().nullable(),
     catalogAvailable: z.boolean(),
     keyOptions: z.array(z.object({ name: z.string(), service: z.string().nullable(), masked: z.string().nullable() }).strict()),
+    log: z.array(decisionLogSchema),
   })
   .strict();
 
@@ -374,6 +400,49 @@ export const decisionTestSchema = z.union([
   }).strict(),
   z.object({ ok: z.literal(false), ms: z.number(), reason: z.string(), detail: z.string().nullable() }).strict(),
 ]);
+
+export const decisionProbeSchema = z
+  .object({
+    intake: z
+      .object({
+        size: z.enum(["S", "M", "L"]),
+        risk: z.enum(["low", "medium", "high"]),
+        decision: z.enum(["accept", "split", "clarify", "return"]),
+        ms: z.number(),
+        answers: z.string(),
+      })
+      .strict()
+      .nullable(),
+    intakeTrace: z.object({ reason: z.string(), answers: z.string(), ms: z.number() }).strict(),
+    junk: z
+      .object({
+        action: z.enum(["rework", "proceed"]),
+        remark: z.string().optional(),
+        ms: z.number(),
+        answers: z.string(),
+      })
+      .strict()
+      .nullable(),
+    solid: z
+      .object({
+        action: z.enum(["rework", "proceed"]),
+        remark: z.string().optional(),
+        ms: z.number(),
+        answers: z.string(),
+      })
+      .strict()
+      .nullable(),
+    briefing: z
+      .object({
+        reason: z.string(),
+        answers: z.string(),
+        ms: z.number(),
+        skills: z.array(z.string()),
+        granted: z.array(z.string()),
+      })
+      .strict(),
+  })
+  .strict();
 
 /** Паспорт проекта: сводка «что это за проект», её история и настройки писаря. */
 export const passportSectionSchema = z.object({ key: z.string(), text: z.string() }).strict();
@@ -949,7 +1018,6 @@ export const webhookSourceViewSchema = z
 export const rotatedWebhookSecretSchema = webhookSourceViewSchema.extend({ secret: z.string() }).strict();
 export type RuleScheduleView = z.infer<typeof ruleScheduleSchema>;
 
-export const knowledgeScopeKindSchema = z.enum(["agency", "department", "project"]);
 export const knowledgeItemSchema = z
   .object({
     id: z.string(),
@@ -966,6 +1034,7 @@ export const knowledgeItemSchema = z
     source: z.string(),
     scopeKind: knowledgeScopeKindSchema,
     scopeId: z.string().nullable(),
+    parentBindingId: z.string().nullable(),
     status: z.enum(["proposal", "accepted", "archived"]),
     proposedBy: z.string().nullable(),
     revision: z.number().int(),
@@ -987,8 +1056,20 @@ export const saveKnowledgeInputSchema = z
     source: z.string().max(500),
     scopeKind: knowledgeScopeKindSchema,
     scopeId: z.string().nullable(),
+    parentBindingId: z.string().optional(),
   })
   .strict();
+export const listKnowledgeInputSchema = z.union([
+  z.null(),
+  z
+    .object({
+      scopeKind: knowledgeScopeKindSchema.optional(),
+      scopeId: z.string().optional(),
+      parentBindingId: z.string().nullable().optional(),
+      status: z.enum(["proposal", "accepted", "archived"]).optional(),
+    })
+    .strict(),
+]);
 export const goalViewSchema = z
   .object({
     id: z.string(),
@@ -1026,10 +1107,13 @@ export const jobSearchHitSchema = z
   .strict();
 export const savedViewSchema = z.object({ id: z.string(), name: z.string(), filters: z.record(z.string(), z.string()), updatedAt: z.string() }).strict();
 export type KnowledgeItemView = z.infer<typeof knowledgeItemSchema>;
+export type IdeaItemView = z.infer<typeof ideaItemSchema>;
 export type DecisionView = z.infer<typeof decisionViewSchema>;
 export type SkillGrantView = z.infer<typeof skillGrantSchema>;
 export type DecisionSettingsView = z.infer<typeof decisionSettingsSchema>;
 export type DecisionTestView = z.infer<typeof decisionTestSchema>;
+export type DecisionLogView = z.infer<typeof decisionLogSchema>;
+export type DecisionProbeView = z.infer<typeof decisionProbeSchema>;
 export const backupFileSchema = z.object({ name: z.string(), size: z.number().int(), createdAt: z.string() }).strict();
 export type BackupFileView = z.infer<typeof backupFileSchema>;
 export type GoalViewRecord = z.infer<typeof goalViewSchema>;
@@ -1173,12 +1257,14 @@ export const getIsolationReadinessRpcSchema = z
   })
   .strict();
 
+/** Must stay field-equal to `LiveAssignedProvider`. Host RPC is `.strict()` — extra keys fail the card. */
 export const liveAssignedProviderSchema = z
   .object({
     jobId: opaqueIdSchema,
     agentId: opaqueIdSchema,
     agentVersionId: opaqueIdSchema,
     providerId: z.string().trim().min(1),
+    model: z.string().trim().min(1),
     source: z.literal("live_assigned_agent_version"),
   })
   .strict();
@@ -1188,7 +1274,6 @@ export const LAUNCH_REASON_CODES = [
   "ok",
   "assignee_required",
   "assignee_not_member",
-  "handshake_unready",
   "launch_not_authorized",
 ] as const;
 
@@ -1198,8 +1283,6 @@ export const launchReasonCodeSchema = z.enum(LAUNCH_REASON_CODES);
 
 export function publicLaunchReasonCode(input: {
   assignedErrorCode?: string | null;
-  handshakeReady: boolean;
-  sdkTypedSpawnReady: boolean;
   launchAllowed: boolean;
   hasJobId: boolean;
 }): LaunchReasonCode {
@@ -1207,18 +1290,14 @@ export function publicLaunchReasonCode(input: {
   if (input.assignedErrorCode === "assignee_not_member") return "assignee_not_member";
   if (input.assignedErrorCode) return "launch_not_authorized";
   if (!input.hasJobId) return "launch_not_authorized";
-  if (!input.handshakeReady || !input.sdkTypedSpawnReady) return "handshake_unready";
   if (input.launchAllowed) return "ok";
   return "launch_not_authorized";
 }
 
 export const isolationReadinessSchema = z
   .object({
-    handshakeReady: z.boolean(),
     executionAvailable: z.boolean(),
     isolationReady: z.boolean(),
-    isolatedSpawnFields: z.boolean(),
-    sdkTypedSpawnReady: z.boolean(),
     assignedProvider: liveAssignedProviderSchema.nullable(),
     launchAllowedForAssigned: z.boolean(),
     reason: z.string(),
@@ -1229,6 +1308,9 @@ export const isolationReadinessSchema = z
     waitable: z.boolean().optional(),
   })
   .strict();
+
+export type IsolationReadiness = z.infer<typeof isolationReadinessSchema>;
+export type LiveAssignedProviderWire = z.infer<typeof liveAssignedProviderSchema>;
 
 const demoDocumentOutput = z.object({ hostId: z.string(), path: z.string(), demo: z.literal(true) }).strict();
 
@@ -1270,6 +1352,8 @@ export const rpcContract = defineRpcContract({
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, output: domainResultSchema(decisionSettingsSchema) },
   saveDecisionKey: { input: z.object({ name: z.string().min(1).max(120), value: z.string().min(1).max(500) }).strict(), output: domainResultSchema(z.object({ name: z.string() }).strict()) },
   testDecisionModel: { input: z.null(), output: domainResultSchema(decisionTestSchema) },
+  listDecisionLog: { input: z.object({ limit: z.number().int().min(1).max(200).optional() }).strict(), output: domainResultSchema(z.array(decisionLogSchema)) },
+  probeDecisionPoints: { input: z.null(), output: domainResultSchema(decisionProbeSchema) },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), output: domainResultSchema(agentModelsViewSchema) },
   setModelPrices: { input: z.object({ rows: z.array(modelPriceRowSchema).max(300) }).strict(), output: modelPricesViewSchema },
   listTemplates: { input: z.null(), output: domainResultSchema(z.array(templateViewSchema)) },
@@ -1277,10 +1361,15 @@ export const rpcContract = defineRpcContract({
   listBackups: { input: z.null(), output: domainResultSchema(z.array(backupFileSchema)) },
   createBackup: { input: z.null(), output: domainResultSchema(backupFileSchema) },
   restoreBackup: { input: z.object({ name: z.string().max(200) }).strict(), output: domainResultSchema(z.object({ restored: z.string(), safetyBackup: backupFileSchema, tables: z.number().int() }).strict()) },
-  listKnowledge: { input: z.null(), output: domainResultSchema(z.array(knowledgeItemSchema)) },
+  listKnowledge: { input: listKnowledgeInputSchema, output: domainResultSchema(z.array(knowledgeItemSchema)) },
   getKnowledge: { input: z.object({ id: z.string().min(1) }).strict(), output: domainResultSchema(knowledgeItemSchema) },
   saveKnowledge: { input: saveKnowledgeInputSchema, output: domainResultSchema(knowledgeItemSchema) },
   setKnowledgeStatus: { input: z.object({ id: z.string(), expectedRevision: z.number().int(), status: z.enum(["proposal", "accepted", "archived"]) }).strict(), output: domainResultSchema(knowledgeItemSchema) },
+  listIdeas: { input: listIdeasInputSchema, output: domainResultSchema(z.array(ideaItemSchema)) },
+  getIdea: { input: z.object({ id: z.string().min(1) }).strict(), output: domainResultSchema(ideaItemSchema) },
+  saveIdea: { input: saveIdeaInputSchema, output: domainResultSchema(ideaItemSchema) },
+  setIdeaStatus: { input: setIdeaStatusInputSchema, output: domainResultSchema(ideaItemSchema) },
+  spawnIdeaThread: { input: spawnIdeaThreadInputSchema, output: domainResultSchema(spawnedIdeaThreadSchema) },
   listGoals: { input: z.null(), output: domainResultSchema(z.array(goalViewSchema)) },
   saveGoal: { input: saveGoalInputSchema, output: domainResultSchema(goalViewSchema) },
   setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), output: domainResultSchema(z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict()) },
@@ -1458,4 +1547,11 @@ export const rpcContract = defineRpcContract({
   claimActionIntent: { input: claimActionIntentCommandSchema, output: domainResultSchema(actionIntentRecordSchema) },
   approveActionIntent: { input: approveActionIntentCommandSchema, output: domainResultSchema(actionIntentRecordSchema) },
   completeActionIntent: { input: completeActionIntentCommandSchema, output: domainResultSchema(actionIntentRecordSchema) },
+  getSessionPolicy: { input: getSessionPolicyInputSchema, output: domainResultSchema(sessionPolicyViewSchema) },
+  saveSessionPolicy: {
+    input: saveSessionPolicyInputSchema,
+    output: domainResultSchema(
+      z.object({ scope: z.enum(["project", "binding", "thread"]), scopeId: z.string(), mode: z.enum(["inherit", "ordinary", "suggest", "pm"]) }).strict(),
+    ),
+  },
 });

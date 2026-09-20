@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 import { isolationReadinessSchema, publicLaunchReasonCode } from "../src/shared/rpc-contract";
 
 describe("public launch reason codes", () => {
-  it("maps assignee, handshake, and isolation to stable codes", () => {
+  it("maps assignee and authorization to stable codes; there is no handshake code", () => {
     expect(
       publicLaunchReasonCode({
         assignedErrorCode: "assignee_required",
-        handshakeReady: true,
-        sdkTypedSpawnReady: true,
         launchAllowed: false,
         hasJobId: true,
       }),
@@ -15,8 +13,6 @@ describe("public launch reason codes", () => {
     expect(
       publicLaunchReasonCode({
         assignedErrorCode: "assignee_not_member",
-        handshakeReady: true,
-        sdkTypedSpawnReady: true,
         launchAllowed: false,
         hasJobId: true,
       }),
@@ -24,40 +20,18 @@ describe("public launch reason codes", () => {
     expect(
       publicLaunchReasonCode({
         assignedErrorCode: "provider_unavailable",
-        handshakeReady: true,
-        sdkTypedSpawnReady: true,
         launchAllowed: false,
         hasJobId: true,
       }),
     ).toBe("launch_not_authorized");
     expect(
       publicLaunchReasonCode({
-        handshakeReady: false,
-        sdkTypedSpawnReady: true,
-        launchAllowed: false,
-        hasJobId: true,
-      }),
-    ).toBe("handshake_unready");
-    expect(
-      publicLaunchReasonCode({
-        handshakeReady: true,
-        sdkTypedSpawnReady: false,
-        launchAllowed: false,
-        hasJobId: true,
-      }),
-    ).toBe("handshake_unready");
-    expect(
-      publicLaunchReasonCode({
-        handshakeReady: true,
-        sdkTypedSpawnReady: true,
         launchAllowed: false,
         hasJobId: false,
       }),
     ).toBe("launch_not_authorized");
     expect(
       publicLaunchReasonCode({
-        handshakeReady: true,
-        sdkTypedSpawnReady: true,
         launchAllowed: true,
         hasJobId: true,
       }),
@@ -66,17 +40,35 @@ describe("public launch reason codes", () => {
 
   it("keeps English reason technical next to reasonCode on the wire schema", () => {
     const parsed = isolationReadinessSchema.parse({
-      handshakeReady: false,
-      executionAvailable: false,
-      isolationReady: false,
-      isolatedSpawnFields: false,
-      sdkTypedSpawnReady: true,
+      executionAvailable: true,
+      isolationReady: true,
       assignedProvider: null,
       launchAllowedForAssigned: false,
-      reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",
-      reasonCode: "handshake_unready",
+      reason: "getIsolationReadiness without jobId does not authorize a launch",
+      reasonCode: "launch_not_authorized",
     });
-    expect(parsed.reasonCode).toBe("handshake_unready");
-    expect(parsed.reason).toMatch(/handshake is not proven/);
+    expect(parsed.reasonCode).toBe("launch_not_authorized");
+    expect(parsed.reason).toMatch(/does not authorize a launch/);
+    expect(isolationReadinessSchema.safeParse({ ...parsed, reasonCode: "handshake_unready" }).success).toBe(false);
+    expect(isolationReadinessSchema.safeParse({ ...parsed, handshakeReady: true }).success).toBe(false);
+  });
+
+  it("accepts the live assigned provider payload with model", () => {
+    const parsed = isolationReadinessSchema.parse({
+      executionAvailable: true,
+      isolationReady: true,
+      assignedProvider: {
+        jobId: "job_d0d7cff575c6f52f6005b0c6",
+        agentId: "agt_a50f169377d8eebd6f37a36f",
+        agentVersionId: "avr_28ec5d9200c1f0fd5a416903",
+        providerId: "claude-code",
+        model: "claude-fable-5-1",
+        source: "live_assigned_agent_version",
+      },
+      launchAllowedForAssigned: false,
+      reason: "Сотрудник приостановлен.",
+      reasonCode: "launch_not_authorized",
+    });
+    expect(parsed.assignedProvider?.model).toBe("claude-fable-5-1");
   });
 });

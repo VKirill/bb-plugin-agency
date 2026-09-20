@@ -12,7 +12,6 @@ import {
   attachJobInput,
   createJobInputPort,
   createPrepareRun,
-  unavailableHandshakePort,
 } from "../src/server/runtime/prepare-run";
 import { createRunStore } from "../src/server/runtime/run-store";
 import { createArtifactMetadataPort, createDomainStore, type ServiceContext } from "../src/server/services";
@@ -367,7 +366,6 @@ describe("attachJobInput", () => {
       store: seeded.store,
       files,
       catalog: catalogPort(seeded),
-      handshake: unavailableHandshakePort(),
       runs: createRunStore(opened.db),
       jobInputs: createJobInputPort({ store: seeded.store, db: opened.db, files }),
       server: {
@@ -410,7 +408,6 @@ describe("attachJobInput", () => {
       store: seeded.store,
       files,
       catalog: catalogPort(seeded),
-      handshake: unavailableHandshakePort(),
       runs: createRunStore(opened.db),
       server: {
         applicable: [{ sourceId: "binding", relativePath: ".bb/AGENTS.md" }],

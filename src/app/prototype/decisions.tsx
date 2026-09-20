@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { Switch } from "../../../components/ui/switch";
-import type { DecisionTestView, DecisionView, rpcContract } from "../../shared/rpc-contract";
+import type { DecisionProbeView, DecisionTestView, DecisionView, rpcContract } from "../../shared/rpc-contract";
 import { tr } from "../i18n";
 import { Button, Choice, Field, HintHeading, InfoHint, Input, Panel, TextField } from "./shared";
 
@@ -122,6 +122,30 @@ export function DecisionsPanel({ notice }: { notice: (text: string) => void }) {
     const result = await call<DecisionTestView>("testDecisionModel");
     setPending(false);
     setTest(result.ok ? testLine(result.value) : tr("Проверка не прошла: метод недоступен."));
+    void load();
+  };
+
+  const runProbe = async () => {
+    if (pending) return;
+    setPending(true);
+    setTest(tr("Спрашиваем точки…"));
+    const result = await call<DecisionProbeView>("probeDecisionPoints");
+    setPending(false);
+    if (!result.ok) {
+      setTest(tr("Проверка точек не прошла: метод недоступен."));
+      return;
+    }
+    const intake = result.value.intake
+      ? `${result.value.intake.size}/${result.value.intake.risk}/${result.value.intake.decision}`
+      : `${tr("молчание")} (${result.value.intakeTrace.reason}${result.value.intakeTrace.answers ? `: ${result.value.intakeTrace.answers}` : ""})`;
+    const briefing =
+      result.value.briefing.skills.length || result.value.briefing.granted.length
+        ? `${result.value.briefing.skills.join(", ") || "—"}${result.value.briefing.granted.length ? ` +${result.value.briefing.granted.join(", ")}` : ""}`
+        : `${tr("молчание")} (${result.value.briefing.reason})`;
+    const junk = result.value.junk?.action ?? tr("нет ответа");
+    const solid = result.value.solid?.action ?? tr("нет ответа");
+    setTest(tr("Вход: {intake}. Подсказка: {briefing}. Мусор: {junk}. Нормальная сдача: {solid}.", { intake, briefing, junk, solid }));
+    void load();
   };
 
   if (!view || !draft) return <p className="text-sm text-muted-foreground">{tr("Загружаем настройки оценщика…")}</p>;
@@ -240,6 +264,37 @@ export function DecisionsPanel({ notice }: { notice: (text: string) => void }) {
             </InfoHint>
           </div>
           {test && <p role="status" className="text-xs text-muted-foreground">{test}</p>}
+
+          <div className="space-y-2">
+            <HintHeading
+              level={3}
+              title="Журнал"
+              hint={<p>{tr("Каждое обращение к точке решения: исход, ответы с уверенностью и время. Брифа и ключей в журнале нет. Молчание тоже записывается.")}</p>}
+            />
+            {view.log.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{tr("Пока пусто: оценщика ещё не звали.")}</p>
+            ) : (
+              <ul className="space-y-1 text-xs text-muted-foreground" data-testid="decision-log">
+                {view.log.map((row) => (
+                  <li key={row.id}>
+                    {row.point}
+                    {row.jobKey ? ` · ${row.jobKey}` : ""}
+                    {` · ${row.outcome}`}
+                    {row.detail ? ` · ${row.detail}` : ""}
+                    {` · ${row.ms} мс`}
+                    {row.answers ? ` · ${row.answers}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" disabled={pending} onClick={() => void runProbe()}>{tr("Проверить точки")}</Button>
+            <InfoHint title="Что делает проверка точек">
+              <p>{tr("Агентство спрашивает оценщика на учебном брифе: оценка на входе, подсказка к запуску, мусорная сдача и нормальная сдача. Сотрудник не запускается. Результат попадает в журнал.")}</p>
+            </InfoHint>
+          </div>
         </div>
       </Panel>
     </div>

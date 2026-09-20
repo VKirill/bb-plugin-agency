@@ -557,7 +557,7 @@ describe("agency domain RPC", () => {
         await rpc<DomainEnvelope<{ title: string }>>(harness, "updateJob", {
           requestId: requestId(),
           jobId: seeded.job.id,
-          expectedRevision: 1,
+          expectedRevision: seeded.job.revision,
           title: "Карточка v2",
         }),
         "rename-job",
@@ -741,19 +741,11 @@ describe("agency domain RPC", () => {
         }),
         "queued-job",
       );
-      await requireOk(
-        await rpc<DomainEnvelope>(harness, "transitionJob", {
-          requestId: requestId(),
-          expectedRevision: queued.revision,
-          jobId: queued.id,
-          to: "queued",
-        }),
-        "queue",
-      );
+      expect(queued.revision).toBeGreaterThan(1);
       expect(
         await rpc<DomainEnvelope>(harness, "updateJob", {
           requestId: requestId(),
-          expectedRevision: queued.revision + 1,
+          expectedRevision: queued.revision,
           jobId: queued.id,
           bindingId: otherBinding.id,
           departmentId: reviewDept.department.id,
@@ -873,12 +865,12 @@ describe("agency domain RPC", () => {
         expectedRevision: seeded.job.revision,
         title: "Карточка услуги",
       });
-      expect(updated).toMatchObject({ ok: true, value: { title: "Карточка услуги", revision: 2 } });
+      expect(updated).toMatchObject({ ok: true, value: { title: "Карточка услуги", revision: seeded.job.revision + 1 } });
       expect(
         await rpc<DomainEnvelope>(harness, "updateJob", {
           requestId: requestId(),
           jobId: seeded.job.id,
-          expectedRevision: 2,
+          expectedRevision: seeded.job.revision + 1,
           title: "Подмена",
           claimedBbProjectId: "proj_other",
         }),
@@ -960,7 +952,7 @@ describe("agency domain RPC", () => {
       expect(sha256(Buffer.from(opened.value.bytesBase64, "base64").toString())).toBe(opened.value.hash);
       const accepted = await rpc<DomainEnvelope<{ version: number; hash: string }>>(harness, "acceptArtifactVersion", {
         requestId: requestId(),
-        expectedRevision: 2,
+        expectedRevision: seeded.job.revision + 1,
         jobId: seeded.job.id,
         artifactId: artifact.id,
         version: 1,

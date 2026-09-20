@@ -71,7 +71,7 @@ flowchart TD
 | `src/shared` | Zod-схемы и RPC-контракт | Один контракт для UI, RPC и CLI |
 | `src/domain` | Переходы Job и попыток, правила | Чистая логика без I/O |
 | `src/server/db` | SQLite и append-only миграции | Откат кода только с совместимой схемой |
-| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn только после handshake |
+| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn только через координатор, после проверки готовности |
 | `src/server/dispatcher` | typed inbox → правило → outbox/claim | Live и автозапуск выключены |
 | `src/app` | Рабочие экраны на RPC и отдельное демо | Демоданные не смешиваются с рабочими |
 
@@ -89,9 +89,10 @@ backlog → queued → running → review → done
 
 1. **Durable CRUD.** Поручение получает бриф, критерий готовности, исполнителя и
    закреплённые входные версии файлов (`attachJobInput`).
-2. **Готовность.** `getIsolationReadiness` и `GET spawn-contract` ядра, CLI
-   сотрудника на машине проекта и политики проекта и сотрудника, которые этот CLI
-   разрешают. Нет контракта — запуск недоступен, каталог при этом жив.
+2. **Готовность.** `getIsolationReadiness` с `jobId`: CLI сотрудника на машине
+   проекта и политики проекта и сотрудника, которые этот CLI разрешают.
+   Запуск идёт штатным `threads.spawn` (скрытый plugin-тред); идентичность запуска —
+   база Агентства и `pluginMetadata` треда.
 3. **Снимок контекста.** Неизменяемый `ContextSnapshot`: версии правил, процесса
    отдела, роли, брифа, действующей политики, CLI и host, входы и передачи.
    Слой поручения не отменяет слой отдела; конфликт — это typed-вопрос, а не
@@ -329,9 +330,8 @@ docs/                        архитектура, события, API и эт
 
 ## Установка и разработка
 
-Требуется BB `>=0.43.1 <0.44` и Node 22/24/26. Пакет собирается с закреплённым
-BB Plugin SDK; сам tarball SDK в репозиторий не включён — положите его в
-`vendor/` согласно `devDependencies` в `package.json`.
+Требуется BB `>=0.43.1 <0.44` и Node 22/24/26. Пакет собирается с публичным
+`@get-bb/plugin-sdk` из npm, версия закреплена в `devDependencies`.
 
 ```sh
 npm ci --include=dev
@@ -349,9 +349,9 @@ bb agency help
 ```
 
 Плагин регистрирует страницу `/plugins/agency/overview` и CLI `bb agency`.
-Успешная сборка не означает установку, а заявленная совместимость BB не
-доказывает наличие experimental API: запуск дополнительно требует ответа
-`/api/v1/system/experimental_thread-spawn-contract` текущего сервера.
+Успешная сборка не означает установку. Запуск идёт штатным `threads.spawn`
+(origin plugin, скрытый тред, pluginMetadata). Идентичность попытки хранится в
+базе Агентства.
 
 Команды CRUD и семантика `--input-json` / server-fs: [docs/cli.md](docs/cli.md).
 

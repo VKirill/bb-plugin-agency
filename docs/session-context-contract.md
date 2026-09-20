@@ -1,7 +1,7 @@
 # Контекст сотрудника при запуске
 
-Статус: compiler schema 2 и persist snapshot+attempt в source. Spawn — только
-после GET spawn-contract (claude-code). Production rollout отдельно.
+Статус: compiler schema 2 и persist snapshot+attempt в source. Spawn — native
+`threads.spawn` (origin plugin, hidden, pluginMetadata).
 
 ## Уровни
 
@@ -23,7 +23,7 @@
 
 Нужно различать: обнаружен в каталоге; выбран в профиле; прочитан по поручению; встроен при старте; доступен как инструмент. Отсутствие вызова лишнего MCP не доказывает его отсутствие в сессии.
 
-На старте сохраняется ContextSnapshot: binding host/root/revision, job/revision, agentVersion (включая model), processVersion, effective PolicyVersion (capabilities/constraints/secretRefs), project rules hash, selected skill **и MCP** IDs/hash, input artifact IDs/version/hash (в том числе authorized upstream), exclusions, handoff или явный none, ограничения провайдера. Compiler — `schemaVersion` 2 ([revise](context-snapshot-revise.md) — исторические замечания, уже закрытые в compile). Persist — `run-store`. Spawn недоступен, если нет proven handshake.
+На старте сохраняется ContextSnapshot: binding host/root/revision, job/revision, agentVersion (включая model), processVersion, effective PolicyVersion (capabilities/constraints/secretRefs), project rules hash, selected skill **и MCP** IDs/hash, input artifact IDs/version/hash (в том числе authorized upstream), exclusions, handoff или явный none, ограничения провайдера. Compiler — `schemaVersion` 2 ([revise](context-snapshot-revise.md) — исторические замечания, уже закрытые в compile). Persist — `run-store`. Spawn — штатный `threads.spawn` через координатор после проверки готовности (CLI, host, политики).
 
 ## Передача
 

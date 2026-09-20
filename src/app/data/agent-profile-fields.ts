@@ -1,9 +1,10 @@
 import { tr } from "../i18n";
 import type { Agent } from "../prototype/data";
+import { fallbackListKey } from "./agent-fallbacks";
 
 /** Fields `saveAgentProfile` / AgentVersion draft persist (AGY-17). */
 export const AGENT_PROFILE_SAVED_HINT =
-  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, CLI, модель, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.";
+  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, основная CLI и модель, запасные модели, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.";
 
 export const AGENT_PROFILE_UNSUPPORTED = {
   department: "Отдел задаётся в составе отдела, в версии профиля не хранится.",
@@ -35,6 +36,10 @@ export function isOwnProfileEcho(draft: Agent, server: Agent, baseline: Agent): 
   return (server.revision ?? 0) >= (baseline.revision ?? 0);
 }
 
+function fallbackKey(agent: Agent): string {
+  return fallbackListKey(agent.fallbackSelections);
+}
+
 export function persistedAgentDirty(current: Agent, next: Agent): boolean {
   return (
     current.name !== next.name ||
@@ -45,6 +50,7 @@ export function persistedAgentDirty(current: Agent, next: Agent): boolean {
     current.selection.model !== next.selection.model ||
     (current.reasoningEffort ?? "") !== (next.reasoningEffort ?? "") ||
     (current.selection.serviceTier ?? "") !== (next.selection.serviceTier ?? "") ||
+    fallbackKey(current) !== fallbackKey(next) ||
     (current.policyVersionId ?? "") !== (next.policyVersionId ?? "") ||
     !sameIds(current.skills, next.skills) ||
     !sameIds(current.mcps, next.mcps) ||

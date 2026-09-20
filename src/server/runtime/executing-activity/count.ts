@@ -6,9 +6,11 @@ export const EXECUTING_THREAD_STATUS = "active" as const;
 export type BoundThreadView = {
   id: string;
   status?: string;
-  experimental_callerLaunchId?: string;
-  experimental_callerAttemptId?: string;
-  experimental_callerJobId?: string;
+  pluginMetadata?: {
+    agencyLaunchId?: string;
+    agencyAttemptId?: string;
+    agencyJobId?: string;
+  };
 };
 
 export type ExecutingActivityCount =
@@ -21,12 +23,15 @@ export type ExecutingActivityPorts = {
 };
 
 function verifiedActiveBind(candidate: BoundExecutingCandidate, thread: BoundThreadView): boolean {
+  const jobId = thread.pluginMetadata?.agencyJobId;
+  const launchId = thread.pluginMetadata?.agencyLaunchId;
+  const attemptId = thread.pluginMetadata?.agencyAttemptId;
   return (
     thread.id === candidate.threadId &&
     thread.status === EXECUTING_THREAD_STATUS &&
-    thread.experimental_callerJobId === candidate.jobId &&
-    thread.experimental_callerLaunchId === candidate.launchId &&
-    thread.experimental_callerAttemptId === candidate.attemptId
+    jobId === candidate.jobId &&
+    launchId === candidate.launchId &&
+    attemptId === candidate.attemptId
   );
 }
 

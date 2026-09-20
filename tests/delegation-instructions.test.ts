@@ -89,7 +89,9 @@ describe("delegation instructions for ordinary sessions", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const seeded = seedAgency(db);
     const text = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate");
-    expect(text).toContain("## BB Agency: where the work goes");
+    expect(text).toContain("## BB Agency: you are the project manager");
+    expect(text).toContain("You do not implement");
+     expect(text).toContain("a native choice card opens in this chat");
     expect(text).toContain('"Программисты": Разрабатывает и проверяет код плагинов.');
     expect(text).toContain(`Lead: Fable (${seeded.lead.id})`);
     expect(text).toContain(`departmentId ${seeded.departmentId}`);
@@ -104,9 +106,25 @@ describe("delegation instructions for ordinary sessions", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     seedAgency(db);
     const suggest = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "suggest");
-    expect(suggest).toContain("Propose handing it to");
+    expect(suggest).toContain("## BB Agency: ask before handing work");
+    expect(suggest).toContain("ask the owner once");
     expect(suggest).toContain("After the owner agrees");
     expect(buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "off")).toBeNull();
+    db.close();
+  });
+
+  it("tells the manager there is no binding and to keep section knowledge in the section scope", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    seedAgency(db);
+    const manager = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_bound" }, "delegate") as string;
+    expect(manager).toContain("bb agency project bind");
+    expect(manager).toContain("Do not create the job, folder tree, or bindings yourself");
+    expect(manager).toContain("One binding per project");
+    expect(manager).toContain('scopeKind "section"');
+    expect(manager).toContain("parentBindingId");
+    const unbound = buildAgencyInstructions(db, { threadId: "thr_plain", projectId: "proj_other" }, "delegate") as string;
+    expect(unbound).toContain("bb agency project bind");
+    expect(unbound).toContain("Do not create the folder tree or bindings yourself");
     db.close();
   });
 
@@ -139,6 +157,7 @@ describe("delegation instructions for ordinary sessions", () => {
     }) as string;
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_LIMIT);
     expect(text).toContain("more: bb agency workspace --json");
+    expect(text).toContain("agency_ask_owner");
     expect(text.trimEnd()).toMatch(/Language: write job titles.*in Russian\.$/);
   });
 
@@ -232,7 +251,11 @@ describe("instructions inside Agency job threads", () => {
     expect(text).not.toContain("agt_lead0001");
     expect(text).toContain("the Agency messages this thread");
     expect(text).toContain("A job outside the department's scope");
+    expect(text).toContain("Mixed product → split");
+    expect(text).toContain("children in accepting departments");
     expect(text).toContain("bb agency launch cancel");
+    expect(text).toContain("S+low → assistant");
+    expect(text).toContain("questions bounce to the client chat");
   });
 
   it("tells an executor not to re-delegate", () => {
@@ -248,6 +271,7 @@ describe("instructions inside Agency job threads", () => {
     expect(text).toContain("## Your role: executor of AG-2202");
     expect(text).toContain("do not hand this work on");
     expect(text).toContain("report-needs-input");
+    expect(text).toContain("chat that commissioned the job");
     expect(text).toContain('"Return: reason; who fits; what is missing"');
     expect(text).toContain("transition` to blocked");
   });

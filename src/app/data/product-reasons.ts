@@ -3,8 +3,6 @@ import { tr } from "../i18n";
 /** Product copy for server codes/reasons. Technical text stays behind `technicalServerReason`. */
 
 export const PRODUCT_ASSIGNEE_REQUIRED = "Сначала назначьте исполнителя из состава этого отдела.";
-export const PRODUCT_HANDSHAKE_UNREADY =
-  "Среда ещё не подтвердила изолированный запуск.";
 export const PRODUCT_LAUNCH_UNAVAILABLE = "Сейчас запуск недоступен.";
 export const PRODUCT_LAUNCH_READY = "Готово к запуску";
 export const PRODUCT_LAUNCH_STARTED = "Запуск начат";
@@ -15,7 +13,6 @@ const CODE_PRODUCT: Record<string, string> = {
   assignee_required: PRODUCT_ASSIGNEE_REQUIRED,
   assignee_not_member:
     "Исполнитель должен состоять в выбранном отделе. Выберите сотрудника из состава отдела.",
-  handshake_unready: PRODUCT_HANDSHAKE_UNREADY,
   launch_not_authorized: PRODUCT_LAUNCH_UNAVAILABLE,
   provider_not_allowed_by_policy: "Политика прав сотрудника не разрешает выбранный CLI. Выберите политику, которая разрешает этот CLI или любой CLI.",
   provider_unavailable: "Выбранный CLI не подключён в BB на машине проекта. Подключите его в настройках BB или выберите сотруднику другой CLI.",
@@ -52,6 +49,9 @@ const CODE_PRODUCT: Record<string, string> = {
   project_rules_hash_mismatch: "Правила проекта изменились во время подготовки запуска. Запустите задачу ещё раз.",
   secret_grant_mismatch: "Политики проекта и сотрудника разрешают разные секреты. Проверьте политику.",
   duplicate_department_name: "Отдел с таким названием уже есть. Названия отделов должны различаться: по ним агенты выбирают, куда поручить работу.",
+  spec_required:
+    "Сначала нужна принятая спецификация: создайте задачу в отделе спецификаций, дождитесь приёмки и приложите её (attach-input) или поставьте job depend.",
+  work_kind_owner_only: "Вид работы new-program может снять только владелец.",
 };
 
 export function productFromReasonCode(code: string | null | undefined): string | null {
@@ -77,18 +77,6 @@ export function productLaunchCopy(input: {
 const REASON_PRODUCT: { match: RegExp; text: string }[] = [
   { match: /assignedAgentId is required/i, text: PRODUCT_ASSIGNEE_REQUIRED },
   { match: /assignee_required/i, text: PRODUCT_ASSIGNEE_REQUIRED },
-  {
-    match: /experimental_thread-spawn-contract|GET\s+\/api\/v1\/system/i,
-    text: PRODUCT_HANDSHAKE_UNREADY,
-  },
-  {
-    match: /typed runtime capability|instance names are not evidence|Engines|SDK 0\.4|ordinary SDK/i,
-    text: PRODUCT_HANDSHAKE_UNREADY,
-  },
-  {
-    match: /Isolation and isolated spawn fields are not proven/i,
-    text: PRODUCT_HANDSHAKE_UNREADY,
-  },
   { match: /verified bind applied/i, text: PRODUCT_LAUNCH_STARTED },
 ];
 
@@ -104,7 +92,6 @@ export function productInterpretNotice(view: {
 }
 
 export function productPrepareLaunchNotice(view: {
-  handshakeReady: boolean;
   launched: { kind: string } | null;
   reasonCode?: string | null;
   reason: string;
@@ -112,7 +99,7 @@ export function productPrepareLaunchNotice(view: {
   if (view.launched?.kind === "running" || /verified bind applied/i.test(view.reason)) {
     return tr(PRODUCT_LAUNCH_STARTED);
   }
-  if (!view.handshakeReady || view.launched?.kind === "failed") {
+  if (!view.launched || view.launched.kind === "failed") {
     // Compare the reason code, not the (possibly already translated) copy text.
     if (view.reasonCode === "ok") return tr(PRODUCT_LAUNCH_REFUSED);
     return productLaunchCopy({ reasonCode: view.reasonCode, reason: view.reason });
@@ -122,7 +109,7 @@ export function productPrepareLaunchNotice(view: {
 
 
 export function looksTechnicalReason(raw: string): boolean {
-  return /\/api\/|assignedAgentId|spawn-contract|TypeScript|SDK|Engines|ThreadSpawnArgs|handshake protocol|fingerprint confirms/i.test(
+  return /\/api\/|assignedAgentId|TypeScript|SDK|Engines|ThreadSpawnArgs/i.test(
     raw,
   );
 }

@@ -120,8 +120,8 @@ export async function pinCatalogRolesForPrepare(input: {
       return fail(
         "catalog_skill_hash_mismatch",
         en
-          ? `The Agency skill changed after it was pinned, so no launch passes the check. Open Settings → Machines → «Pin current versions». (${pin.id}: ${hashed.value.hash.slice(0, 8)} instead of ${pin.hash.slice(0, 8)}.)`
-          : `Навык Агентства изменился после закрепления, поэтому запуск не проходит проверку. Откройте «Настройки → Машины» и нажмите «Закрепить текущие версии». (${pin.id}: ${hashed.value.hash.slice(0, 8)} вместо ${pin.hash.slice(0, 8)}.)`,
+          ? `The Agency skill changed after it was pinned (${pin.id}: ${hashed.value.hash.slice(0, 8)} instead of ${pin.hash.slice(0, 8)}). The launch queue waits and re-pins the current package when that is allowed.`
+          : `Навык Агентства изменился после закрепления (${pin.id}: ${hashed.value.hash.slice(0, 8)} вместо ${pin.hash.slice(0, 8)}). Очередь запуска ждёт и сама закрепит текущий пакет, если это разрешено.`,
       );
     }
   }

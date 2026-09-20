@@ -38,12 +38,12 @@ describe("inbox decisions", () => {
     document.body.innerHTML = "";
   });
 
-  it("keeps mapped waiting_input and includes it with review/blocked", () => {
+  it("keeps mapped waiting_input and excludes review from owner decisions", () => {
     expect(asUiState("waiting_input")).toBe("waiting_input");
     expect(inboxNeedsDecision(waiting)).toBe(true);
-    expect(inboxNeedsDecision(review)).toBe(true);
+    expect(inboxNeedsDecision(review)).toBe(false);
     expect(inboxNeedsDecision(running)).toBe(false);
-    expect(inboxDecisionJobs([review, running, waiting, done]).map((item) => item.id)).toEqual(["AG-1601", "AG-1607"]);
+    expect(inboxDecisionJobs([review, running, waiting, done]).map((item) => item.id)).toEqual(["AG-1607"]);
   });
 
   it("opens waiting_input card without answer/resume or invented stdout", async () => {
@@ -61,6 +61,7 @@ describe("inbox decisions", () => {
       }) as ReactNode);
     });
     expect(container.querySelector('[data-testid="inbox-row-AG-1607"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="inbox-row-AG-1601"]')).toBeNull();
     expect(container.querySelector('[data-testid="inbox-row-AG-1606"]')).toBeNull();
     expect(container.textContent).toContain("Ждёт ответа");
     expect(container.textContent).not.toMatch(/Отправить ответ|Повторить ту же команду|stdout|resume/i);

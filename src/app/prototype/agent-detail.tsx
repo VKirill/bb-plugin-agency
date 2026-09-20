@@ -21,6 +21,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { JOB_DESCRIPTION_LABEL, jobDescriptionKind, jobDescriptionTemplate } from "../data/instruction-templates";
 import { AGENT_PASSPORT_RULE_GROUP, AGENT_REVIEW_RULE_GROUP, AGENT_SANDBOX_RULE_GROUP, LIMIT_RULE_GROUP, WorkRulesEditor } from "./work-rules";
 import { tr } from "../i18n";
+import { AGENT_FALLBACK_LIMIT, addFallback, canAddFallback, fallbackProblems, moveFallback, removeFallback, replaceFallback } from "../data/agent-fallbacks";
+import { fallbackProblemText } from "../data/persist";
 
 export function AgentDetail({
   agent,
@@ -73,6 +75,8 @@ export function AgentDetail({
   }, [agent, dirty, ownEcho, pending]);
 
   const set = (patch: Partial<Agent>) => setDraft((current) => ({ ...current, ...patch }));
+  const fallbacks = draft.fallbackSelections ?? [];
+  const problems = fallbackProblems(draft.selection, fallbacks);
 
   const save = async () => {
     if (pending) return;
@@ -200,7 +204,7 @@ export function AgentDetail({
           <>
             <Panel title="Модель">
               <div className="space-y-5">
-                <Field label="CLI и модель" info={<><p>{tr("Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Уровень рассуждения и быстрый режим выбираются здесь же; набор уровней у каждого CLI свой.")}</p><p>{tr("Смена модели создаёт новую версию профиля. Идущий запуск доработает на прежней.")}</p></>}>
+                <Field label="Основная CLI и модель" info={<><p>{tr("Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Уровень рассуждения и быстрый режим выбираются здесь же; набор уровней у каждого CLI свой.")}</p><p>{tr("Смена модели создаёт новую версию профиля. Идущий запуск доработает на прежней.")}</p></>}>
                   <ProviderModelPicker
                     value={draft.selection}
                     onChange={(selection) => set({ selection, reasoningEffort: selection.reasoningLevel })}
@@ -208,6 +212,45 @@ export function AgentDetail({
                     allowProviderChange
                     align="start"
                   />
+                </Field>
+                <Field
+                  label="Запасные модели"
+                  info={
+                    <>
+                      <p>{tr("Если основная модель не запускается на машине задачи — нет CLI, модели нет в каталоге, провайдер недоступен или закончился лимит, — Агентство берёт первую запасную по порядку, которая запускается. Профиль сотрудника не меняется.")}</p>
+                      <p>{tr("Порядок строк — приоритет. Пока список пуст, задача ждёт основную, как раньше. Идущий запуск на другую модель не переключается.")}</p>
+                    </>
+                  }
+                >
+                  <div className="space-y-3">
+                    {fallbacks.length === 0 && <p className="text-xs text-muted-foreground">{tr("Запасных моделей нет: запуск идёт только на основной.")}</p>}
+                    {fallbacks.map((pick, index) => {
+                      const problem = problems.find((item) => item.index === index);
+                      return (
+                        <div key={index} className="space-y-1" data-fallback-row={index}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="w-5 text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+                            <ProviderModelPicker
+                              value={pick}
+                              onChange={(next) => set({ fallbackSelections: replaceFallback(fallbacks, index, next) })}
+                              routing={routing}
+                              allowProviderChange
+                              align="start"
+                            />
+                            <Button size="sm" variant="ghost" disabled={index === 0} onClick={() => set({ fallbackSelections: moveFallback(fallbacks, index, -1) })}>{tr("Выше")}</Button>
+                            <Button size="sm" variant="ghost" disabled={index === fallbacks.length - 1} onClick={() => set({ fallbackSelections: moveFallback(fallbacks, index, 1) })}>{tr("Ниже")}</Button>
+                            <Button size="sm" variant="ghost" onClick={() => set({ fallbackSelections: removeFallback(fallbacks, index) })}>{tr("Убрать")}</Button>
+                          </div>
+                          {problem && <p className="pl-7 text-xs text-destructive">{fallbackProblemText(problem)}</p>}
+                        </div>
+                      );
+                    })}
+                    {canAddFallback(fallbacks) ? (
+                      <Button size="sm" variant="outline" onClick={() => set({ fallbackSelections: addFallback(fallbacks, draft.selection) })}>{tr("Добавить запасную модель")}</Button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{tr("Не больше {limit} запасных моделей.", { limit: String(AGENT_FALLBACK_LIMIT) })}</p>
+                    )}
+                  </div>
                 </Field>
               </div>
             </Panel>

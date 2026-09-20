@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
 import { listKnowledge } from "../src/server/knowledge/store";
-import { clusterRemarks, remarkLines, remarkSimilarity, remarkStems, sweepRemarkPatterns } from "../src/server/knowledge/remark-patterns";
+import { clusterRemarks, isRemarkNoise, remarkLines, remarkSimilarity, remarkStems, sweepRemarkPatterns } from "../src/server/knowledge/remark-patterns";
 import { createJobCommandSchema, type Job } from "../src/shared/contracts/job";
 import { seed } from "./role-types.test";
 
@@ -58,6 +58,25 @@ describe("repeated remarks", () => {
 
     ctx.rework(ctx.job("Оплата"), "Мобильная вёрстка на ширине 375 пикселей опять не проверена", "2026-09-16T10:00:00.000Z");
     expect(sweepRemarkPatterns(ctx.db, NOW, false)).toEqual([]);
+  });
+
+  it("does not propose QC pass reports or conveyor ritual as department knowledge", () => {
+    const ctx = setup();
+    const jobs = [ctx.job("A"), ctx.job("B"), ctx.job("C")];
+    const pass = [
+      "Дефектов не обнаружено. Свой результат не принимаю, станцию закрывает конвейер.",
+      "Отчёт: art_933332cb83414f821097b520 v1 (.agency/jobs/AG-41/report.md).",
+      "Все 7 критериев приёмки AG-34 пройдены.",
+    ].join("\n");
+    expect(isRemarkNoise("Дефектов не обнаружено.")).toBe(true);
+    expect(isRemarkNoise("Свой результат не принимаю, станцию закрывает конвейер.")).toBe(true);
+    expect(isRemarkNoise("Дефектов не обнаружено. Свой результат не принимаю, станцию закрывает конвейер.")).toBe(true);
+    expect(isRemarkNoise("Отчёт: art_933332cb83414f821097b520 v1 (.agency/jobs/AG-41/report.md).")).toBe(true);
+    expect(isRemarkNoise("Все 7 критериев приёмки AG-34 пройдены.")).toBe(true);
+    expect(isRemarkNoise("Критерий приёмки мобильной вёрстки не пройден.")).toBe(false);
+    for (const item of jobs) ctx.reviewerComment(item!, pass, "2026-09-15T10:00:00.000Z");
+    expect(sweepRemarkPatterns(ctx.db, NOW, false)).toEqual([]);
+    expect(listKnowledge(ctx.db, { scopeKind: "department", scopeId: ctx.s.departmentId })).toEqual([]);
   });
 
   it("ignores remarks outside the window and reviewer comments without defects", () => {

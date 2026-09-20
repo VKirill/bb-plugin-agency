@@ -51,6 +51,10 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
       skillIds: [EXAMPLE_CATALOG_SKILL_ID],
       mcpIds: [],
       policyVersionId: "policy_aaaaaaaa",
+      fallbackModels: [
+        { providerId: "opencode", model: "gemini-3.8-flash" },
+        { providerId: "codex", model: "gpt-5.5" },
+      ],
     },
   },
   provisionDepartment: {
@@ -131,6 +135,8 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     title: "Карточка",
     brief: "Собрать.",
     acceptance: "Текст принят.",
+    sectionId: null,
+    workKind: "feature",
     contract: {
       mayChange: ["src/cards/**"],
       readFirst: ["docs/architecture.md"],
@@ -348,15 +354,42 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   markOwnerMessagesRead: {},
   ownerDigest: { kind: "watchdog", stuckHours: 12, notify: true },
   listScriptTemplates: {},
-  listKnowledge: {},
+  listKnowledge: { scopeKind: "section", scopeId: "sec_aaaaaaaaaaaaaaaa", parentBindingId: "bnd_aaaaaaaaaaaa" },
+  listIdeas: { bbProjectId: "proj_trusted", kind: "idea", status: "open" },
+  getIdea: { id: "ide_aaaaaaaaaaaaaaaaaaaaaaaa" },
+  saveIdea: {
+    expectedRevision: 0,
+    title: "Склад идей в Агентстве",
+    body: "## Суть\nДержать обсуждённые идеи файлами в проекте.\n\n## Зачем\nВернуться к мысли позже.\n\n## Контекст\nЧат постановки.\n\n## Следующий шаг\nОткрыть карточку в разделе «Идеи».",
+    kind: "idea",
+    bindingId: "bnd_aaaaaaaaaaaa",
+    sectionId: "sec_aaaaaaaaaaaaaaaa",
+    sectionLabel: "Плагины",
+    sourceThreadId: "thr_aaaaaaaaaaaa",
+  },
+  setIdeaStatus: { id: "ide_aaaaaaaaaaaaaaaaaaaaaaaa", expectedRevision: 1, status: "parked" },
+  spawnIdeaThread: {
+    id: "ide_aaaaaaaaaaaaaaaaaaaaaaaa",
+    request: {
+      projectId: "proj_trusted",
+      providerId: "claude-code",
+      model: "claude-sonnet-4-6",
+      reasoningLevel: "medium",
+      permissionMode: "auto",
+      environment: { type: "project-default" },
+      input: [{ type: "text", text: "Обсудим идею.", mentions: [] }],
+    },
+  },
   setKnowledgeStatus: { id: "kno_aaaaaaaaaaaa", expectedRevision: 1, status: "archived" },
   getSkillPool: { departmentId: "dep_aaaaaaaaaaaa" },
   setSkillPool: { departmentId: "dep_aaaaaaaaaaaa", skillIds: ["skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff"] },
   listSkillGrants: { departmentId: "dep_aaaaaaaaaaaa" },
   getDecisionSettings: {},
   testDecisionModel: {},
+  listDecisionLog: { limit: 40 },
+  probeDecisionPoints: {},
   saveDecisionSettings: { expectedRevision: 0, enabled: true, endpointKind: "openrouter", model: "typesafe/jev-1.13", keySource: "env-catalog", keyName: "OPENROUTER_API_KEY", points: ["memory-gate"] },
-  saveKnowledge: { expectedRevision: 0, title: "Тон рассылок", body: "Пишем коротко, без канцелярита.", source: "Решение владельца 2026-09-17", scopeKind: "department", scopeId: "dep_aaaaaaaaaaaa" },
+  saveKnowledge: { expectedRevision: 0, title: "Тон раздела", body: "Пишем коротко, без канцелярита.", source: "Решение владельца 2026-09-17", scopeKind: "section", scopeId: "sec_aaaaaaaaaaaaaaaa", parentBindingId: "bnd_aaaaaaaaaaaa" },
   listGoals: {},
   setJobGoal: { jobId: "job_aaaaaaaaaaaa", goalId: "gol_aaaaaaaaaaaa" },
   addJobDependency: { requestId: REQUEST_ID, jobId: "job_bbbbbbbbbbbb", dependsOnJobId: "job_aaaaaaaaaaaa" },
@@ -396,12 +429,15 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     comment: "Сверстала оффер v2; проверка на фикстуре прошла. Жду ревью условий.",
     references: [{ type: "thread", id: "thr_exactattempt01" }],
   },
+  getSessionPolicy: { bbProjectId: "proj_trusted" },
+  saveSessionPolicy: { requestId: REQUEST_ID, scope: "project", scopeId: "proj_trusted", mode: "pm" },
 };
 
 export const SKILL_SCHEMA_NOTES = [
   "skillIds — ID из bb agency catalog / listCapabilityCatalog, формат skill_ + 64 hex.",
   "Не подставляй вымышленные skl_* и не бери имя навыка вместо ID.",
   "mcpDiscovery сейчас unavailable: mcpIds оставляй пустым массивом.",
+  "fallbackModels — до 4 запасных пар providerId+model по приоритету. Если основная на машине задачи не запускается (нет CLI, модели нет в каталоге, провайдер недоступен, лимит), запуск берёт первую запасную, которая стартует; профиль при этом не переписывается. Без повтора основной и друг друга. Пустой список — запуск только на основной.",
 ];
 
 export const POLICY_SCHEMA_NOTES = [

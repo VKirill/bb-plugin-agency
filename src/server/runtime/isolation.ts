@@ -4,6 +4,6 @@ export type IsolationAssessment = { supported: false; reason: string };
 export function assessIsolation(_profile?: AgentProfile): IsolationAssessment {
   return {
     supported: false,
-    reason: "Изоляция MCP и навыков ещё не проверена. Запуск сотрудников недоступен.",
+    reason: "BB не изолирует навыки и MCP каталога по тредам: навыки сотрудника передаются в промпте запуска.",
   };
 }

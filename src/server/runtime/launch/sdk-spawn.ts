@@ -6,24 +6,16 @@ import type {
   ThreadVerifyOutcome,
   ThreadVerifyPort,
 } from "./ports.js";
-import { DEPLOYED_CORE_ISOLATED_SPAWN_FIELDS } from "./readiness.js";
 
-/**
- * Installed plugin-sdk ThreadSpawnArgs has no isolatedSkillDelivery/skillIds.
- * Do not cast spawn args or call threads.spawn until a live core probe proves those fields.
- */
-export function deployedSdkHasIsolatedSpawnFields(): false {
-  return DEPLOYED_CORE_ISOLATED_SPAWN_FIELDS;
-}
-
+/** A spawn port that never calls `threads.spawn`: for a coordinator with no live SDK wired. */
 export function unsupportedSdkSpawnPort(): SpawnPort {
   return {
     supported: false,
     async spawn(_request: LaunchContract): Promise<SpawnOutcome> {
       return {
         kind: "rejected",
-        code: "sdk_isolated_fields_unsupported",
-        message: "deployed SDK/core cannot express isolated skill/MCP fields; spawn is not called",
+        code: "sdk_spawn_unsupported",
+        message: "no live threads.spawn is wired; spawn is not called",
       };
     },
     async reconcileByLaunchId(_launchId: string): Promise<ReconcileOutcome> {
@@ -32,7 +24,7 @@ export function unsupportedSdkSpawnPort(): SpawnPort {
   };
 }
 
-/** Deployed SDK has no launchId/thread lookup. Do not invent confirmation. */
+/** No live thread lookup is wired. Do not invent confirmation. */
 export function unsupportedSdkThreadVerifyPort(): ThreadVerifyPort {
   return {
     supported: false,
@@ -41,7 +33,7 @@ export function unsupportedSdkThreadVerifyPort(): ThreadVerifyPort {
         kind: "unavailable",
         code: "sdk_thread_lookup_unsupported",
         message:
-          "deployed SDK cannot prove launchId or thread identity against provider/server metadata; recovery stays pending",
+          "no live thread lookup is wired to prove launch identity; recovery stays pending",
       };
     },
   };

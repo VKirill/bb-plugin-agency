@@ -363,7 +363,6 @@ const testReady = {
   assess: () => ({
     executionAvailable: true,
     isolationReady: true,
-    isolatedSpawnFields: true,
     reason: "test-only readiness; product execution stays unavailable",
   }),
 };

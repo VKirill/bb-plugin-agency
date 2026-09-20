@@ -176,12 +176,19 @@ function wakeStillCurrentHead(db: SqlDatabase, row: WakeRow): boolean {
   );
 }
 
+function isAutoReviewChild(db: SqlDatabase, jobId: string): boolean {
+  return Boolean(db.prepare(`SELECT 1 FROM agency_auto_review WHERE review_job_id = ? LIMIT 1`).get(jobId));
+}
+
 export function enqueueParentWake(db: SqlDatabase, child: Job, activity: Activity, now: string): boolean {
   const childState = wakeStateFromActivity(activity);
   if (!childState) return false;
   if (activity.jobId !== child.id) return false;
   if (child.state !== childState) return false;
   if (!isCurrentTransitionCausation(db, child.id, activity.id, activity.causationId ?? activity.id)) return false;
+  // Automatic QC children are conveyor traffic. Pinging the lead on every
+  // «done» burned a planning turn on a status the lead does not act on.
+  if (isAutoReviewChild(db, child.id)) return false;
   const target = resolveParentTarget(db, child);
   if (!target) return false;
   const result = db

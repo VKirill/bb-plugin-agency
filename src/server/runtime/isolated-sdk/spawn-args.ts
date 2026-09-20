@@ -1,38 +1,26 @@
 import { fail, ok, type DomainResult } from "../../../domain";
+import { attemptPackDir, PACK_ENTRY } from "../context-snapshot/pack.js";
 import type { ContextSnapshot } from "../context-snapshot/types.js";
 import type { LaunchContract } from "../launch/ports.js";
-import type { IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
+import { AGENCY_PLUGIN_ID, type IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
 
 export type { IsolatedThreadSpawnArgs } from "./sdk-isolation-contract.js";
 
 /**
- * Layers a worker reads, in compile order. A later layer does not cancel an
- * earlier one. The platform layer is supplied by the host session, not here.
- * Without department and agent layers a worker never sees its job description
- * or the department charter, so it cannot tell its own work from misrouted work.
+ * The spawn prompt is a short pointer to the on-disk attempt pack. The brief, the contract, the
+ * rules, the handoff and the role's CLI card are files of the pack, pinned by the snapshot digest;
+ * none of them is pasted here.
  */
-const WORKER_PROMPT_LAYERS = [
-  ["agency", "Agency rules"],
-  ["project", "Project"],
-  ["department", "Department: process and scope"],
-  ["agent", "Your position and job description"],
-  ["job", "Job"],
-  ["handoff", "Handoff from the previous attempt"],
-] as const;
 
 /** The first line names the job: BB titles the hidden thread from the start of the prompt. */
-export function composeWorkerPrompt(
-  levels: ContextSnapshot["prompt"]["levels"],
-  job?: Pick<ContextSnapshot["job"], "key" | "title">,
-): string {
-  const sections = WORKER_PROMPT_LAYERS.flatMap(([layer, title]) => {
-    const text = levels[layer].trim();
-    return text ? [`## ${title} (${layer})\n${text}`] : [];
-  });
+export function composeWorkerPrompt(snapshot: Pick<ContextSnapshot, "job" | "agentVersion" | "pack">): string {
+  const dir = snapshot.pack?.dir ?? attemptPackDir(snapshot.job.key);
+  const role = [snapshot.pack?.role, snapshot.agentVersion.role.trim().split("\n")[0]].filter(Boolean).join(", ");
   return [
-    ...(job ? [`${job.key}: ${job.title}`] : []),
-    "You are an employee of the BB Agency. The layers below add to each other: a lower layer does not cancel a higher one.",
-    ...sections,
+    `${snapshot.job.key}: ${snapshot.job.title}`,
+    `You are an Agency employee${role ? `: ${role}` : ""}.`,
+    `Your job pack is in ${dir}/. Read ${dir}/${PACK_ENTRY} and the files it lists before the first edit, then do that job. The pack is the assignment: do not call job get for your own brief.`,
+    `Hand in: write ${dir}/report.md, publish it as the job's artifact, leave a closing job comment and end the turn. Do not wait for the owner to accept this station.`,
   ].join("\n\n");
 }
 
@@ -48,7 +36,7 @@ export function spawnArgsFromContract(
   if (!snapshot.prompt.levels.job.trim()) {
     return fail("incomplete_launch_contract", "snapshot prompt.job is empty; no fallback brief");
   }
-  const prompt = composeWorkerPrompt(snapshot.prompt.levels, snapshot.job);
+  const prompt = composeWorkerPrompt(snapshot);
   return ok({
     projectId: contract.bbProjectId,
     providerId: contract.providerId,
@@ -59,12 +47,14 @@ export function spawnArgsFromContract(
       hostId: contract.hostId,
       workspace: { type: "unmanaged", path: contract.canonicalRoot },
     },
-    isolatedSkillDelivery: true,
-    skillIds,
+    origin: "plugin",
+    originPluginId: AGENCY_PLUGIN_ID,
     visibility: "hidden",
-    experimental_callerLaunchId: contract.launchId,
-    experimental_callerAttemptId: contract.attemptId,
-    ...(jobId ? { experimental_callerJobId: jobId } : {}),
+    pluginMetadata: {
+      agencyLaunchId: contract.launchId,
+      agencyAttemptId: contract.attemptId,
+      agencyJobId: jobId,
+    },
     ...(snapshot.execution?.reasoningLevel || snapshot.execution?.serviceTier || snapshot.execution?.permissionMode
       ? {
           ...(snapshot.execution.reasoningLevel ? { reasoningLevel: snapshot.execution.reasoningLevel } : {}),
@@ -75,14 +65,6 @@ export function spawnArgsFromContract(
             ...(snapshot.execution.serviceTier ? { serviceTier: "explicit" as const } : {}),
             ...(snapshot.execution.permissionMode ? { permissionMode: "explicit" as const } : {}),
           },
-        }
-      : {}),
-    ...(snapshot.plugins?.ids.length
-      ? {
-          instructionPluginIds: [...snapshot.plugins.ids],
-          ...(snapshot.plugins.toolNames.length
-            ? { dynamicToolNames: [...snapshot.plugins.toolNames], allowBridgeToolProxy: true }
-            : {}),
         }
       : {}),
   });

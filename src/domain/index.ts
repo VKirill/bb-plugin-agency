@@ -40,3 +40,4 @@ export {
   type ArtifactScope,
 } from "./artifact-version";
 export type { AgentProfile, RunSnapshot, Rule, Trigger } from "./models";
+export { evaluateSpecGate, type SpecGateInput, type SpecGateReason, type SpecGateResult, type SpecGateVersionRef } from "./spec-gate";

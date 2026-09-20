@@ -28,6 +28,8 @@ const snapshot = (execution?: ContextSnapshot["execution"]) =>
   ({
     schemaVersion: 2,
     digest: "d".repeat(64),
+    job: { key: "AG-1", title: "T" },
+    agentVersion: { role: "Developer" },
     prompt: { digest: "p".repeat(64), levels: { platform: "p", agency: "a", project: "pr", department: "d", agent: "ag", job: "Brief.", handoff: "" } },
     ...(execution ? { execution } : {}),
   }) as ContextSnapshot;

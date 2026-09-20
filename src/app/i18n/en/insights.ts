@@ -78,6 +78,45 @@ export const EN_INSIGHTS: Record<string, string> = {
     "A goal is the owner's outcome that main jobs work toward. The goal's due date and status don't change the jobs.",
   "Сохранить цель": "Save goal",
   "Цели": "Goals",
+  "Идеи работают на данных Агентства: выключите пример.": "Ideas work on Agency data: turn off the example.",
+  "Склад обсуждённых идей и туду. Карточка открывает оформленный markdown; тот же текст лежит файлом в папке проекта.":
+    "A warehouse of discussed ideas and todos. The card opens the formatted markdown; the same text lives as a file in the project folder.",
+  "Новая идея": "New idea",
+  "Поиск идей": "Search ideas",
+  "Найти идею…": "Find an idea…",
+  "Все проекты": "All projects",
+  "Вид записи": "Record kind",
+  "Идеи и туду": "Ideas and todos",
+  "Туду": "Todo",
+  "Статус идеи": "Idea status",
+  "Открытые": "Open",
+  "Сделанные": "Done",
+  "Загружаем идеи…": "Loading ideas…",
+  "Идея": "Idea",
+  "Вид": "Kind",
+  "Откуда": "From",
+  "Обновлена": "Updated",
+  "Закрыть идею": "Close idea",
+  "Открыть файл": "Open file",
+  "Создать тред": "Start a thread",
+  "Штатный композер BB: текст идеи уже подставлен. Отправка откроет обычный чат, не скрытый запуск сотрудника.":
+    "BB's official composer: the idea text is already filled in. Send opens an ordinary chat, not a hidden employee launch.",
+  "Отметить сделанной": "Mark done",
+  "Изменить идею": "Edit idea",
+  "Название, проект и текст по регламенту: суть, зачем, контекст, следующий шаг. Файл появится в .bb/agency/ideas/ выбранного проекта.":
+    "Title, project, and text by the regulation: gist, why, context, next step. The file will appear in .bb/agency/ideas/ of the chosen project.",
+  "Название идеи": "Idea title",
+  "Раздел — как его видит владелец": "Section — as the owner sees it",
+  "Содержание": "Body",
+  "Сохранить идею": "Save idea",
+  "Идея сохранена, файл записан в проект.": "Idea saved, the file is written in the project.",
+  "Идея сохранена в Агентстве. Файл в проекте не записался — повторите сохранение, когда машина проекта на связи.":
+    "Idea saved in the Agency. The project file was not written — save again when the project machine is online.",
+  "Статус идеи обновлён.": "Idea status updated.",
+  "Файл идеи ещё не записан на машину проекта.": "The idea file is not on the project machine yet.",
+  "Открыта": "Open",
+  "Отложена": "Parked",
+  "Сделана": "Done",
   "Зачем идут главные задачи и насколько продвинулись. Подзадачи учитываются через свою главную задачу.":
     "Why main jobs are running and how far they've got. Subtasks count through their main job.",
   "Целей пока нет": "No goals yet",
@@ -131,6 +170,10 @@ export const EN_INSIGHTS: Record<string, string> = {
   // knowledge-live.tsx
   "Отдел «{name}»": "Department “{name}”",
   "Проект «{name}»": "Project “{name}”",
+  "Раздел": "Section",
+  "Раздел «{id}» · {project}": "Section “{id}” · {project}",
+  "Идентификатор раздела": "Section id",
+  "Привязка проекта-родителя": "Parent project binding",
   "Материал сохранён и принят: он придёт в запуски своей области.": "Material saved and accepted: it will reach launches in its scope.",
   "Материал принят: он придёт в запуски своей области.": "Material accepted: it will reach launches in its scope.",
   "Материал убран в архив и больше не приходит в запуски.": "Material archived; it no longer reaches launches.",
@@ -150,8 +193,8 @@ export const EN_INSIGHTS: Record<string, string> = {
     "This is reference, not an order: if it contradicts the regulations or the assignment, the employee asks a question.",
   "Укажите область и источник. Материал, сохранённый владельцем, принят сразу; правка из треда сотрудника становится предложением.":
     "Set the scope and source. Material saved by the owner is accepted at once; an edit from an employee's thread becomes a proposal.",
-  "Принятые материалы приходят в каждый запуск своей области: всего Агентства, отдела или проекта.":
-    "Accepted materials reach every launch in their scope: the whole Agency, a department or a project.",
+  "Принятые материалы приходят в каждый запуск своей области: всего Агентства, отдела, проекта или раздела.":
+    "Accepted materials reach every launch in their scope: the whole Agency, a department, a project or a section.",
   "Как материал доходит до запуска": "How material reaches a launch",
 
   // Labels translated inside components and helpers

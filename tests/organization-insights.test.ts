@@ -183,6 +183,8 @@ describe("metrics, archive, search, views", () => {
     for (const [argv, operation] of [
       [["knowledge", "list"], "listKnowledge"],
       [["knowledge", "status"], "setKnowledgeStatus"],
+      [["idea", "list"], "listIdeas"],
+      [["idea", "save"], "saveIdea"],
       [["goal", "link"], "setJobGoal"],
       [["job", "search"], "searchJobs"],
       [["agent", "metrics"], "agentMetrics"],

@@ -4,6 +4,7 @@ import { AGENCY_SKILL_COMMANDS, AGENCY_SKILL_FORBIDDEN_SURFACES } from "./agency
 import { PROMPT_PRECEDENCE_DEPARTMENT, PROMPT_PRECEDENCE_JOB } from "./prompt-precedence.js";
 import { canonicalizeJson, deepFreeze, isSha256Hex, sha256Hex } from "./canonical.js";
 import { effectivePolicy, policyContentHash, sortedUnique } from "./policy.js";
+import { buildAttemptPack, snapshotPack, type AttemptPackFile } from "./pack.js";
 import type {
   CatalogMcpEntry,
   CatalogSkillEntry,
@@ -376,7 +377,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
   const selectedMcpsHash = sha256Hex(canonicalizeJson(selectedMcps));
   const inputArtifactsHash = sha256Hex(canonicalizeJson(inputArtifacts));
 
-  const levels = buildPromptLevels({
+  const levelArgs: PromptLevelArgs = {
     binding,
     job,
     agentVersion,
@@ -398,7 +399,9 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     placement: input.placement ?? null,
     withoutSandbox: input.permissionMode === "full",
     roleInstructions: input.roleInstructions ?? null,
-  });
+  };
+  const levels = buildPromptLevels(levelArgs);
+  const packFiles = buildAttemptPack(packInput(levelArgs, levels, input.memberRole ?? null, input.packLanguage ?? "en"));
   const promptDigest = sha256Hex(canonicalizeJson(levels));
 
   const snapshotWithoutDigest: Omit<ContextSnapshot, "digest"> = {
@@ -437,6 +440,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       policyVersionId: agentVersion.policyVersionId,
       skillIds: [...agentVersion.skillIds],
       mcpIds: [...agentVersion.mcpIds],
+      ...(input.launchModelSource && input.launchModelSource !== "primary" ? { modelSource: input.launchModelSource } : {}),
     },
     processVersion: {
       id: processVersion.id,
@@ -487,14 +491,15 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       levels,
       digest: promptDigest,
     },
+    pack: snapshotPack(job.key, input.memberRole ?? null, packFiles),
   };
 
   const digest = sha256Hex(canonicalizeJson(snapshotWithoutDigest));
   const snapshot = deepFreeze({ ...snapshotWithoutDigest, digest }) as ContextSnapshot;
-  return { ok: true, snapshot };
+  return { ok: true, snapshot, packFiles };
 }
 
-function buildPromptLevels(args: {
+type PromptLevelArgs = {
   binding: CompileContextSnapshotInput["binding"];
   job: CompileContextSnapshotInput["job"];
   agentVersion: CompileContextSnapshotInput["agentVersion"];
@@ -516,7 +521,9 @@ function buildPromptLevels(args: {
   placement: CompileContextSnapshotInput["placement"] | null;
   withoutSandbox: boolean;
   roleInstructions: string | null;
-}): ContextPromptLevels {
+};
+
+function buildPromptLevels(args: PromptLevelArgs): ContextPromptLevels {
   const {
     binding,
     job,
@@ -542,12 +549,7 @@ function buildPromptLevels(args: {
     selectedMcps.length === 0
       ? "MCP none"
       : selectedMcps.map((mcp) => `MCP ${mcp.id} hash=${mcp.hash}`).join("\n");
-  const artifactLines =
-    inputArtifacts.length === 0
-      ? "none"
-      : inputArtifacts
-          .map((item) => `${item.artifactId}@${item.version} job=${item.jobId} host=${item.hostId} hash=${item.hash}`)
-          .join("\n");
+  const artifactLines = inputArtifacts.length === 0 ? "none" : inputArtifacts.map(artifactLine).join("\n");
   const handoffLevel =
     handoff === null
       ? "handoff none"
@@ -649,6 +651,49 @@ function buildPromptLevels(args: {
       ...placementLines(placement ?? null),
     ].join("\n"),
     handoff: handoffLevel,
+  };
+}
+
+function artifactLine(item: InputArtifactRef): string {
+  return `${item.artifactId}@${item.version} job=${item.jobId} host=${item.hostId} hash=${item.hash}`;
+}
+
+/**
+ * The pack is cut from the records the levels are built from. The agency CLI catalog stays out:
+ * it is the dispatcher's list, the employee gets the card of their role.
+ */
+function packInput(
+  args: PromptLevelArgs,
+  levels: ContextPromptLevels,
+  memberRole: string | null,
+  lang: "ru" | "en",
+): Parameters<typeof buildAttemptPack>[0] {
+  const block = (title: string, text: string | null | undefined) => (text?.trim() ? [`## ${title}`, text.trim(), ""] : []);
+  return {
+    job: args.job,
+    memberRole,
+    position: args.agentVersion.role,
+    lang,
+    contract: contractText(args.job.contract),
+    inputLines: [
+      ...args.inputArtifacts.map((item) => `- ${artifactLine(item)} path=${item.relativePath}`),
+      ...placementLines(args.placement ?? null),
+    ],
+    handoff: args.handoff === null ? null : levels.handoff,
+    briefing: args.briefing?.text ?? null,
+    rules: [
+      ...block("Agency rules", args.agencyRules?.text),
+      ...block("Agency knowledge", args.knowledge?.agency),
+      ...block("Role in this job", args.roleInstructions),
+      ...block("Department", levels.department),
+      ...block("Employee", levels.agent),
+    ],
+    project: [
+      ...block("Passport", args.passport?.text),
+      ...block("Project knowledge", args.knowledge?.project),
+      ...block("Work profiles", args.workProfiles?.index),
+      ...block("Work profile of this job", args.workProfiles?.body),
+    ],
   };
 }
 

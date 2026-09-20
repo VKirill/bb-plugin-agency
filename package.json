@@ -9,7 +9,7 @@
   },
   "bb": {
     "name": "Агентство",
-    "description": "Команда, отделы, задачи и версии результатов. Запуск агентов доступен при подтверждённой готовности среды.",
+    "description": "Команда, отделы, задачи и версии результатов. Запуск сотрудника — скрытый тред BB через координатор.",
     "branding": {
       "icon": "Workflow"
     },
@@ -30,7 +30,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "file:vendor/get-bb-plugin-sdk-0.4.87-agy16.431.tgz",
+    "@get-bb/plugin-sdk": "0.4.87",
     "@pierre/diffs": "^1.2.9",
     "@radix-ui/react-alert-dialog": "^1.1.19",
     "@radix-ui/react-context-menu": "^2.3.3",

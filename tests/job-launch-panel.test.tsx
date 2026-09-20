@@ -90,11 +90,8 @@ const snapshot: WorkspaceSnapshot = {
 };
 
 const readyReadiness: IsolationReadiness = {
-  handshakeReady: true,
   executionAvailable: true,
   isolationReady: true,
-  isolatedSpawnFields: true,
-  sdkTypedSpawnReady: true,
   assignedProvider: {
     jobId: "job_2de115e5c5e8bd8b555a71a3",
     agentId: "agt_b1fe6a357a7e8736a896c649",
@@ -288,7 +285,6 @@ describe("JobLaunchPanel mapped click", () => {
       receipt: startedReceipt,
     };
     const startedPrepare: PrepareLaunchView = {
-      handshakeReady: true,
       snapshotId: startedAttempt.snapshotId,
       digest: startedAttempt.digest,
       attemptId: startedAttempt.attemptId,

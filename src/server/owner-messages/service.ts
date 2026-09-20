@@ -109,12 +109,13 @@ export function buildDigest(
   en: boolean,
 ): { text: string; level: "info" | "warning"; items: DigestItem[]; counts: Record<string, number> } {
   const hours = (value: number) => new Date(now.getTime() - value * 3_600_000).toISOString();
+  // Only waits for a person: review is a station the conveyor closes by itself.
   const waiting = (before: string) =>
     (
       db
         .prepare(
           `SELECT key, title, state, updated_at FROM agency_job
-           WHERE state IN ('review', 'waiting_input', 'blocked') AND updated_at <= ?
+           WHERE state IN ('waiting_input', 'blocked') AND updated_at <= ?
            ORDER BY updated_at`,
         )
         .all(before) as { key: string; title: string; state: string; updated_at: string }[]
@@ -144,7 +145,7 @@ export function buildDigest(
     waitingInput: count(`SELECT COUNT(*) AS n FROM agency_job WHERE state = 'waiting_input'`),
     blocked: count(`SELECT COUNT(*) AS n FROM agency_job WHERE state = 'blocked'`),
   };
-  const items = waiting(now.toISOString()).filter((item) => item.state !== "review");
+  const items = waiting(now.toISOString());
   const text = [
     en
       ? `Agency for ${input.sinceHours} h: new jobs ${counts.created}, done ${counts.done}, versions accepted ${counts.accepted}.`
@@ -181,8 +182,8 @@ export function scriptTemplates(en: boolean): ScriptTemplate[] {
       id: "watchdog",
       title: en ? "Watchdog" : "Сторож",
       description: en
-        ? "Every 30 minutes: jobs that wait for review, an answer or a decision longer than 12 h. Writes only when something waits, once per job state."
-        : "Каждые 30 минут: задачи, которые ждут проверки, ответа или решения дольше 12 ч. Пишет, только когда что-то ждёт, и один раз на состояние задачи.",
+        ? "Every 30 minutes: jobs that wait for your answer or a decision longer than 12 h. Writes only when something waits, once per job state."
+        : "Каждые 30 минут: задачи, которые ждут вашего ответа или решения дольше 12 ч. Пишет, только когда что-то ждёт, и один раз на состояние задачи.",
       script: [
         header,
         "# crontab -e",

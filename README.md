@@ -70,7 +70,7 @@ flowchart TD
 | `src/shared` | Zod schemas and the RPC contract | One contract for UI, RPC and CLI |
 | `src/domain` | Job and attempt transitions, rules | Pure logic, no I/O |
 | `src/server/db` | SQLite and append-only migrations | Roll code back only with a compatible schema |
-| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn only after the handshake |
+| `src/server/runtime` | isolation, ContextSnapshot, run-store, launch, needs-input | Spawn only through the coordinator, after readiness |
 | `src/server/dispatcher` | typed inbox → rule → outbox/claim | Event rules, schedules and webhooks |
 | `src/app` | Working screens over RPC and a separate demo | Demo data never mixes with real data |
 
@@ -89,9 +89,10 @@ backlog → queued → running → review → done
 1. **Durable CRUD.** A job gets a brief, acceptance criteria, an assignee and
    pinned input file versions (`attachJobInput`). It can wait for other jobs and
    name a next step for another department.
-2. **Readiness.** `getIsolationReadiness` and the core `GET spawn-contract`, the
-   employee's CLI on the project's machine, and project and employee policies that
-   allow that CLI. No contract means no launch; the catalog keeps working.
+2. **Readiness.** `getIsolationReadiness` with `jobId`: the employee's CLI on the
+   project's machine, and project and employee policies that allow that CLI.
+   Launch uses public `threads.spawn` (hidden plugin thread); launch identity is
+   the Agency database plus the thread's `pluginMetadata`.
 3. **Context snapshot.** An immutable `ContextSnapshot`: versions of the rules, the
    department process, the role, the brief, the effective policy, CLI and host,
    inputs and handoffs. The job layer does not cancel the department layer; a
@@ -171,11 +172,12 @@ subtasks sit under it. Closed jobs leave the board: subtasks after 1 h, the rest
 after 24 h (plugin settings). The job card has the work and discussion on the left
 and properties, files and launches on the right.
 
-Every new BB session gets a routing section: what to do in the chat and what to
-hand to which department of the project. An employee gets its role — lead,
-executor, reviewer or assistant — in the launch prompt. Instructions and service messages to
-agents are always in English; the "Agency language" setting sets the language of
-reports and comments. The `delegate` / `suggest` / `off` mode is in the settings.
+Ordinary BB chats get a routing section from the project (or a unique folder, or
+this thread): Agency, on request, or do it here. A dropdown in the row under the
+input, next to access mode, shows the role and can switch this chat.
+The plugin setting is only the fallback. An employee gets its role — lead, executor, reviewer or assistant — in
+the launch prompt. Instructions and service messages to agents are always in
+English; the "Agency language" setting sets the language of reports and comments.
 
 Files open with a click in a closable right-hand BB tab. The Agency has its own
 editor for txt/json/yaml/csv and images; `.md` / `.markdown` files open in the
@@ -334,9 +336,8 @@ docs/                        architecture, events, API and stages (Russian)
 
 ## Install and develop
 
-Requires BB `>=0.43.1 <0.44` and Node 22/24/26. The package builds against a
-pinned BB Plugin SDK; the SDK tarball is not in the repository — put it into
-`vendor/` as named in `devDependencies` of `package.json`.
+Requires BB `>=0.43.1 <0.44` and Node 22/24/26. The package builds against the
+public `@get-bb/plugin-sdk` from npm, pinned in `devDependencies`.
 
 ```sh
 npm ci --include=dev
@@ -354,9 +355,9 @@ bb agency help
 ```
 
 The plugin registers the `/plugins/agency/overview` page and the `bb agency` CLI.
-A successful build is not an install, and the declared BB compatibility does not
-prove the experimental API is there: a launch also needs an answer from the
-current server's `/api/v1/system/experimental_thread-spawn-contract`.
+A successful build is not an install. A launch uses public `threads.spawn`
+(origin plugin, hidden visibility, pluginMetadata). Identity of the attempt
+stays in the Agency database.
 
 CRUD commands and the `--input-json` / server-fs semantics:
 [docs/cli.md](docs/cli.md) (Russian).

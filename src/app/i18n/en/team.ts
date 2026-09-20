@@ -197,6 +197,19 @@ export const EN_TEAM: Record<string, string> = {
   "Вставить шаблон {kind}": "Insert the {kind} template",
   "Модель": "Model",
   "CLI и модель": "CLI and model",
+  "Основная CLI и модель": "Primary CLI and model",
+  "Запасные модели": "Reserve models",
+  "Если основная модель не запускается на машине задачи — нет CLI, модели нет в каталоге, провайдер недоступен или закончился лимит, — Агентство берёт первую запасную по порядку, которая запускается. Профиль сотрудника не меняется.": "If the primary model does not start on the job's machine — the CLI is missing, the model is not in the catalog, the provider is unavailable or the usage limit is reached — Agency takes the first reserve in order that does start. The employee profile stays as it is.",
+  "Порядок строк — приоритет. Пока список пуст, задача ждёт основную, как раньше. Идущий запуск на другую модель не переключается.": "The row order is the priority. While the list is empty, the job waits for the primary as before. A run in progress is never switched to another model.",
+  "Запасных моделей нет: запуск идёт только на основной.": "No reserve models: launches use the primary only.",
+  "Выше": "Up",
+  "Ниже": "Down",
+  "Добавить запасную модель": "Add a reserve model",
+  "Не больше {limit} запасных моделей.": "No more than {limit} reserve models.",
+  "Запасная модель {row} совпадает с основной. Выберите другую CLI или модель либо уберите строку.": "Reserve model {row} is the same as the primary. Pick another CLI or model, or remove the row.",
+  "Запасная модель {row} повторяет строку выше. Выберите другую или уберите строку.": "Reserve model {row} repeats a row above. Pick another one or remove the row.",
+  "В запасной модели {row} не выбрана CLI или модель.": "Reserve model {row} has no CLI or model chosen.",
+  "Убрать": "Remove",
   "Любой провайдер, подключённый в BB: Claude Code, Codex, Cursor и другие. Уровень рассуждения и быстрый режим выбираются здесь же; набор уровней у каждого CLI свой.": "Any provider connected in BB: Claude Code, Codex, Cursor and others. The reasoning level and fast mode are chosen here too; each CLI has its own set of levels.",
   "Смена модели создаёт новую версию профиля. Идущий запуск доработает на прежней.": "Changing the model creates a new profile version. A run in progress finishes on the previous one.",
   "Уровень рассуждения": "Reasoning level",
@@ -382,8 +395,8 @@ export const EN_TEAM: Record<string, string> = {
     "The department's skill library",
   "Навыки в профиле сотрудника едут в каждый его запуск. Библиотека — то, что отдел вправе поднять под конкретное задание.":
     "Skills in an employee's profile go to every launch of theirs. The library is what the department may raise for a particular job.",
-  "Оценщик читает задание и открывает отсюда только то, без чего работа будет заметно хуже: на один запуск и с записью в журнал.":
-    "The decision model reads the job and opens from here only what the work would be noticeably worse without — for one launch and written into the log.",
+  "Оценщик читает задание и открывает отсюда то, без чего работа будет заметно хуже — чтобы результат был качественнее: на один запуск и с записью в журнал.":
+    "The decision model reads the job and opens from here what the work would be noticeably worse without — so the result is better quality — for one launch and written into the log.",
   "Правит библиотеку владелец или руководитель этого отдела. Пусто — работают только профили сотрудников.":
     "The owner or this department's lead edits the library. Empty — only the employees' profiles apply.",
   "Сохранить библиотеку":

@@ -128,7 +128,7 @@ export function JobNeedsInputPanel({
     <section aria-label={tr("Вопрос исполнителя")} className="mb-6 rounded-xl border border-foreground/20 bg-muted/60 p-5" data-testid="needs-input-panel">
       <h2 className="text-base font-semibold">{tr("Нужен ответ, чтобы продолжить")}</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        {tr("Исполнитель остановился и ждёт ответа. Ответ уйдёт ему в тред, работа продолжится сама.")}
+        {tr("Исполнитель остановился. Тот же вопрос ушёл в чат, откуда ставили задачу. Здесь — запасной вход; ответ всё равно вернётся в рабочий тред.")}
       </p>
       <ol className="mt-3 list-decimal space-y-3 pl-5 text-sm">
         {record.questions.map((item) => (

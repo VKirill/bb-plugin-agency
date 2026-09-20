@@ -30,6 +30,24 @@ export type Remark = { departmentId: string; jobId: string; jobKey: string; text
 
 const DEFECT_WORDS = /доработ|дефект|не пройден|не выполнен|ошибк|rework|defect|failed|not met|missing/i;
 
+/**
+ * Reviewer pass reports, conveyor ritual and artifact citations look like
+ * repeated remarks (the word «дефект» sits inside «дефектов не обнаружено»)
+ * but they are not a department rule.
+ */
+export function isRemarkNoise(text: string): boolean {
+  const line = text.trim();
+  if (/дефект\p{L}*\s+не\s+обнаруж/iu.test(line) || /не\s+обнаружен\p{L}*\s+дефект/iu.test(line) || /дефектов\s+нет/i.test(line)) return true;
+  if (/\bno\s+defects?\b/i.test(line) || /\bno\s+issues?\s+found\b/i.test(line)) return true;
+  if (/свой\s+результат\s+не\s+принимаю/i.test(line) || /станцию\s+закрывает/i.test(line) || /отк\s+этой\s+станции\s+не\s+нужно/i.test(line)) return true;
+  if (/^вердикт:\s*доработать\.?$/i.test(line)) return true;
+  if (/не\s+пройден/i.test(line)) return false;
+  if (/все\s+\d+\s+критери/i.test(line) && /пройден/i.test(line)) return true;
+  if (/критери\p{L}*\s+приёмк/iu.test(line) && /пройден/i.test(line)) return true;
+  if (/^отчёт:\s*/i.test(line) || /\bart_[a-f0-9]{12,}\b/i.test(line) || /\.agency\/jobs\//i.test(line)) return true;
+  return false;
+}
+
 /** Remark lines: list items, or the sentences of a short text. */
 export function remarkLines(text: string): string[] {
   const lines = text
@@ -85,7 +103,9 @@ export function recentRemarks(db: SqlDatabase, since: string): Remark[] {
     ).filter((row) => DEFECT_WORDS.test(row.text)),
   ];
   return rows.flatMap((row) =>
-    remarkLines(row.text).map((line) => ({ departmentId: row.department_id, jobId: row.job_id, jobKey: row.key, text: line, at: row.at })),
+    remarkLines(row.text)
+      .filter((line) => !isRemarkNoise(line))
+      .map((line) => ({ departmentId: row.department_id, jobId: row.job_id, jobKey: row.key, text: line, at: row.at })),
   );
 }
 
@@ -135,6 +155,7 @@ export function sweepRemarkPatterns(db: SqlDatabase, now: Date, en: boolean): st
   for (const cluster of clusterRemarks(recentRemarks(db, since))) {
     const jobs = [...new Set(cluster.remarks.map((remark) => remark.jobId))];
     if (jobs.length < REMARK_REPEAT_JOBS) continue;
+    if (isRemarkNoise(cluster.representative)) continue;
     if (known.some((item) => item.departmentId === cluster.departmentId && similar(item.stems, cluster.stems))) continue;
     const text = proposalText(cluster, en);
     const saved = saveKnowledge(

@@ -36,7 +36,7 @@ export type AutoReviewPorts = {
   now: () => string;
 };
 
-export type AutoReviewOutcome = "skipped" | "created" | "failed";
+export type AutoReviewOutcome = "skipped" | "pending" | "created" | "failed";
 
 export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedInVersion, lang = agencyLanguage()) {
   const title = `${lang === "en" ? "Review" : "Проверка"} ${job.key}: ${job.title}`.slice(0, 180);
@@ -44,13 +44,13 @@ export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedIn
     return {
       title,
       brief: `Independent review of version v${version.version} of ${job.key} «${job.title}» against its acceptance criteria. The version is attached as input: open it by hash, do not trust working files.\nDo not fix the result: describe defects (criterion → place → how to reproduce → severity).`,
-      acceptance: `The review report is published as a version: verdict (accept / rework) and every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
+      acceptance: `The review report is published as a version. First line: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
     };
   }
   return {
     title,
     brief: `Независимая проверка версии v${version.version} результата ${job.key} «${job.title}» по её критериям приёмки. Версия приложена входом: открывайте её по hash, рабочим файлам на слово не верьте.\nРезультат не правьте: описывайте дефекты (критерий → место → как воспроизвести → серьёзность).`,
-    acceptance: `Заключение опубликовано версией: вердикт (принять / доработать) и каждый критерий приёмки ${job.key} — пройден / не пройден / не проверен с командой или местом.`,
+    acceptance: `Заключение опубликовано версией. Первая строка: Вердикт: принять или Вердикт: доработать. Затем каждый критерий приёмки ${job.key} — пройден / не пройден / не проверен с командой или местом.`,
   };
 }
 
@@ -65,7 +65,7 @@ export async function startAutoReview(ports: AutoReviewPorts, jobId: string): Pr
   const claimed = ports.db
     .prepare(`INSERT OR IGNORE INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at) VALUES (?, ?, NULL, 'pending', ?)`)
     .run(job.id, version.hash, ports.now());
-  if (claimed.changes === 0) return "skipped";
+  if (claimed.changes === 0) return "pending";
   const en = agencyLanguage() === "en";
   const finish = (outcome: string, reviewJobId: string | null) =>
     ports.db.prepare(`UPDATE agency_auto_review SET outcome = ?, review_job_id = ? WHERE job_id = ? AND hash = ?`).run(outcome, reviewJobId, job.id, version.hash);

@@ -4,8 +4,10 @@ import { passportDeliveryFor, passportText } from "../../shared/passport.js";
 import { agencyLanguage } from "../i18n/language.js";
 import { currentAgencyRules } from "../templates/store";
 import { handInCommentMissing } from "../runtime/hand-in/service";
+import { clearExhaustedModels } from "../runtime/agent-fallback";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
 import { foreignRuleKeys, readStoredRules, rulesForDepartment, rulesForLaunch, workRulesView, writeStoredRules } from "../rules/work-rules";
+import { inspectSpecGate, specIntakeViolationComment } from "../flow/spec-gate";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCommand, type WorkRulesView } from "../../shared/contracts/work-rules";
 import { listWorkProfiles, workProfileBlock, workProfileIndex } from "../projects/work-profiles";
 import {
@@ -63,6 +65,7 @@ import type {
 import { contractIsEmpty, emptyJobTeamFields } from "../../shared/contracts";
 import { assertJobTeamMembership, effectiveJobTeamIds } from "../runtime/job-team";
 import { enqueueParentWake } from "../runtime/parent-wake";
+import { enqueueClientBounceForOpenWait, enqueueProductReady, isOriginThreadId, resolveJobOriginThreadId } from "../runtime/client-bounce";
 import {
   acceptArtifactVersionCommandSchema,
   createActivityCommandSchema,
@@ -75,9 +78,11 @@ import {
   createProjectBindingCommandSchema,
   saveAgentProfileCommandSchema,
   saveDepartmentProfileCommandSchema,
+  optionalFallbackModels,
   optionalPluginIds,
   optionalReasoningEffort,
   optionalServiceTier,
+  sameFallbackModels,
   jobTransitionCommandSchema,
   publishArtifactVersionCommandSchema,
   updateAgentCommandSchema,
@@ -661,6 +666,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           ...optionalReasoningEffort(input.version.reasoningEffort),
           ...optionalServiceTier(input.version.serviceTier),
           ...optionalPluginIds(input.version.pluginIds),
+          ...optionalFallbackModels(input.version.fallbackModels),
         };
         const agent: Agent = {
           id: agentId,
@@ -689,6 +695,10 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         }
         const allowed = assertPolicyAllowsProvider(parsed.data.policyVersionId, parsed.data.providerId);
         if (!allowed.ok) return allowed;
+        for (const reserve of parsed.data.fallbackModels ?? []) {
+          const fallbackAllowed = assertPolicyAllowsProvider(parsed.data.policyVersionId, reserve.providerId);
+          if (!fallbackAllowed.ok) return fallbackAllowed;
+        }
         const version: AgentVersion = {
           id: newOpaqueId("agentVersion"),
           agentId: parsed.data.agentId,
@@ -703,6 +713,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           ...optionalReasoningEffort(parsed.data.reasoningEffort),
           ...optionalServiceTier(parsed.data.serviceTier),
           ...optionalPluginIds(parsed.data.pluginIds),
+          ...optionalFallbackModels(parsed.data.fallbackModels),
         };
         try {
           repos.agentVersion.insert(version);
@@ -878,6 +889,10 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         }
         const allowed = assertPolicyAllowsProvider(parsed.data.version.policyVersionId, parsed.data.version.providerId);
         if (!allowed.ok) return allowed;
+        for (const reserve of parsed.data.version.fallbackModels ?? []) {
+          const fallbackAllowed = assertPolicyAllowsProvider(parsed.data.version.policyVersionId, reserve.providerId);
+          if (!fallbackAllowed.ok) return fallbackAllowed;
+        }
         const currentVersion = repos.agentVersion.get(current.value.currentVersionId);
         if (!currentVersion) return fail("not_found", `agent version ${current.value.currentVersionId} not found`);
         const draft = parsed.data.version;
@@ -889,6 +904,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           currentVersion.policyVersionId === draft.policyVersionId &&
           currentVersion.reasoningEffort === draft.reasoningEffort &&
           currentVersion.serviceTier === draft.serviceTier &&
+          sameFallbackModels(currentVersion.fallbackModels, draft.fallbackModels) &&
           sameTextList(currentVersion.skillIds, draft.skillIds) &&
           sameTextList(currentVersion.mcpIds, draft.mcpIds) &&
           sameTextList(currentVersion.pluginIds ?? [], draft.pluginIds ?? []);
@@ -908,6 +924,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
             ...optionalReasoningEffort(draft.reasoningEffort),
             ...optionalServiceTier(draft.serviceTier),
             ...optionalPluginIds(draft.pluginIds),
+            ...optionalFallbackModels(draft.fallbackModels),
           };
           try {
             repos.agentVersion.insert(version);
@@ -928,6 +945,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           ...(workplace.value ? { workplaceBindingId: workplace.value } : {}),
         };
         repos.agent.update(agent);
+        clearExhaustedModels(db, agent.id);
         return ok({ agent, version });
       }),
     );
@@ -1329,6 +1347,18 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     );
   }
 
+  function resolveCreatedJobSectionId(requested: string | null, parent: Job | null): DomainResult<string | null> {
+    if (!parent) return ok(requested);
+    const inherited = parent.sectionId ?? null;
+    if (requested !== null && requested !== inherited) {
+      return fail(
+        "invalid_command",
+        "sectionId подзадачи должен совпадать с разделом главной задачи или не передаваться — тогда он наследуется.",
+      );
+    }
+    return ok(inherited);
+  }
+
   function assertCallerMayDelegate(ctx: ServiceContext): DomainResult<true> {
     const agentId = ctx.caller?.agentId;
     if (!agentId) return ok(true);
@@ -1397,6 +1427,13 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           const round = assertReworkRoundAllowed(parsed.data.parentJobId, parsed.data.departmentId, assignedAgentId);
           if (!round.ok) return round;
         }
+        if (parsed.data.originThreadId && !isOriginThreadId(parsed.data.originThreadId)) {
+          return fail("invalid_command", "originThreadId must be a BB thread id");
+        }
+        const parent = parsed.data.parentJobId ? repos.job.get(parsed.data.parentJobId) ?? null : null;
+        const sectionId = resolveCreatedJobSectionId(parsed.data.sectionId ?? null, parent);
+        if (!sectionId.ok) return sectionId;
+        const originThreadId = resolveJobOriginThreadId(db, parsed.data, parent);
         const team = assertJobTeamMembership({
           departmentId: parsed.data.departmentId,
           reviewerAgentIds: parsed.data.reviewerAgentIds ?? emptyJobTeamFields().reviewerAgentIds,
@@ -1416,6 +1453,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           acceptance: parsed.data.acceptance,
           state: "backlog",
           parentJobId: parsed.data.parentJobId,
+          sectionId: sectionId.value,
           assignedAgentId,
           reviewerAgentIds: team.value.reviewerAgentIds,
           observerAgentIds: team.value.observerAgentIds,
@@ -1423,6 +1461,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           dueAt: parsed.data.dueAt,
           ...(parsed.data.contract && !contractIsEmpty(parsed.data.contract) ? { contract: parsed.data.contract } : {}),
           ...(parsed.data.workProfileKey ? { workProfileKey: parsed.data.workProfileKey } : {}),
+          ...(parsed.data.workKind ? { workKind: parsed.data.workKind } : {}),
+          ...(originThreadId ? { originThreadId } : {}),
           revision: 1,
           updatedAt: nowUtc(ctx),
         };
@@ -1433,6 +1473,18 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         }
         repos.facts.insert(job.id);
         appendActivity(ctx, job.id, "job_created", [{ type: "job", id: job.id }]);
+        const spec = inspectSpecGate(db, job, rulesForDepartment(db, job.departmentId));
+        if (
+          spec.result.required &&
+          !spec.result.satisfied &&
+          (spec.result.reason === "no_spec_job" || spec.result.reason === "spec_not_accepted")
+        ) {
+          const note = specIntakeViolationComment(job.key, spec.result.reason, agencyLanguage() === "en");
+          appendActivity(ctx, job.id, "comment", [{ type: "job", id: job.id }], null, note);
+          if (spec.rootId !== job.id) {
+            appendActivity(ctx, spec.rootId, "comment", [{ type: "job", id: job.id }], null, note);
+          }
+        }
         return ok(job);
       });
     })();
@@ -1526,15 +1578,29 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           hasRun: isActiveRunState(scoped.value.job.state, facts?.threadBound === true),
         });
         if (!blocked.ok) return blocked;
-        const { contract: _previousContract, workProfileKey: _previousProfile, ...current } = scoped.value.job;
+        const { contract: _previousContract, workProfileKey: _previousProfile, originThreadId: previousOrigin, workKind: previousWorkKind, ...current } = scoped.value.job;
         const contract = parsed.data.contract === undefined ? scoped.value.job.contract : parsed.data.contract;
         // null clears the profile, undefined keeps it: the same rule as the contract.
         const workProfileKey =
           parsed.data.workProfileKey === undefined ? scoped.value.job.workProfileKey : parsed.data.workProfileKey;
+        const workKind = parsed.data.workKind === undefined ? previousWorkKind ?? null : parsed.data.workKind;
+        if ((previousWorkKind ?? null) === "new-program" && workKind !== "new-program" && ctx.caller) {
+          return fail(
+            "work_kind_owner_only",
+            "Only the owner can change workKind away from new-program. / Вид работы new-program может снять только владелец.",
+          );
+        }
+        if (parsed.data.originThreadId !== undefined && !isOriginThreadId(parsed.data.originThreadId)) {
+          return fail("invalid_command", "originThreadId must be a BB thread id");
+        }
+        const originThreadId =
+          parsed.data.originThreadId === undefined ? previousOrigin : parsed.data.originThreadId;
         const next: Job = {
           ...current,
           ...(contract && !contractIsEmpty(contract) ? { contract } : {}),
           ...(workProfileKey ? { workProfileKey } : {}),
+          ...(workKind ? { workKind } : {}),
+          ...(originThreadId ? { originThreadId } : {}),
           title: parsed.data.title ?? scoped.value.job.title,
           brief: parsed.data.brief ?? scoped.value.job.brief,
           acceptance: parsed.data.acceptance ?? scoped.value.job.acceptance,
@@ -1549,6 +1615,10 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           updatedAt: nowUtc(ctx),
         };
         repos.job.update(next);
+        if (originThreadId && originThreadId !== previousOrigin) {
+          enqueueClientBounceForOpenWait(db, next, next.updatedAt);
+          enqueueProductReady(db, next, next.updatedAt);
+        }
         appendActivity(ctx, next.id, "job_updated");
         return ok(next);
       });
@@ -1816,12 +1886,25 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(artifact_id, job_id) DO UPDATE SET version = excluded.version, hash = excluded.hash, accepted_at = excluded.accepted_at`,
         ).run(parsed.data.artifactId, parsed.data.jobId, parsed.data.version, parsed.data.hash, nowUtc(ctx));
-        repos.job.update({
+        const afterAccept: Job = {
           ...scoped.value.job,
           revision: revision.value.nextRevision,
           updatedAt: nowUtc(ctx),
-        });
+        };
+        let next = afterAccept;
+        if (scoped.value.job.state === "review") {
+          const stored = transitionContext(afterAccept);
+          if (stored.ok) {
+            const allowed = assertJobTransition("review", "done", stored.value);
+            if (allowed.ok) next = { ...afterAccept, state: "done" };
+          }
+        }
+        repos.job.update(next);
         appendActivity(ctx, parsed.data.jobId, "artifact_accepted", [{ type: "artifact", id: parsed.data.artifactId }]);
+        if (next.state === "done" && scoped.value.job.state === "review") {
+          const activity = appendActivity(ctx, next.id, "job_transitioned", [{ type: "job_state", id: "done" }]);
+          enqueueParentWake(db, next, { ...activity, causationId: activity.causationId ?? activity.id }, next.updatedAt);
+        }
         return ok(accepted.value);
       });
     })();
@@ -1927,14 +2010,19 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       const text = passportText(passport, mode);
       return text ? { text, mode, revision: passport.revision } : null;
     },
-    knowledgeForLaunch: (departmentId: string, bindingId: string, focusIds?: readonly string[] | null) => {
+    knowledgeForLaunch: (departmentId: string, bindingId: string, focusIds?: readonly string[] | null, sectionId?: string | null) => {
       // Фокус подсказки: в промпт идут отобранные записи, остальные — строкой «ещё N, команда».
       const focus = focusIds && focusIds.length ? new Set(focusIds) : null;
       const agency = knowledgeBlock(db, "agency", null, focus);
       const project = knowledgeBlock(db, "project", bindingId, focus);
       const department = knowledgeBlock(db, "department", departmentId, focus);
-      const ids = [...agency.ids, ...project.ids, ...department.ids];
-      return ids.length ? { agency: agency.text, project: project.text, department: department.text, ids } : null;
+      const sectionKey = typeof sectionId === "string" ? sectionId.trim() : "";
+      const section = sectionKey ? knowledgeBlock(db, "section", sectionKey, focus, bindingId) : { text: "", ids: [] as { id: string; hash: string }[] };
+      const projectText = section.text
+        ? [project.text, `Знания раздела ${sectionKey}`, section.text].filter((part) => part.length > 0).join("\n")
+        : project.text;
+      const ids = [...agency.ids, ...project.ids, ...department.ids, ...section.ids];
+      return ids.length ? { agency: agency.text, project: projectText, department: department.text, ids } : null;
     },
     getWorkRules,
     memberRole,

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { AgencyApi } from "../data/agency-api";
 import type { Job } from "./data";
 import {
-  LAUNCH_HANDSHAKE_HINT,
+  LAUNCH_READINESS_HINT,
   launchAssigneeProviderId,
   launchNeedsReconcile,
   launchReadinessNotice,
@@ -118,11 +118,11 @@ export function JobLaunchPanel({
 
   const ready = liveJobLaunchReady(job);
   const providerId = launchAssigneeProviderId(readiness);
-  const handshakeReady = jobLaunchAllowedFromReadiness(readiness);
+  const launchReady = jobLaunchAllowedFromReadiness(readiness);
   const launchId = latest?.receipt?.launchId || latest?.attempt?.launchId;
   const action = nextLaunchAction({
     jobReady: ready.ok,
-    handshakeReady,
+    launchReady,
     lastPrepare: prepare,
     attemptState: latest?.attempt.state,
     launchedKind: prepare?.launched?.kind,
@@ -272,7 +272,7 @@ export function JobLaunchPanel({
   const reason = (envReadinessVisible ? readinessMessage : null)
     ?? (rawReadyMessage && !hideStateGuard
       ? rawReadyMessage
-      : prepare && !prepare.handshakeReady
+      : prepare && !prepare.launched
         ? productLaunchCopy({ reasonCode: prepare.reasonCode, reason: prepare.reason })
         : latest && launchNeedsReconcile({
             attempt: latest.attempt,
@@ -283,7 +283,7 @@ export function JobLaunchPanel({
           : listMessage);
   const technical = readiness
     ? technicalLaunchReason({ reasonCode: readiness.reasonCode, reason: readiness.reason })
-    : prepare && !prepare.handshakeReady
+    : prepare && !prepare.launched
       ? technicalLaunchReason({ reasonCode: prepare.reasonCode, reason: prepare.reason })
       : technicalServerReason(reason);
   const workThreadId = scopedAttemptThreadId(latest);
@@ -356,7 +356,7 @@ export function JobLaunchPanel({
   const content = (
     <>
       {!hideReadyHint && readinessProbe && (
-        <p className="text-xs text-muted-foreground">{tr(handshakeReady ? PRODUCT_LAUNCH_READY : LAUNCH_HANDSHAKE_HINT)}</p>
+        <p className="text-xs text-muted-foreground">{tr(launchReady ? PRODUCT_LAUNCH_READY : LAUNCH_READINESS_HINT)}</p>
       )}
       {(canceled || latest) && (
         <dl className="grid gap-1 text-xs text-muted-foreground">

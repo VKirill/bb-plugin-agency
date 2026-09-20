@@ -27,8 +27,8 @@ export type JobAttention = {
   hint: string;
 };
 
-/** States where the agency cannot move until a person acts. */
-export const HUMAN_BLOCKING_STATES: readonly State[] = ["blocked", "waiting_input", "review"];
+/** States where the agency cannot move until a person acts. Review is the conveyor, not the owner. */
+export const HUMAN_BLOCKING_STATES: readonly State[] = ["blocked", "waiting_input"];
 
 /** A job waiting on a person for longer than this reads as overdue. */
 export const OVERDUE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -41,7 +41,7 @@ const WEEK = 7 * DAY;
 const REASON: Record<State, string> = {
   blocked: "Ждёт уточнения вводных",
   waiting_input: "Ждёт вашего ответа",
-  review: "Ждёт вашего решения",
+  review: "На проверке: линия закроет станцию сама",
   running: "Исполнитель работает",
   queued: "В очереди на запуск",
   backlog: "Не передана в работу",

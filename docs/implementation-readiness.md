@@ -10,7 +10,7 @@
 | CRUD | Agent/Department/Binding/Job/Artifact/Activity в SQLite; RPC+CLI; UI на RPC | Не raw SQL. `status.execution` не запуск |
 | Файлы | Publish/open/accept по hash; preview на host binding | Published ≠ accepted |
 | Контекст | `compileContextSnapshot` schema 2; precedence department/job | Сервер не сравнивает acceptance regex |
-| Launch | `prepareLaunch` / receipt / reconcile; spawn только после GET spawn-contract | Любой CLI, подключённый в BB и разрешённый политиками проекта и сотрудника. Host SDK 0.4.87 без GET 404 → spawn unavailable, CRUD жив |
+| Launch | `prepareLaunch` / receipt / reconcile; native `threads.spawn` | Любой CLI, подключённый в BB и разрешённый политиками проекта и сотрудника. Без CLI/политик spawn недоступен, CRUD жив |
 | Watch | `idle` + hash текущей версии → Job `review`, attempt `awaiting_review` | `idle` без такого артефакта оставляет `running`. Не accept. `runSucceeded` всегда false |
 | Вопрос | Typed `reportNeedsInput` → `waiting_input`; `answerNeedsInput` + `waitId` + amendment + official send → тот же running; новый вопрос — новый wait | Recover unknown → `needs_reconciliation` без send. `queued` ≠ turn active. Класса done без артефакта нет |
 | Telegram | Opt-in notify / question_link | Не enqueue из правил, не второй getUpdates |
@@ -37,7 +37,7 @@ OpenCode и Antigravity; это доставка профиля через BB, �
 не включалась. Таблица «постоянный CRUD отсутствует / isolation stub» **устарела**.
 
 - AGY-2…AGY-8: toolchain, domain, storage, artifacts, RPC, UI на данных.
-- AGY-16/0431: isolated spawn-contract, catalog pin, watch, `reportNeedsInput`.
+- AGY-16/0431: catalog pin, watch, `reportNeedsInput`; запуск — native `threads.spawn` (AG-28 убрал experimental spawn-contract).
 - AGY-17: installation-owner RPC, не caller context SDK 0.4.87.
 
 Подробности toolchain: [проверки](toolchain-validation.md).

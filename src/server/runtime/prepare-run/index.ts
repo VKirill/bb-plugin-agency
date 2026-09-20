@@ -1,18 +1,3 @@
-export {
-  CORE_CALLER_WORKER_THREAD,
-  EXPERIMENTAL_ISOLATED_NAMES,
-  PUBLIC_SDK_CALLER_FIELDS,
-} from "./experimental-names.js";
-export type { ExperimentalIsolatedCapability } from "./experimental-names.js";
-export {
-  HANDSHAKE_PROTOCOL,
-  isHandshakeReady,
-  parseHandshakePayload,
-  readinessFromHandshake,
-  unavailableHandshake,
-  unavailableHandshakePort,
-} from "./handshake.js";
-export type { IsolatedCapabilityHandshake, IsolatedCapabilityHandshakePort } from "./handshake.js";
 export { createPrepareRun } from "./prepare.js";
 export type { PreparedRun, PrepareRunDeps, PrepareRunPublicInput } from "./prepare.js";
 export { selectCatalogRoles } from "./catalog-roles.js";

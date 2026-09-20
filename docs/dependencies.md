@@ -9,7 +9,7 @@
 | Компонент | Проверено | Условие |
 | --- | --- | --- |
 | BB | 0.43.1 | engines.bb >=0.43.1 <0.44 |
-| Plugin SDK | compile pin `0.4.87-agy16.431` file:vendor; host production 0.4.87 | engines.bbPluginSdk >=0.4.87 <0.5 (CRUD на ordinary runtime). Spawn только GET `/api/v1/system/experimental_thread-spawn-contract`, не engines |
+| Plugin SDK | публичный npm `0.4.87` (compile и host production) | engines.bbPluginSdk >=0.4.87 <0.5. Spawn — public `threads.spawn` |
 | Агентство | 0.1.0-alpha.12 | path установка, running |
 | Telegram Projects | 0.5.1, optional API v1 | Наличие/версию проверять capabilities, не по названию |
 | Node в shell проверки | 26.3.1 | Не доказательство версии процесса сервера или поддержки Node 22 |
@@ -32,7 +32,7 @@
 | @radix-ui/react-tabs | ^1.1.21 | 1.1.21 | prod | Компонент, bundled |
 | cron-parser | ^5.5.0 | 5.10.1 | prod | Вычисление cron preview и будущих occurrences |
 | zod | ^4.3.6 | 4.6.4 | prod | RPC/данные, bundled |
-| @get-bb/plugin-sdk | file:vendor/get-bb-plugin-sdk-0.4.87-agy16.431.tgz | 0.4.87-agy16.431 | dev | Compile pin SHA256 a517adf2…; engines не readiness; GET spawn-contract = runtime gate |
+| @get-bb/plugin-sdk | 0.4.87 | 0.4.87 | dev | Публичный npm-пакет; spawn — public threads.spawn |
 | @pierre/diffs | ^1.2.9 | 1.4.2 | dev | BB shim, локальная версия для разработки |
 | @radix-ui/react-alert-dialog | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
 | @radix-ui/react-context-menu | ^2.3.3 | 2.3.7 | dev | BB shim, портальный UI |

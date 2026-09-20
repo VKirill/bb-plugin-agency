@@ -258,7 +258,7 @@ describe("run store persist", () => {
     }
   });
 
-  it("rejects a second active attempt and rolls back a new snapshot", () => {
+  it("reuses a prepared attempt with no thread and replaces one whose snapshot changed", () => {
     const { db, close } = openFileDb();
     try {
       const seeded = seedProject(db);
@@ -270,6 +270,28 @@ describe("run store persist", () => {
         attestation: attestation(seeded),
       });
       expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const reused = store.reservePreparedRun(seeded.ctx, {
+        requestId: requestId(),
+        snapshot,
+        attestation: attestation(seeded),
+      });
+      expect(reused.ok).toBe(true);
+      if (reused.ok) expect(reused.value.attempt.attemptId).toBe(first.value.attempt.attemptId);
+
+      const replaced = store.reservePreparedRun(seeded.ctx, {
+        requestId: requestId(),
+        snapshot: compileFor(seeded, { projectRules: projectRules("Другие правила проекта.") }),
+        attestation: attestation(seeded),
+      });
+      expect(replaced.ok).toBe(true);
+      if (!replaced.ok) return;
+      expect(replaced.value.attempt.attemptId).not.toBe(first.value.attempt.attemptId);
+      const previous = db
+        .prepare(`SELECT state FROM agency_run_attempt WHERE id = ?`)
+        .get(first.value.attempt.attemptId) as { state: string };
+      expect(previous.state).toBe("canceled");
+
       const otherJob = seeded.store.createJob(seeded.ctx, {
         requestId: requestId(),
         key: "AG-202",
@@ -284,21 +306,9 @@ describe("run store persist", () => {
         dueAt: null,
       });
       if (!otherJob.ok) throw new Error(otherJob.error.message);
-      const secondJobSnapshot = compileFor({ ...seeded, job: otherJob.value });
-      const again = store.reservePreparedRun(seeded.ctx, {
-        requestId: requestId(),
-        snapshot: compileFor(seeded, { projectRules: projectRules("Другие правила проекта.") }),
-        attestation: attestation(seeded),
-      });
-      expect(again.ok).toBe(false);
-      if (!again.ok) expect(again.error.code).toBe("active_attempt_exists");
-      const leftover = db
-        .prepare(`SELECT count(*) AS n FROM agency_context_snapshot WHERE job_id = ?`)
-        .get(seeded.job.id) as { n: number };
-      expect(leftover.n).toBe(1);
       const other = store.reservePreparedRun(seeded.ctx, {
         requestId: requestId(),
-        snapshot: secondJobSnapshot,
+        snapshot: compileFor({ ...seeded, job: otherJob.value }),
         attestation: {
           accessVerified: true,
           revisionsVerified: true,
@@ -307,6 +317,37 @@ describe("run store persist", () => {
         },
       });
       expect(other.ok).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it("rejects a second attempt once the first has left prepared", () => {
+    const { db, close } = openFileDb();
+    try {
+      const seeded = seedProject(db);
+      const store = createRunStore(db);
+      const first = store.reservePreparedRun(seeded.ctx, {
+        requestId: requestId(),
+        snapshot: compileFor(seeded),
+        attestation: attestation(seeded),
+      });
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const launching = store.transitionAttempt(seeded.ctx, {
+        requestId: requestId(),
+        attemptId: first.value.attempt.attemptId,
+        expectedRevision: 1,
+        to: "launching",
+      });
+      expect(launching.ok).toBe(true);
+      const again = store.reservePreparedRun(seeded.ctx, {
+        requestId: requestId(),
+        snapshot: compileFor(seeded, { projectRules: projectRules("Другие правила проекта.") }),
+        attestation: attestation(seeded),
+      });
+      expect(again.ok).toBe(false);
+      if (!again.ok) expect(again.error.code).toBe("active_attempt_exists");
     } finally {
       close();
     }

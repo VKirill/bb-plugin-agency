@@ -9,7 +9,6 @@ import { compileContextSnapshot } from "../src/server/runtime/context-snapshot";
 import {
   attemptStoreFromRunStore,
   createLaunchCoordinator,
-  deployedSdkHasIsolatedSpawnFields,
   LAUNCH_COORDINATOR_STATUS,
   launchContractFromSnapshot,
   launchOpRequestId,
@@ -171,7 +170,6 @@ const testReady = {
   assess: () => ({
     executionAvailable: true,
     isolationReady: true,
-    isolatedSpawnFields: true,
     reason: "test-only readiness; product execution stays unavailable",
   }),
 };
@@ -303,7 +301,6 @@ function wrapStore(
 describe("launch coordinator", () => {
   it("keeps execution unavailable and uses UUID v5 operation ids", () => {
     expect(LAUNCH_COORDINATOR_STATUS.executionAvailable).toBe(false);
-    expect(deployedSdkHasIsolatedSpawnFields()).toBe(false);
     const parent = requestId();
     const cas = launchOpRequestId(parent, "cas-launching");
     expect(requestIdSchema.safeParse(cas).success).toBe(true);

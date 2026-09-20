@@ -26,27 +26,12 @@ export {
 export type { AppliedCompletion } from "./completion-apply.js";
 export { readCompletionFromCore, readJobPublishedArtifact } from "./completion-artifact.js";
 export { attachDisposableThreadHints, createCompletionWatch, createReadingChangeGate } from "./completion-watch.js";
-export {
-  CORE_SPAWN_CONTRACT_PATH,
-  CORE_SPAWN_CONTRACT_PROTOCOL,
-  createCoreCapabilityHandshakePort,
-  experimentalThreadSpawnContractSchema,
-  handshakeFromSpawnContract,
-} from "./core-capability.js";
-export { handshakeAllowsSpawn } from "./handshake-port.js";
 export { createStoreJobRunningPort } from "./job-running.js";
-export { isolatedHandshakeUnavailable, probeSpawnArgsShape } from "./probe.js";
-export { createIsolatedSpawnPort, createIsolatedThreadVerifyPort, identityFromServerThread } from "./sdk-ports.js";
-export { spawnArgsFromContract } from "./spawn-args.js";
+export { createIsolatedSpawnPort, createIsolatedThreadVerifyPort, identityFromServerThread, callerIdsFromThread } from "./sdk-ports.js";
+export { spawnArgsFromContract, composeWorkerPrompt } from "./spawn-args.js";
 export type { IsolatedThreadSpawnArgs } from "./spawn-args.js";
 export type { IsolatedThreadView } from "./sdk-ports.js";
-export {
-  OFFICIAL_LIST_HAS_CALLER_LAUNCH,
-  OFFICIAL_SPAWN_HAS_CALLER_LAUNCH,
-  OFFICIAL_SPAWN_HAS_REASONING_LEVEL,
-  SDK_ISOLATION_BLOCKER,
-  officialSdkAllowsIsolatedSpawn,
-} from "./sdk-isolation-contract.js";
+export { AGENCY_PLUGIN_ID, OFFICIAL_SPAWN_HAS_REASONING_LEVEL } from "./sdk-isolation-contract.js";
 export {
   isDispatchedUserRow,
   queuedMessageHoldsToken,

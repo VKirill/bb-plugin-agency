@@ -10,7 +10,7 @@
 BB Tasks и Workflows — другие продукты. Notify — inbox, не spawn.
 
 Автоматический cron/webhook и event registry **ещё нет**. Ни webhook, ни UI
-realtime не вызывают spawn: только `prepareLaunch` после handshake.
+realtime не вызывают spawn: только `prepareLaunch` через координатор.
 
 ```mermaid
 flowchart TD
@@ -35,7 +35,7 @@ src/server/db                 append-only миграции, в т.ч. run/needs_
 src/server/services           CRUD, facts, accept
 src/server/artifacts          publish/open
 src/server/runtime
-  isolation.ts                отказ без spawn-contract
+  isolation.ts                заметка каталога: навыки/MCP не изолируются по тредам
   context-snapshot            compile schema 2
   prepare-run                 reserve + attachJobInput
   run-store                   snapshot, attempt, receipt
@@ -65,8 +65,8 @@ outbox, работающий dispatcher claim-loop, изоляция всех CL
 ## Активация
 
 1. Durable CRUD и pin входов (`attachJobInput`).
-2. `getIsolationReadiness` / GET spawn-contract.
-3. `prepareLaunch` → receipt. `reconcile` не второй spawn.
+2. `getIsolationReadiness` с `jobId` (CLI, политики, правила проекта).
+3. `prepareLaunch` → receipt → native `threads.spawn`. `reconcile` не второй spawn.
 4. `idle` + hash текущей версии → review / `awaiting_review`.
 5. Иначе Job остаётся `running`, пока worker не вызовет `reportNeedsInput`.
 6. Accept — отдельная команда по artifactId+version+hash.

@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { fail, ok } from "../src/domain";
 import { openMigratedDatabase } from "../src/server/db";
-import { dequeueLaunch, enqueueLaunch, listLaunchQueue, repairQueuedJobs, sweepLaunchQueue, type LaunchQueuePorts } from "../src/server/runtime/launch-queue/service";
+import { dequeueLaunch, dropFromQueue, enqueueLaunch, listAssignedBacklogJobIds, listLaunchQueue, refusalIfLaunchDidNotStart, reopenDroppedAssignedJobs, repairQueuedJobs, sweepLaunchQueue, WAIT_CODES, type LaunchQueuePorts } from "../src/server/runtime/launch-queue/service";
 import { createJobCommandSchema } from "../src/shared/contracts/job";
 import { seed } from "./role-types.test";
 
@@ -120,6 +120,79 @@ describe("launch queue", () => {
     expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([stuck.id]);
     // The one already in the queue is not repaired twice; the second job waits out its grace.
     expect(repairQueuedJobs(db, "2026-09-17T10:20:00.000Z")).toEqual([fresh.id]);
+  });
+
+  it("has no handshake wait class: a launch that did not start is a transient refusal", async () => {
+    const { db, s, job } = setup();
+    const item = job("Не стартовал");
+    enqueueLaunch(db, item.id, "2026-09-17T10:00:00.000Z");
+    expect(WAIT_CODES.has("handshake_unready")).toBe(false);
+    const mapped = refusalIfLaunchDidNotStart({
+      ok: true,
+      value: { launched: null, reason: "spawn was not called", reasonCode: "launch_not_authorized" },
+    });
+    expect(mapped.ok).toBe(false);
+    if (mapped.ok) return;
+    expect(mapped.error.code).toBe("launch_not_started");
+    const result = await sweepLaunchQueue({
+      db,
+      getJob: (id) => s.store.getJob(id),
+      checkLimits: async () => ok({ warnings: [] }),
+      launch: async () => mapped,
+      comment: () => true,
+      now: () => "2026-09-17T12:00:00.000Z",
+    });
+    expect(result).toEqual({ launched: 0, removed: 0 });
+    expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([item.id]);
+    expect(listLaunchQueue(db)[0]?.waitingReason).toContain("spawn was not called");
+  });
+
+  it("keeps a job when the pinned skill hash is stale", async () => {
+    const { db, s, job } = setup();
+    const item = job("Ждёт закрепление навыка");
+    enqueueLaunch(db, item.id, "2026-09-17T10:00:00.000Z");
+    expect(WAIT_CODES.has("catalog_skill_hash_mismatch")).toBe(true);
+    const result = await sweepLaunchQueue({
+      db,
+      getJob: (id) => s.store.getJob(id),
+      checkLimits: async () => ok({ warnings: [] }),
+      launch: async () => ({ ok: false, error: { code: "catalog_skill_hash_mismatch", message: "skill hash stale" } }),
+      comment: () => true,
+      now: () => "2026-09-17T12:00:00.000Z",
+    });
+    expect(result).toEqual({ launched: 0, removed: 0 });
+    expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([item.id]);
+    expect(listLaunchQueue(db)[0]?.waitingReason).toBe("skill hash stale");
+  });
+
+  it("puts a dropped assigned job with no attempt back in line", () => {
+    const { db, s, job } = setup();
+    const item = job("Сняли из-за навыка");
+    const moved = s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: item.id, expectedRevision: item.revision, to: "queued" });
+    expect(moved.ok).toBe(true);
+    enqueueLaunch(db, item.id, "2026-09-17T10:00:00.000Z");
+    dropFromQueue(db, item.id, "skill hash stale", "2026-09-17T10:01:00.000Z");
+    expect(listLaunchQueue(db)).toEqual([]);
+    expect(reopenDroppedAssignedJobs(db, "2026-09-17T10:02:00.000Z")).toEqual([item.id]);
+    expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([item.id]);
+  });
+
+  it("lists assigned backlog jobs that have no attempt yet", () => {
+    const { db, s, job } = setup();
+    const assigned = job("С исполнителем");
+    const unassigned = s.store.createJob(s.ctx, {
+      ...createJobCommandSchema.parse({
+        requestId: randomUUID(),
+        bindingId: s.ctx.allowedBindingIds[0],
+        departmentId: s.departmentId,
+        title: "Черновик",
+        brief: "Бриф.",
+        acceptance: "Критерий.",
+        assignedAgentId: null,
+      }),
+    });
+    expect(unassigned.ok).toBe(true);
+    expect(listAssignedBacklogJobIds(db)).toEqual([assigned.id]);
   });
 
   it("forgets a job that was launched or canceled by hand", async () => {

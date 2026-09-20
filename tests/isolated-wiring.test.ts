@@ -2,18 +2,12 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { catalogRolesFromListed, resolveCatalogRoles } from "../src/server/runtime/isolated-sdk/catalog-port";
 import { interpretVerifiedCompletion, verifyOpenedCurrentVersion } from "../src/server/runtime/isolated-sdk/completion";
-import {
-  CORE_SPAWN_CONTRACT_PATH,
-  createCoreCapabilityHandshakePort,
-  handshakeFromSpawnContract,
-} from "../src/server/runtime/isolated-sdk/core-capability";
 import { createIsolatedThreadVerifyPort, type IsolatedThreadView } from "../src/server/runtime/isolated-sdk/sdk-ports";
 import { spawnArgsFromContract } from "../src/server/runtime/isolated-sdk/spawn-args";
 import type { LaunchContract } from "../src/server/runtime/launch/ports";
 import type { ContextSnapshot } from "../src/server/runtime/context-snapshot/types";
 import type { CatalogSkillId } from "../src/shared/contracts/ids";
 import { interpretWorkerCompletionRpcSchema } from "../src/shared/rpc-contract";
-import { isHandshakeReady } from "../src/server/runtime/prepare-run";
 import { hashBytes } from "../src/host/guarded-fs";
 import type { ArtifactVersion } from "../src/shared/contracts/artifact";
 
@@ -21,34 +15,6 @@ const AGENCY =
   "skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff" as CatalogSkillId;
 const HELPER =
   "skill_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as CatalogSkillId;
-const FINGERPRINT = "ab".repeat(32);
-
-function validContract(over: Record<string, unknown> = {}) {
-  return {
-    protocol: "bb-experimental-thread-spawn-contract-v1",
-    appVersion: "0.43.1",
-    fingerprint: FINGERPRINT,
-    createThreadRequestKeys: [
-      "experimental_callerLaunchId",
-      "experimental_callerAttemptId",
-      "experimental_callerJobId",
-      "isolatedSkillDelivery",
-      "skillIds",
-      "originPluginId",
-      "model",
-    ],
-    threadListQueryKeys: ["experimental_callerLaunchId", "originPluginId", "includeHidden"],
-    threadResponseKeys: [
-      "experimental_callerLaunchId",
-      "experimental_callerAttemptId",
-      "experimental_callerJobId",
-    ],
-    persist: { table: "thread_caller_launches", unique: ["origin_plugin_id", "caller_launch_id"] },
-    policies: { forkDoesNotInheritCallerIdentity: true, hiddenVisibilitySupported: true },
-    ...over,
-  };
-}
-
 function launchContract(): LaunchContract {
   return {
     snapshotId: "snp_aaaaaaaaaaaaaaaaaaaaaaaa",
@@ -115,7 +81,10 @@ function snapshot(): ContextSnapshot {
   } as unknown as ContextSnapshot;
 }
 
-function serverThread(over: Partial<IsolatedThreadView> = {}): IsolatedThreadView {
+function serverThread(
+  input: Partial<IsolatedThreadView> & { launchId?: string; jobId?: string } = {},
+): IsolatedThreadView {
+  const { launchId, jobId, ...over } = input;
   return {
     id: "thr_aaaaaaaa",
     status: "idle",
@@ -123,9 +92,11 @@ function serverThread(over: Partial<IsolatedThreadView> = {}): IsolatedThreadVie
     providerId: "codex",
     model: "gpt-5.6",
     environmentId: "env_1",
-    experimental_callerLaunchId: over.experimental_callerLaunchId,
-    experimental_callerAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
-    experimental_callerJobId: "job_aaaaaaaaaaaa",
+    pluginMetadata: {
+      ...(launchId ? { agencyLaunchId: launchId } : {}),
+      agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      agencyJobId: jobId ?? "job_aaaaaaaaaaaa",
+    },
     host: { id: "host_mini" },
     environment: { id: "env_1", hostId: "host_mini", path: "/tmp/agency-root" },
     ...over,
@@ -145,43 +116,30 @@ function threadsApi(getImpl: () => Promise<IsolatedThreadView>) {
 }
 
 describe("isolated wiring", () => {
-  it("accepts only the core spawn-contract body, not capability flags or env samples", async () => {
-    expect(isHandshakeReady(handshakeFromSpawnContract(validContract()))).toBe(true);
-    expect(isHandshakeReady(handshakeFromSpawnContract({ capabilities: { isolatedSkillDelivery: true } }))).toBe(false);
-    expect(isHandshakeReady(handshakeFromSpawnContract({ instanceName: "bb-isolated-0431" }))).toBe(false);
-    const missing = validContract({
-      createThreadRequestKeys: ["experimental_callerLaunchId"],
-    });
-    expect(isHandshakeReady(handshakeFromSpawnContract(missing))).toBe(false);
-    const port = createCoreCapabilityHandshakePort({
-      baseUrl: () => "http://127.0.0.1:9",
-      fetchImpl: async (url) => {
-        expect(String(url)).toContain(CORE_SPAWN_CONTRACT_PATH);
-        return new Response(JSON.stringify(validContract()), { status: 200 });
-      },
-    });
-    const probed = await port.probe();
-    expect(probed.ok && isHandshakeReady(probed.value)).toBe(true);
-    const missingUrl = createCoreCapabilityHandshakePort({ baseUrl: () => null });
-    const empty = await missingUrl.probe();
-    expect(empty.ok && isHandshakeReady(empty.value)).toBe(false);
-  });
-
-  it("builds typed spawn args with experimental_ keys and hidden visibility", () => {
-    const built = spawnArgsFromContract(launchContract(), snapshot(), "job_aaaaaaaaaaaa");
+  it("builds typed spawn args with plugin origin, hidden visibility and pluginMetadata", () => {
+    const contract = launchContract();
+    const built = spawnArgsFromContract(contract, snapshot(), "job_aaaaaaaaaaaa");
     expect(built.ok).toBe(true);
     if (!built.ok) return;
     expect(built.value.visibility).toBe("hidden");
-    // The worker reads every compiled layer in order, not the job brief alone.
+    expect(built.value.origin).toBe("plugin");
+    expect(built.value.originPluginId).toBe("agency");
+    expect(built.value.pluginMetadata).toEqual({
+      agencyLaunchId: contract.launchId,
+      agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      agencyJobId: "job_aaaaaaaaaaaa",
+    });
     const prompt = built.value.prompt;
-    const order = ["## Agency rules (agency)\na", "## Project (project)\npr", "## Department: process and scope (department)\nd", "## Your position and job description (agent)\nag", "## Job (job)\nJob brief for worker."];
-    expect(order.map((part) => prompt.indexOf(part)).every((at, index, all) => at >= 0 && (index === 0 || at > all[index - 1]))).toBe(true);
     // BB titles the hidden thread from the first line, so it names the job.
     expect(prompt.split("\n")[0]).toBe("AG-1: T");
+    expect(prompt).toContain(".agency/jobs/AG-1/TASK.md");
+    expect(prompt).not.toContain("## Agency rules (agency)");
+    expect(prompt).not.toContain("## Job (job)");
     expect(prompt).not.toContain("(platform)");
-    expect(prompt).not.toContain("(handoff)");
-    expect(built.value.isolatedSkillDelivery).toBe(true);
-    expect("originPluginId" in built.value).toBe(false);
+    expect(prompt).not.toContain("handoff none");
+    expect("isolatedSkillDelivery" in built.value).toBe(false);
+    expect("experimental_callerLaunchId" in built.value).toBe(false);
+    expect("skillIds" in built.value).toBe(false);
   });
 
   it("does not fill missing get host/path/project/provider from snapshot", async () => {
@@ -189,7 +147,7 @@ describe("isolated wiring", () => {
     const port = createIsolatedThreadVerifyPort(
       threadsApi(async () =>
         serverThread({
-          experimental_callerLaunchId: launchId,
+          launchId,
           host: null,
           environment: { id: "env_1", hostId: "", path: null },
           projectId: undefined,
@@ -213,13 +171,42 @@ describe("isolated wiring", () => {
     if (outcome.kind === "unavailable") expect(outcome.code).toBe("live_binding_incomplete");
   });
 
-  it("rejects foreign experimental_callerJobId", async () => {
+  it("rejects foreign pluginMetadata job id", async () => {
     const launchId = randomUUID();
     const port = createIsolatedThreadVerifyPort(
       threadsApi(async () =>
         serverThread({
-          experimental_callerLaunchId: launchId,
-          experimental_callerJobId: "job_foreignzzzz",
+          pluginMetadata: {
+            agencyLaunchId: launchId,
+            agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+            agencyJobId: "job_foreignzzzz",
+          },
+        }),
+      ),
+      true,
+    );
+    const outcome = await port.verifyConfirmedThread(
+      {
+        launchId,
+        attemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+        threadId: "thr_aaaaaaaa",
+        jobId: "job_aaaaaaaaaaaa",
+        snapshotId: "snp_aaaaaaaaaaaaaaaaaaaaaaaa",
+        digest: "d".repeat(64),
+      },
+      snapshot(),
+    );
+    expect(outcome.kind).toBe("rejected");
+    if (outcome.kind === "rejected") expect(outcome.code).toBe("caller_job_mismatch");
+  });
+
+  it("rejects a foreign agencyJobId", async () => {
+    const launchId = randomUUID();
+    const port = createIsolatedThreadVerifyPort(
+      threadsApi(async () =>
+        serverThread({
+          launchId,
+          jobId: "job_foreignzzzz",
         }),
       ),
       true,
@@ -242,7 +229,7 @@ describe("isolated wiring", () => {
   it("rejects model mismatch from actual get and confirms a complete server thread", async () => {
     const launchId = randomUUID();
     const bad = createIsolatedThreadVerifyPort(
-      threadsApi(async () => serverThread({ experimental_callerLaunchId: launchId, model: "other-model" })),
+      threadsApi(async () => serverThread({ launchId, model: "other-model" })),
       true,
     );
     const badOut = await bad.verifyConfirmedThread(
@@ -258,7 +245,7 @@ describe("isolated wiring", () => {
     );
     expect(badOut.kind).toBe("rejected");
     const okPort = createIsolatedThreadVerifyPort(
-      threadsApi(async () => serverThread({ experimental_callerLaunchId: launchId })),
+      threadsApi(async () => serverThread({ launchId })),
       true,
     );
     const okOut = await okPort.verifyConfirmedThread(

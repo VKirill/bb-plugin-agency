@@ -6,10 +6,11 @@ import { canCreateJob, failureNotice, openPersistedArtifact, persistAgentPatch, 
 import { bindingPlacementLabel } from "../src/app/data/persist-create";
 import { capabilityStatusLabel } from "../src/app/data/capability-catalog";
 import { mapAgents, mapDepartments, mapProjects } from "../src/app/data/view-models";
-import { agentDraftStale, isOwnProfileEcho, unsupportedAgentFieldChanges } from "../src/app/data/agent-profile-fields";
+import { agentDraftStale, isOwnProfileEcho, persistedAgentDirty, unsupportedAgentFieldChanges } from "../src/app/data/agent-profile-fields";
+import { AGENT_FALLBACK_LIMIT, addFallback, canAddFallback, fallbackProblems, moveFallback, removeFallback, replaceFallback } from "../src/app/data/agent-fallbacks";
 import { applyDraftsAfterSave, canLeaveAfterSave, commitDocumentSave } from "../src/app/data/document-save";
 import { assigneeChoiceOptions, assigneeFields, assigneesForDepartment, canConfirmPlacement, departmentsForBinding, JOB_CREATE_HINT, placementFields, sanitizeDepartmentId, selectedAgentId, selectedBindingId, selectedDepartmentId, UNASSIGNED_AGENT } from "../src/app/data/job-placement";
-import { productServerReason, PRODUCT_ASSIGNEE_REQUIRED, PRODUCT_HANDSHAKE_UNREADY } from "../src/app/data/product-reasons";
+import { productServerReason, PRODUCT_ASSIGNEE_REQUIRED, PRODUCT_LAUNCH_UNAVAILABLE } from "../src/app/data/product-reasons";
 import {
   applyRestoredSaveResult,
   commitRestoredDocumentSave,
@@ -35,7 +36,7 @@ import type { WorkspaceSnapshot } from "../src/app/data/snapshot";
 import type { Activity } from "../src/shared/contracts";
 import {
   LAUNCH_LIST_UNREGISTERED,
-  LAUNCH_HANDSHAKE_HINT,
+  LAUNCH_READINESS_HINT,
   completionNeverSucceeded,
   jobCanRequestLaunch,
   jobLaunchableState,
@@ -308,7 +309,7 @@ describe("domain RPC adapter", () => {
   });
 
   it("does not treat an unrecognized envelope as prepareLaunch success", () => {
-    const parsed = parseDomainResult({ handshakeReady: false, reason: "" });
+    const parsed = parseDomainResult({ launched: null, reason: "" });
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.failure.kind).toBe("transport");
   });
@@ -319,7 +320,7 @@ describe("workspace view models", () => {
     const jobs = mapJobs(snapshot);
     expect(jobs.map((job) => job.id)).toEqual(["AG-102"]);
     expect(jobs[0]?.agent).toBe("Анна");
-    expect(queueCounts(jobs, snapshot.counts).attention).toBe(1);
+    expect(queueCounts(jobs, snapshot.counts).attention).toBe(0);
     expect(countsMatchJobs(jobs, snapshot.counts)).toBe(true);
   });
 
@@ -460,6 +461,78 @@ describe("workspace view models", () => {
     expect(JSON.stringify(calls[0])).not.toMatch(/hostId|reasoningLevel|serviceTier|shell|delegate|customMcps/);
   });
 
+  it("saves the owner's reserve list in order and names a wrong row instead of dropping it", async () => {
+    const [current] = mapAgents(snapshot);
+    const calls: unknown[] = [];
+    const api = {
+      saveAgentProfile: async (input: unknown) => {
+        calls.push(input);
+        return { ok: true as const, value: { agent: snapshot.agents[0]!, version: snapshot.agentVersions[0]! } };
+      },
+      createPolicyVersion: async (input: { cliHostConstraints: { providerIds: string[] } }) => ({
+        ok: true as const,
+        value: { id: "pol_fallback1", ...input },
+      }),
+    };
+    const reserves = [
+      { providerId: "opencode", model: "gemini-3.8-flash", reasoningLevel: "medium" as const },
+      { providerId: "codex", model: "gpt-5.5", reasoningLevel: "high" as const },
+    ];
+    const withReserves = await persistAgentPatch(api as never, snapshot, current, { ...current, fallbackSelections: reserves });
+    expect(withReserves).toEqual({ ok: true });
+    expect(calls[0]).toMatchObject({
+      version: {
+        providerId: "codex",
+        model: "gpt-5.6",
+        fallbackModels: [
+          { providerId: "opencode", model: "gemini-3.8-flash", reasoningEffort: "medium" },
+          { providerId: "codex", model: "gpt-5.5", reasoningEffort: "high" },
+        ],
+      },
+    });
+    calls.length = 0;
+    const empty = await persistAgentPatch(api as never, snapshot, current, { ...current, role: "Редактор", fallbackSelections: [] });
+    expect(empty).toEqual({ ok: true });
+    expect(JSON.stringify(calls[0])).not.toMatch(/fallbackModels/);
+    calls.length = 0;
+    // A row equal to the primary is refused before the server is asked: the draft stays with the owner.
+    const sameAsPrimary = await persistAgentPatch(api as never, snapshot, current, {
+      ...current,
+      fallbackSelections: [reserves[0]!, { providerId: "codex", model: "gpt-5.6", reasoningLevel: "medium" }],
+    });
+    expect(sameAsPrimary.ok).toBe(false);
+    if (!sameAsPrimary.ok && sameAsPrimary.failure.kind === "domain") {
+      expect(sameAsPrimary.failure.error.code).toBe("invalid_command");
+      expect(sameAsPrimary.failure.error.message).toContain("2");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("edits the reserve draft: add up to the limit, reorder, remove, and a reorder is a change to save", () => {
+    const [current] = mapAgents(snapshot);
+    const primary = current.selection;
+    let list = addFallback([], primary);
+    expect(fallbackProblems(primary, list)).toEqual([{ index: 0, kind: "same_as_primary" }]);
+    list = replaceFallback(list, 0, { providerId: "opencode", model: "gemini-3.8-flash", reasoningLevel: "medium" });
+    list = replaceFallback(addFallback(list, primary), 1, { providerId: "codex", model: "gpt-5.5", reasoningLevel: "medium" });
+    expect(fallbackProblems(primary, list)).toEqual([]);
+    expect(fallbackProblems(primary, [...list, list[0]!])).toEqual([{ index: 2, kind: "repeated" }]);
+    expect(moveFallback(list, 1, -1).map((pick) => pick.model)).toEqual(["gpt-5.5", "gemini-3.8-flash"]);
+    expect(moveFallback(list, 0, -1)).toEqual(list);
+    expect(removeFallback(list, 0).map((pick) => pick.model)).toEqual(["gpt-5.5"]);
+    let full = list;
+    for (const model of ["m3", "m4", "m5"]) full = replaceFallback(addFallback(full, primary), full.length, { providerId: "opencode", model, reasoningLevel: "medium" });
+    expect(full).toHaveLength(AGENT_FALLBACK_LIMIT);
+    expect(canAddFallback(full)).toBe(false);
+
+    const saved = { ...current, fallbackSelections: list };
+    expect(persistedAgentDirty(current, saved)).toBe(true);
+    expect(persistedAgentDirty(saved, { ...saved, fallbackSelections: [...list] })).toBe(false);
+    expect(persistedAgentDirty(saved, { ...saved, fallbackSelections: moveFallback(list, 1, -1) })).toBe(true);
+    // The server echo of the very list we saved is ours: the draft is not reset by it.
+    expect(isOwnProfileEcho(saved, { ...saved, revision: (current.revision ?? 0) + 1 }, current)).toBe(true);
+  });
+
   it("keeps child placement on parent binding and department, not first catalog row", () => {
     expect(canCreateJob(snapshot, { bindingId: "bnd_project01", departmentId: "dep_editorial" })).toEqual({
       bindingId: "bnd_project01",
@@ -503,24 +576,18 @@ describe("workspace view models", () => {
     expect(other.find((item) => item.value === "agt_claude02")?.label).toContain("исполнитель");
     expect(productServerReason("job.assignedAgentId is required")).toBe(PRODUCT_ASSIGNEE_REQUIRED);
     expect(failureNotice({ kind: "domain", error: { code: "assignee_required", message: "job.assignedAgentId is required" } })).toBe(PRODUCT_ASSIGNEE_REQUIRED);
-    expect(productServerReason("GET /api/v1/system/experimental_thread-spawn-contract")).toBe(PRODUCT_HANDSHAKE_UNREADY);
-    expect(LAUNCH_HANDSHAKE_HINT).not.toMatch(/\/api\/|Engines|SDK/);
+    expect(LAUNCH_READINESS_HINT).not.toMatch(/\/api\/|Engines|SDK/);
     expect(launchReadinessNotice({
-      handshakeReady: false,
       executionAvailable: false,
       isolationReady: false,
-      isolatedSpawnFields: false,
-      sdkTypedSpawnReady: false,
       assignedProvider: null,
       launchAllowedForAssigned: false,
-      reason: "typed runtime capability handshake is not proven; TypeScript types and instance names are not evidence",
-    }, null)).toBe(PRODUCT_HANDSHAKE_UNREADY);
+      reasonCode: "launch_not_authorized",
+      reason: "getIsolationReadiness without jobId does not authorize a launch",
+    }, null)).toBe(PRODUCT_LAUNCH_UNAVAILABLE);
     expect(launchReadinessNotice({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       assignedProvider: { jobId: "job_a", agentId: "agt_a", agentVersionId: "agv_a", providerId: "claude-code", source: "live_assigned_agent_version" },
       launchAllowedForAssigned: false,
       reasonCode: "launch_not_authorized",
@@ -1036,11 +1103,8 @@ describe("AGY-8 live launch UI", () => {
     const tokenB = gate.begin(jobLaunchRefreshKey(after));
     const applyA = pendingA.then((value) => (gate.accept(tokenA) ? value : null));
     resolveA({
-      handshakeReady: false,
       executionAvailable: false,
       isolationReady: false,
-      isolatedSpawnFields: false,
-      sdkTypedSpawnReady: false,
       assignedProvider: null,
       launchAllowedForAssigned: false,
       reason: "job.assignedAgentId is required",
@@ -1050,7 +1114,7 @@ describe("AGY-8 live launch UI", () => {
     expect(gate.accept(tokenB)).toBe(true);
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       hasLaunchId: false,
     })).toBe("prepare");
@@ -1094,7 +1158,7 @@ describe("AGY-8 live launch UI", () => {
     })).toBe(true);
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       attemptState: "unknown",
       launchedKind: "unknown",
@@ -1102,7 +1166,7 @@ describe("AGY-8 live launch UI", () => {
     })).toBe("reconcile");
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       attemptState: "unknown",
       launchedKind: "unknown",
@@ -1140,7 +1204,7 @@ describe("AGY-8 live launch UI", () => {
     expect(listed?.[0]?.attempt.reportedState).toBe("future_state");
     const blocked = {
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       hasLaunchId: true,
     } as const;
@@ -1179,7 +1243,7 @@ describe("AGY-8 live launch UI", () => {
     expect(launchStateLabel("succeeded")).not.toBe("succeeded");
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       attemptState: "awaiting_review",
       hasLaunchId: true,
@@ -1188,7 +1252,7 @@ describe("AGY-8 live launch UI", () => {
     expect(mustNotRespawn({ attempt: { state: "awaiting_review" } })).toBe(true);
     const action = nextLaunchAction({
       jobReady: true,
-      handshakeReady: true,
+      launchReady: true,
       lastPrepare: null,
       attemptState: parsed!.state,
       hasLaunchId: true,
@@ -1214,47 +1278,36 @@ describe("AGY-8 live launch UI", () => {
     expect(parsed?.threadStatus).toBe("idle");
   });
 
-  it("parses prepareLaunch and keeps launched null when handshake is unproven", () => {
+  it("parses prepareLaunch and blocks a repeat when nothing was launched", () => {
     const parsed = parsePrepareLaunch({
-      handshakeReady: false,
       snapshotId: "snp_1",
       digest: "d".repeat(64),
       attemptId: "att_1",
       launched: null,
-      reason: "runtime handshake is not proven; spawn is not called",
+      reason: "spawn is not called",
     });
-    expect(parsed?.handshakeReady).toBe(false);
     expect(parsed?.launched).toBeNull();
-    expect(nextLaunchAction({ jobReady: true, handshakeReady: true, lastPrepare: parsed, hasLaunchId: false })).toBe("blocked");
+    expect(nextLaunchAction({ jobReady: true, launchReady: true, lastPrepare: parsed, hasLaunchId: false })).toBe("blocked");
   });
 
-  it("does not enable launch from instance name when handshake bits are false", () => {
+  it("does not enable launch when readiness says execution is unavailable", () => {
     const readiness = parseIsolationReadiness({
-      handshakeReady: false,
       executionAvailable: false,
       isolationReady: false,
-      isolatedSpawnFields: false,
-      sdkTypedSpawnReady: false,
-      reason: "runtime handshake is not proven; spawn is not called",
+      reason: "spawn is not called",
     });
     expect(canLaunchFromReadiness(readiness)).toBe(false);
     expect(readinessAllowsProvider(readiness, "cursor")).toBe(false);
     expect(readinessAllowsProvider({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       assignedProvider: null,
       launchAllowedForAssigned: false,
-      reason: "GET proven",
+      reason: "native threads.spawn",
     }, "cursor")).toBe(false);
     expect(readinessAllowsProvider({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       assignedProvider: {
         jobId: "job_offer0001",
         agentId: "agt_writer01",
@@ -1263,11 +1316,11 @@ describe("AGY-8 live launch UI", () => {
         source: "live_assigned_agent_version",
       },
       launchAllowedForAssigned: true,
-      reason: "GET proven",
+      reason: "native threads.spawn",
     }, "claude-code")).toBe(true);
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: canLaunchFromReadiness(readiness),
+      launchReady: canLaunchFromReadiness(readiness),
       lastPrepare: null,
       hasLaunchId: false,
     })).toBe("blocked");
@@ -1275,11 +1328,8 @@ describe("AGY-8 live launch UI", () => {
 
   it("launches any assigned provider the server allows, and only that provider", () => {
     const missingField = parseIsolationReadiness({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       reason: "ready",
     });
     expect(missingField).toBeNull();
@@ -1293,11 +1343,8 @@ describe("AGY-8 live launch UI", () => {
       source: "live_assigned_agent_version" as const,
     };
     const readyCodex = parseIsolationReadiness({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       assignedProvider: assignedCodex,
       launchAllowedForAssigned: true,
       reasonCode: "ok",
@@ -1309,11 +1356,8 @@ describe("AGY-8 live launch UI", () => {
     expect(readinessAllowsProvider(readyCodex, "claude-code")).toBe(false);
     expect(launchAssigneeProviderId(readyCodex)).toBe("codex");
     const unavailable = parseIsolationReadiness({
-      handshakeReady: true,
       executionAvailable: true,
       isolationReady: true,
-      isolatedSpawnFields: true,
-      sdkTypedSpawnReady: true,
       assignedProvider: assignedCodex,
       launchAllowedForAssigned: false,
       reasonCode: "launch_not_authorized",
@@ -1324,7 +1368,7 @@ describe("AGY-8 live launch UI", () => {
     expect(launchAssigneeProviderId(null)).toBeNull();
     expect(nextLaunchAction({
       jobReady: true,
-      handshakeReady: jobLaunchAllowedFromReadiness(unavailable),
+      launchReady: jobLaunchAllowedFromReadiness(unavailable),
       lastPrepare: null,
       hasLaunchId: false,
     })).toBe("blocked");

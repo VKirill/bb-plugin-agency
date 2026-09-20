@@ -29,6 +29,11 @@ import { DECISION_SETTINGS_MIGRATION } from "../decisions/settings.js";
 import { SKILL_GRANT_MIGRATION, SKILL_POOL_MIGRATION } from "../organization/skill-pool.js";
 import { PASSPORT_MIGRATION, PASSPORT_VERSION_MIGRATION } from "../projects/passport.js";
 import { PASSPORT_SETTINGS_MIGRATION } from "../projects/passport-settings.js";
+import { SESSION_POLICY_MIGRATION } from "../delegation/session-policy.js";
+import { CLIENT_BOUNCE_MIGRATION } from "../runtime/client-bounce/service.js";
+import { AGENT_FALLBACK_LIST_MIGRATION, AGENT_FALLBACK_MIGRATION } from "../runtime/agent-fallback.js";
+import { DECISION_LOG_MIGRATION } from "../decisions/log.js";
+import { IDEAS_MIGRATION } from "../ideas/store.js";
 import type { SqlDatabase } from "./sql";
 
 // Append-only once released. Add statements; never rewrite a shipped migration.
@@ -659,6 +664,48 @@ CREATE INDEX agency_membership_agent_idx ON agency_membership(agent_id);`,
   PASSPORT_MIGRATION,
   PASSPORT_VERSION_MIGRATION,
   PASSPORT_SETTINGS_MIGRATION,
+  SESSION_POLICY_MIGRATION,
+  // SQLite cannot widen CHECK: rebuild so knowledge can live on a project section.
+  `CREATE TABLE agency_knowledge_next (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    source TEXT NOT NULL,
+    scope_kind TEXT NOT NULL CHECK(scope_kind IN ('agency', 'department', 'project', 'section')),
+    scope_id TEXT,
+    parent_binding_id TEXT,
+    status TEXT NOT NULL CHECK(status IN ('proposal', 'accepted', 'archived')),
+    proposed_by TEXT,
+    revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    summary TEXT,
+    kind TEXT,
+    importance INTEGER,
+    pinned INTEGER,
+    write_reason TEXT,
+    read_count INTEGER,
+    last_read_at TEXT
+  );
+INSERT INTO agency_knowledge_next (
+    id, title, body, source, scope_kind, scope_id, parent_binding_id, status, proposed_by,
+    revision, created_at, updated_at, summary, kind, importance, pinned, write_reason,
+    read_count, last_read_at
+  )
+  SELECT
+    id, title, body, source, scope_kind, scope_id, NULL, status, proposed_by,
+    revision, created_at, updated_at, summary, kind, importance, pinned, write_reason,
+    read_count, last_read_at
+  FROM agency_knowledge;
+DROP TABLE agency_knowledge;
+ALTER TABLE agency_knowledge_next RENAME TO agency_knowledge;`,
+  CLIENT_BOUNCE_MIGRATION,
+  `ALTER TABLE agency_job ADD COLUMN section_id TEXT`,
+  AGENT_FALLBACK_MIGRATION,
+  AGENT_FALLBACK_LIST_MIGRATION,
+  `ALTER TABLE agency_job ADD COLUMN work_kind TEXT`,
+  DECISION_LOG_MIGRATION,
+  IDEAS_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

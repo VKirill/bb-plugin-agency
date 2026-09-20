@@ -19,8 +19,55 @@ export const LAUNCH_QUEUE_MIGRATION = `CREATE TABLE agency_launch_queue (
 
 export const LAUNCH_QUEUE_SWEEP_MS = 15_000;
 
-/** Refusals that mean «wait», not «stop». */
-export const WAIT_CODES = new Set(["concurrency_limit_reached", "budget_exhausted", "dependencies_open", "owns_overlap"]);
+/** Refusals that mean «wait», not «stop»: keep trying until the limit clears or the skill pin is fresh. */
+export const WAIT_CODES = new Set([
+  "concurrency_limit_reached",
+  "budget_exhausted",
+  "dependencies_open",
+  "owns_overlap",
+  "catalog_skill_hash_mismatch",
+]);
+
+/** Maps prepareLaunch «ok but not spawned» to a transient queue refusal. */
+export function refusalIfLaunchDidNotStart(result: {
+  ok: true;
+  value: { launched: unknown; reason: string; reasonCode?: string };
+} | { ok: false; error: { code: string; message: string } }): { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } } {
+  if (!result.ok) return result;
+  if (result.value.launched) return { ok: true, value: result.value };
+  return { ok: false, error: { code: "launch_not_started", message: result.value.reason } };
+}
+
+/** Assigned backlog jobs with no attempt — create already handed them to a person; they belong in the launch queue. */
+export function listAssignedBacklogJobIds(db: SqlDatabase): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT id FROM agency_job
+         WHERE state = 'backlog' AND assigned_agent_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM agency_run_attempt a WHERE a.job_id = agency_job.id)`,
+      )
+      .all() as { id: string }[]
+  ).map((row) => row.id);
+}
+
+/** Assigned jobs the queue dropped while they still have no attempt — put them back; the owner does not relaunch by hand. */
+export function reopenDroppedAssignedJobs(db: SqlDatabase, now: string): string[] {
+  const rows = (
+    db
+      .prepare(
+        `SELECT q.job_id AS id FROM agency_launch_queue q
+         JOIN agency_job j ON j.id = q.job_id
+         WHERE q.dropped_at IS NOT NULL
+           AND j.state IN ('backlog', 'queued')
+           AND j.assigned_agent_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id)`,
+      )
+      .all() as { id: string }[]
+  ).map((row) => row.id);
+  for (const jobId of rows) enqueueLaunch(db, jobId, now);
+  return rows;
+}
 
 /**
  * Refusals that pass: a machine that blinked, a provider that answered 502, a launch that
@@ -77,7 +124,8 @@ export function listLaunchQueue(db: SqlDatabase): QueueEntry[] {
 export type LaunchQueuePorts = {
   db: SqlDatabase;
   getJob: (jobId: string) => Job | undefined;
-  checkLimits: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
+  /** `pendingJobIds`: jobs this sweep is launching right now — they hold their slots and files already. */
+  checkLimits: (job: Job, pendingJobIds: readonly string[]) => Promise<DomainResult<{ warnings: string[] }>>;
   /** Prepares and launches the job with its current revision. */
   launch: (job: Job, requestedAt: string) => Promise<DomainResult<unknown>>;
   comment: (job: Job, text: string) => boolean;
@@ -126,36 +174,38 @@ function setReason(db: SqlDatabase, jobId: string, reason: string, now: string):
   db.prepare(`UPDATE agency_launch_queue SET waiting_reason = ?, updated_at = ? WHERE job_id = ? AND COALESCE(waiting_reason, '') != ?`).run(reason, now, jobId, reason);
 }
 
+/**
+ * One sweep starts every job that may start now, side by side: a job does not wait for another
+ * job's thread to spawn. Jobs are judged in queue order, and a job already being launched by this
+ * sweep holds its slot and its files for the ones after it — two jobs never take one slot or one
+ * file, and the higher priority gets it.
+ */
 export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launched: number; removed: number }> {
   const en = agencyLanguage() === "en";
   let launched = 0;
   let removed = 0;
-  for (const entry of listLaunchQueue(ports.db)) {
-    const job = ports.getJob(entry.jobId);
-    // Launched by hand, canceled or moved on: the queue has nothing to do.
-    if (!job || (job.state !== "backlog" && job.state !== "queued")) {
-      dequeueLaunch(ports.db, entry.jobId);
-      removed += 1;
-      continue;
+  const pending = new Set<string>();
+  const inFlight: Promise<void>[] = [];
+
+  const settle = async (job: Job, entry: QueueEntry): Promise<void> => {
+    let result: DomainResult<unknown>;
+    try {
+      result = await ports.launch(job, entry.requestedAt);
+    } catch (error) {
+      result = { ok: false, error: { code: "launch_not_started", message: error instanceof Error ? error.message : String(error) } };
+    } finally {
+      pending.delete(job.id);
     }
-    const limits = await ports.checkLimits(job);
-    if (!limits.ok) {
-      if (WAIT_CODES.has(limits.error.code)) {
-        setReason(ports.db, job.id, limits.error.message, ports.now());
-        continue;
-      }
-    }
-    const result = await ports.launch(job, entry.requestedAt);
     if (result.ok) {
       dequeueLaunch(ports.db, job.id);
       ports.comment(job, en ? "Launched from the queue: what it waited for is ready." : "Запущена из очереди: то, чего она ждала, готово.");
       launched += 1;
-      continue;
+      return;
     }
     if (WAIT_CODES.has(result.error.code)) {
       clearFailure(ports.db, job.id);
       setReason(ports.db, job.id, result.error.message, ports.now());
-      continue;
+      return;
     }
     const now = ports.now();
     if (transient(result.error)) {
@@ -171,7 +221,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
               : `${job.key} ждёт в очереди запуска дольше ${Math.round(age / 60_000)} мин: ${result.error.message}. Агентство продолжает попытки.`,
           });
         }
-        continue;
+        return;
       }
     }
     removed += 1;
@@ -181,6 +231,24 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     dropFromQueue(ports.db, job.id, result.error.message, now);
     ports.comment(job, text);
     ports.notifyOwner?.({ jobId: job.id, dedupeKey: `launch-queue-left:${job.id}:${entry.requestedAt}`, text: `${job.key}: ${text}` });
+  };
+
+  for (const entry of listLaunchQueue(ports.db)) {
+    const job = ports.getJob(entry.jobId);
+    // Launched by hand, canceled or moved on: the queue has nothing to do.
+    if (!job || (job.state !== "backlog" && job.state !== "queued")) {
+      dequeueLaunch(ports.db, entry.jobId);
+      removed += 1;
+      continue;
+    }
+    const limits = await ports.checkLimits(job, [...pending]);
+    if (!limits.ok && WAIT_CODES.has(limits.error.code)) {
+      setReason(ports.db, job.id, limits.error.message, ports.now());
+      continue;
+    }
+    pending.add(job.id);
+    inFlight.push(settle(job, entry));
   }
+  await Promise.all(inFlight);
   return { launched, removed };
 }

@@ -23,6 +23,14 @@ export type AgencyCliDeps = {
   dispatch: (operation: CliOperation, input: unknown) => Promise<unknown>;
   /** Trusted PluginCliContext.threadId from register run(argv, ctx). Not a payload field. */
   cliThreadId?: string | null;
+  /** Plugin CLI abort when the HTTP request disconnects. */
+  cliSignal?: AbortSignal;
+  /** Native composer choice card for waiting_input in this origin chat. */
+  askOwner?: (input: {
+    threadId: string | null;
+    overlay?: unknown;
+    signal?: AbortSignal;
+  }) => Promise<AgencyCliResult>;
   /** Production: bindJobCommentHandler in register.ts. Tests may omit. */
   jobComment?: (
     input: unknown,
@@ -39,6 +47,7 @@ const WRITE_OPERATIONS = new Set<CliRoutedOperation>([
   "addMembership",
   "removeMembership",
   "createProjectBinding",
+  "saveSessionPolicy",
   "linkDepartment",
   "unlinkDepartment",
   "archiveProjectBinding",
@@ -48,6 +57,9 @@ const WRITE_OPERATIONS = new Set<CliRoutedOperation>([
   "saveWorkRules",
   "saveTemplate",
   "saveKnowledge",
+  "saveIdea",
+  "setIdeaStatus",
+  "spawnIdeaThread",
   "saveDecisionSettings",
   "setSkillPool",
   "setKnowledgeStatus",
@@ -164,6 +176,16 @@ export async function runAgencyCli(deps: AgencyCliDeps, argv: string[]): Promise
     } catch (error) {
       return { exitCode: 1, stderr: error instanceof Error ? error.message : String(error), stdout: "" };
     }
+  }
+
+  if (command === "job" && rest[0] === "ask-owner") {
+    if (rest.length !== 1) return cliFailure("invalid_command", "job ask-owner takes no extra tokens");
+    if (!deps.askOwner) {
+      return cliFailure("not_implemented", "job ask-owner requires askOwner port");
+    }
+    const loaded = await loadCliPayload(flags);
+    if (!loaded.ok) return cliFailure("invalid_command", loaded.message);
+    return deps.askOwner({ threadId: deps.cliThreadId ?? null, overlay: loaded.value, signal: deps.cliSignal });
   }
 
   if (command === "call" && rest.length !== 1) {

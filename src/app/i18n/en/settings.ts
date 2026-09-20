@@ -421,6 +421,28 @@ export const EN_SETTINGS: Record<string, string> = {
     "The test did not run: the method is unavailable.",
   "Загружаем настройки оценщика…":
     "Loading the decision model settings…",
+  "Журнал":
+    "Log",
+  "Каждое обращение к точке решения: исход, ответы с уверенностью и время. Брифа и ключей в журнале нет. Молчание тоже записывается.":
+    "Every call to a decision point: the outcome, answers with confidence, and time. Briefs and keys are not in the log. Silence is recorded too.",
+  "Пока пусто: оценщика ещё не звали.":
+    "Empty so far: the decision model has not been asked yet.",
+  "Проверить точки":
+    "Probe the points",
+  "Что делает проверка точек":
+    "What the point probe does",
+  "Агентство спрашивает оценщика на учебном брифе: оценка на входе, подсказка к запуску, мусорная сдача и нормальная сдача. Сотрудник не запускается. Результат попадает в журнал.":
+    "The Agency asks the decision model on a sample brief: intake, a launch briefing, a junk hand-in and a solid hand-in. No employee is launched. The result goes into the log.",
+  "Спрашиваем точки…":
+    "Asking the points…",
+  "Проверка точек не прошла: метод недоступен.":
+    "The point probe did not run: the method is unavailable.",
+  "молчание":
+    "silence",
+  "нет ответа":
+    "no answer",
+  "Вход: {intake}. Подсказка: {briefing}. Мусор: {junk}. Нормальная сдача: {solid}.":
+    "Intake: {intake}. Briefing: {briefing}. Junk: {junk}. Solid hand-in: {solid}.",
   "Плагин Env Catalog не отвечает: выберите ключ из окружения машины или включите плагин.":
     "The Env Catalog plugin is not answering: pick a key from the machine environment or enable the plugin.",
   "Переменной с таким именем нет: выберите другую или вставьте ключ ниже.":
@@ -431,4 +453,20 @@ export const EN_SETTINGS: Record<string, string> = {
     "Memory gatekeeper",
   "Перед записью урока в память отдела: хранить ли, какой это вид, нет ли в тексте секрета или временного статуса, не повтор ли это. Отказ и находка секрета останавливают запись, вид и важность приходят предложением.":
     "Before a lesson enters the department memory: whether to keep it, what kind it is, whether the text holds a secret or a status of the day, whether it repeats an existing record. A refusal or a found secret stops the write; kind and importance arrive as a suggestion.",
+  "Подсказка к запуску":
+    "Launch briefing",
+  "Перед запуском: какие методические навыки сотрудника поднять, что открыть из библиотеки отдела и какие записи памяти отнести к делу. Молчание и пустой список пишутся в журнал. Бриф и регламент выше подсказки.":
+    "Before a launch: which of the employee's method skills to raise, what to open from the department library, and which memory records belong to the job. Silence and an empty list are written to the log. The brief and the charter stay above the hint.",
+  "Привратник паспорта":
+    "Passport gatekeeper",
+  "Перед тем как новая редакция паспорта проекта заменит прежнюю: нет ли в ней секрета, не состояние ли это дня и отличается ли она от прежней по существу. Секрет и состояние дня отменяют замену, совпадение с прежней — просто пропускает её.":
+    "Before a new project passport edition replaces the previous one: whether it holds a secret, whether it is a status of the day, and whether it differs from the previous edition in substance. A secret or a status of the day cancels the replace; a match with the previous edition simply skips it.",
+  "Оценка на входе":
+    "Intake assessment",
+  "Перед запуском руководителя: размер S/M/L, риск и решение accept/split/clarify/return. Смешанный продукт — split, не return. Пишет тот же комментарий с данными, что и руководитель. Это предложение: подзадачи не создаются, возврат и уточнение сами не блокируют. Ниже порога — молчание, оценку пишет руководитель.":
+    "Before a lead launches: size S/M/L, risk and accept/split/clarify/return. A mixed product is split, not return. Writes the same data comment a lead would. This is a proposal: it does not create subtasks and does not block on return or clarify. Below the threshold — silence, and the lead writes the assessment.",
+  "Привратник сдачи":
+    "Hand-in gatekeeper",
+  "Когда исполнитель сдаёт версию: выглядит ли сдача пустой или мимо брифа. Уверенный мусор возвращается тому же исполнителю в ту же сессию. Принятие независимую проверку не пропускает: неоднозначное — молчание, дальше обычный конвейер.":
+    "When an executor hands in a version: whether the hand-in looks empty or off-brief. Confident junk goes back to the same executor in the same session. An accept never skips independent review: an ambiguous answer is silence, and the conveyor continues as usual.",
 };

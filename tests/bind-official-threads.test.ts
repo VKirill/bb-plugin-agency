@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bindOfficialThreads } from "../src/server/runtime/isolated-sdk/bind-official-threads";
 import {
-  OFFICIAL_LIST_HAS_CALLER_LAUNCH,
-  OFFICIAL_SPAWN_HAS_CALLER_LAUNCH,
-  officialSdkAllowsIsolatedSpawn,
+  OFFICIAL_SPAWN_HAS_REASONING_LEVEL,
 } from "../src/server/runtime/isolated-sdk/sdk-isolation-contract";
 import type { IsolatedThreadSpawnArgs } from "../src/server/runtime/isolated-sdk/sdk-isolation-contract";
 
@@ -18,23 +16,23 @@ function spawnArgs(): IsolatedThreadSpawnArgs {
       hostId: "host_mini",
       workspace: { type: "unmanaged", path: "/tmp/agy-bind" },
     },
-    isolatedSkillDelivery: true,
-    skillIds: ["skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff"],
+    origin: "plugin",
+    originPluginId: "agency",
     visibility: "hidden",
-    experimental_callerLaunchId: "11111111-1111-4111-8111-111111111111",
-    experimental_callerAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
-    experimental_callerJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    pluginMetadata: {
+      agencyLaunchId: "11111111-1111-4111-8111-111111111111",
+      agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      agencyJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    },
   };
 }
 
 describe("bindOfficialThreads typed pin", () => {
-  it("compile pin exposes caller launch on spawn and list", () => {
-    expect(OFFICIAL_SPAWN_HAS_CALLER_LAUNCH).toBe(true);
-    expect(OFFICIAL_LIST_HAS_CALLER_LAUNCH).toBe(true);
-    expect(officialSdkAllowsIsolatedSpawn()).toBe(true);
+  it("compile pin: the public SDK spawn carries reasoningLevel", () => {
+    expect(OFFICIAL_SPAWN_HAS_REASONING_LEVEL).toBe(true);
   });
 
-  it("calls threads.spawn and list with experimental_caller fields and no extra keys", async () => {
+  it("calls threads.spawn and list with public plugin origin fields and no experimental keys", async () => {
     const spawned: unknown[] = [];
     const listed: unknown[] = [];
     const threads = {
@@ -47,7 +45,14 @@ describe("bindOfficialThreads typed pin", () => {
       },
       async list(args: unknown) {
         listed.push(args);
-        return { threads: [{ id: "thr_bound01", experimental_callerLaunchId: "11111111-1111-4111-8111-111111111111" }] };
+        return {
+          threads: [
+            {
+              id: "thr_bound01",
+              pluginMetadata: { agencyLaunchId: "11111111-1111-4111-8111-111111111111" },
+            },
+          ],
+        };
       },
     };
     const bound = bindOfficialThreads(threads as never);
@@ -55,11 +60,17 @@ describe("bindOfficialThreads typed pin", () => {
     expect(created.id).toBe("thr_bound01");
     expect(spawned).toHaveLength(1);
     const first = spawned[0] as Record<string, unknown>;
-    expect(first.experimental_callerLaunchId).toBe("11111111-1111-4111-8111-111111111111");
-    expect(first.experimental_callerAttemptId).toBe("run_aaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(first.experimental_callerJobId).toBe("job_aaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(first.isolatedSkillDelivery).toBe(true);
+    expect(first.origin).toBe("plugin");
+    expect(first.originPluginId).toBe("agency");
     expect(first.visibility).toBe("hidden");
+    expect(first.pluginMetadata).toEqual({
+      agencyLaunchId: "11111111-1111-4111-8111-111111111111",
+      agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      agencyJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+    expect(first.experimental_callerLaunchId).toBeUndefined();
+    expect(first.isolatedSkillDelivery).toBeUndefined();
+    expect(first.skillIds).toBeUndefined();
     expect(first.prompt).toBe("Собрать карточку.");
     expect(first.providerId).toBe("claude-code");
     expect(first.model).toBe("sonnet");
@@ -70,15 +81,14 @@ describe("bindOfficialThreads typed pin", () => {
     });
 
     const rows = await bound.list({
-      experimental_callerLaunchId: "11111111-1111-4111-8111-111111111111",
       includeHidden: true,
     });
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.experimental_callerLaunchId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(rows[0]?.pluginMetadata?.agencyLaunchId).toBe("11111111-1111-4111-8111-111111111111");
     expect(listed).toEqual([
       {
-        experimental_callerLaunchId: "11111111-1111-4111-8111-111111111111",
         includeHidden: true,
+        originPluginId: "agency",
       },
     ]);
   });

@@ -59,17 +59,27 @@ function scopeLabel(scope: LimitScope, en: boolean): string {
   return en ? `employee ${scope.name}` : `сотрудника ${scope.name}`;
 }
 
-/** Attempts holding a launch slot in a scope; the job being launched is not counted against itself. */
-export function liveLaunchCount(db: SqlDatabase, scope: LimitScope, excludeJobId = ""): number {
+/**
+ * Attempts holding a launch slot in a scope; the job being launched is not counted against itself.
+ * `pendingJobIds` are jobs the queue is launching right now: each holds a slot even before its
+ * attempt is reserved, and is counted once when the attempt already exists.
+ */
+export function liveLaunchCount(db: SqlDatabase, scope: LimitScope, excludeJobId = "", pendingJobIds: readonly string[] = []): number {
   const states = SLOT_ATTEMPT_STATES.map(() => "?").join(", ");
-  const base = `SELECT COUNT(*) AS n FROM agency_run_attempt a JOIN agency_job j ON j.id = a.job_id WHERE a.state IN (${states}) AND a.job_id != ?`;
-  const row =
-    scope.kind === "agency"
-      ? db.prepare(base).get(...SLOT_ATTEMPT_STATES, excludeJobId)
-      : scope.kind === "department"
-        ? db.prepare(`${base} AND j.department_id = ?`).get(...SLOT_ATTEMPT_STATES, excludeJobId, scope.id)
-        : db.prepare(`${base} AND j.assigned_agent_id = ?`).get(...SLOT_ATTEMPT_STATES, excludeJobId, scope.id);
-  return (row as { n: number }).n;
+  const scopeSql = scope.kind === "agency" ? "" : scope.kind === "department" ? " AND j.department_id = ?" : " AND j.assigned_agent_id = ?";
+  const scopeArgs = scope.kind === "agency" ? [] : [scope.id];
+  const live = db
+    .prepare(`SELECT COUNT(*) AS n FROM agency_run_attempt a JOIN agency_job j ON j.id = a.job_id WHERE a.state IN (${states}) AND a.job_id != ?${scopeSql}`)
+    .get(...SLOT_ATTEMPT_STATES, excludeJobId, ...scopeArgs) as { n: number };
+  if (!pendingJobIds.length) return live.n;
+  const pending = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM agency_job j
+       WHERE j.id IN (${pendingJobIds.map(() => "?").join(", ")}) AND j.id != ?${scopeSql}
+         AND NOT EXISTS (SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id AND a.state IN (${states}))`,
+    )
+    .get(...pendingJobIds, excludeJobId, ...scopeArgs, ...SLOT_ATTEMPT_STATES) as { n: number };
+  return live.n + pending.n;
 }
 
 function limitsOf(db: SqlDatabase, scope: LimitScope, job: Pick<Job, "departmentId">) {
@@ -108,7 +118,11 @@ async function budgetOf(deps: LimitDeps, scope: LimitScope, job: Pick<Job, "depa
  * the agency, the job's department and its employee. The strictest wins. A
  * refusal names the limit, the numbers and where to change it.
  */
-export async function checkLaunchLimits(deps: LimitDeps, job: Pick<Job, "id" | "departmentId" | "assignedAgentId">): Promise<DomainResult<LaunchLimitCheck>> {
+export async function checkLaunchLimits(
+  deps: LimitDeps,
+  job: Pick<Job, "id" | "departmentId" | "assignedAgentId">,
+  pendingJobIds: readonly string[] = [],
+): Promise<DomainResult<LaunchLimitCheck>> {
   const en = agencyLanguage() === "en";
   const now = deps.now?.() ?? new Date();
   const monthStart = monthStartUtc(now);
@@ -116,7 +130,7 @@ export async function checkLaunchLimits(deps: LimitDeps, job: Pick<Job, "id" | "
   for (const scope of scopesForJob(deps.db, job)) {
     const limits = limitsOf(deps.db, scope, job);
     if (limits.concurrencyLimit !== null) {
-      const live = liveLaunchCount(deps.db, scope, job.id);
+      const live = liveLaunchCount(deps.db, scope, job.id, pendingJobIds);
       if (live >= limits.concurrencyLimit) {
         return fail(
           "concurrency_limit_reached",

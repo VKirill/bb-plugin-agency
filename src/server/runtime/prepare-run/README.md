@@ -20,7 +20,7 @@ path-install Agency не reload. Установленный `node_modules` / pac
 Только `{ requestId, jobId, expectedRevision }`.
 
 Не public: `applicable`, `trustedSources`, catalog roles, attestation,
-readiness/handshake. Их держит `VerifiedPrepareConfig` на сервере.
+readiness. Их держит `VerifiedPrepareConfig` на сервере.
 
 `trustedSources` **выводит** сервер: `sourceId=binding` = live
 `ProjectBinding.hostId` + `canonicalRoot`. Parent — только явный
@@ -49,8 +49,8 @@ Caller does not send `hostId` / `canonicalRoot`. Prepare reads persisted pins on
 published ≠ accepted; `acceptedArtifacts` stays empty until an acceptance row matches the pin.
 `parentJobId` is not a grant.
 
-## Public SDK caller names
+## Launch identity
 
-`experimental_callerLaunchId` / `experimental_callerAttemptId` /
-`experimental_callerJobId`. Internal `launchContract.launchId` не меняется.
+`pluginMetadata.agencyLaunchId` / `agencyAttemptId` / `agencyJobId` на скрытом
+треде плюс база Агентства. Internal `launchContract.launchId` не меняется.
 Isolated adapter — отдельная копия Agency, не этот path-install package.

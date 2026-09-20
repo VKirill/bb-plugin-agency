@@ -23,6 +23,7 @@ export const EN_DATA: Record<string, string> = {
   "Ждёт уточнения вводных": "Waiting for details",
   "Ждёт вашего ответа": "Waiting for your reply",
   "Ждёт вашего решения": "Waiting for your decision",
+  "На проверке: линия закроет станцию сама": "In review: the line will close the station itself",
   "Исполнитель работает": "Executor is working",
   "В очереди на запуск": "Queued to launch",
   "Не передана в работу": "Not yet handed off",
@@ -96,8 +97,8 @@ export const EN_DATA: Record<string, string> = {
   "остались строки шаблона: {lines}": "template lines still in place: {lines}",
 
   // agent-profile-fields.ts
-  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, CLI, модель, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.":
-    "Saving creates a new profile version: name, job title, instructions, CLI, model, reasoning level, fast mode and skills. Runs already underway keep the previous version.",
+  "Сохранение создаёт новую версию профиля: имя, должность, инструкция, основная CLI и модель, запасные модели, уровень рассуждения, быстрый режим и навыки. Идущие запуски работают по прежней версии.":
+    "Saving creates a new profile version: name, job title, instructions, primary CLI and model, reserve models, reasoning level, fast mode and skills. Runs already underway keep the previous version.",
   "Отдел задаётся в составе отдела, в версии профиля не хранится.":
     "The department is set from the department's roster; it isn't stored in the profile version.",
   "Машина в версии профиля не хранится. Запуск идёт в окружении проекта задачи.":
@@ -183,8 +184,8 @@ export const EN_DATA: Record<string, string> = {
     "The executor is waiting on an answer: reply in the job card and the status will change itself.",
   "Этот переход не делается перетаскиванием. Нужны проверка результата, приёмка версии или ответ на вопрос.":
     "This move isn't made by dragging. It needs a result review, a version acceptance, or an answer to a question.",
-  "«Готово» ставится приёмкой результата: откройте задачу на проверке и нажмите «Принять результат».":
-    "“Done” is set by accepting the result: open the job under review and click “Accept result”.",
+  "«Готово» ставит конвейер приёмкой текущей версии, не перетаскиванием.":
+    "“Done” is set by the conveyor accepting the current version, not by dragging.",
   "Выберите версию результата, которую принимаете.": "Choose the result version you're accepting.",
   "У задачи несколько версий результата. Выберите, какую принимаете.":
     "The job has several result versions. Choose which one you're accepting.",
@@ -222,8 +223,8 @@ export const EN_DATA: Record<string, string> = {
     "The launch RPC isn't registered on this instance yet. Launch rows aren't invented.",
   "Список попыток появится, когда instance отдаст listJobAttempts по jobId в scope. Сейчас доска пустая.":
     "The attempt list appears once the instance serves listJobAttempts for a scoped jobId. The board is empty for now.",
-  "Запуск откроется, когда среда подтвердит изолированную работу. Сейчас проверен только сотрудник на Claude.":
-    "Launch will open once the environment confirms isolated execution. Only a Claude employee is verified so far.",
+  "Запуск начнётся, когда у задачи будет исполнитель, доступный CLI и правила проекта.":
+    "Launch starts once the job has an assignee, an available CLI, and project rules.",
   "Состояние попытки сервер не поддерживает. Запуск недоступен.":
     "The server doesn't support this attempt state. Launch isn't available.",
   "Ожидает проверки": "Awaiting review",
@@ -366,7 +367,6 @@ export const EN_DATA: Record<string, string> = {
   "Не удалось открыть документ в панели BB.": "Couldn't open the document in the BB panel.",
 
   // product-reasons.ts
-  "Среда ещё не подтвердила изолированный запуск.": "The environment hasn't confirmed an isolated launch yet.",
   "Политика прав сотрудника не разрешает выбранный CLI. Выберите политику, которая разрешает этот CLI или любой CLI.":
     "The employee's permission policy doesn't allow the chosen CLI. Pick a policy that allows this CLI or any CLI.",
   "Выбранный CLI не подключён в BB на машине проекта. Подключите его в настройках BB или выберите сотруднику другой CLI.":
@@ -437,6 +437,9 @@ export const EN_DATA: Record<string, string> = {
     "The project's and the employee's policies allow different secrets. Check the policy.",
   "Отдел с таким названием уже есть. Названия отделов должны различаться: по ним агенты выбирают, куда поручить работу.":
     "A department with this name already exists. Department names must be distinct: agents use them to choose where to route work.",
+  "Сначала нужна принятая спецификация: создайте задачу в отделе спецификаций, дождитесь приёмки и приложите её (attach-input) или поставьте job depend.":
+    "An accepted spec is required first: create a job in the spec department, wait until it is accepted, then attach it (attach-input) or set job depend.",
+  "Вид работы new-program может снять только владелец.": "Only the owner can change workKind away from new-program.",
 
   // role-types.ts
   "Ведёт отдел: принимает поручения, раздаёт подзадачи, собирает итог. Сам не исполняет.":

@@ -13,6 +13,11 @@ import { uuidV5 } from "../launch/operation-ids.js";
  * keeps its context and gets the remarks as a message. The job goes back to
  * running and does not re-enter review until a new version (a different hash)
  * is published; the returned version is remembered here.
+ *
+ * Reclamation: the customer may return a root job that the line has already
+ * delivered (done). It reopens done → review → running in one transaction and
+ * reworks in the same thread. Stations inside the line are not reclaimed one
+ * by one: the customer returns the product, the lead decides which station redoes it.
  */
 
 export const REWORK_MIGRATION = `CREATE TABLE agency_rework (
@@ -92,12 +97,16 @@ function setSendState(db: SqlDatabase, requestId: string, state: string, now: st
   db.prepare(`UPDATE agency_rework SET send_state = ?, updated_at = ? WHERE request_id = ?`).run(state, now, requestId);
 }
 
-/** The attempt that holds the reviewed version: the latest one, awaiting review, with a thread. */
-function reviewedAttempt(db: SqlDatabase, jobId: string): { id: string; thread_id: string; launch_id: string } | undefined {
+/**
+ * The attempt that holds the returned version: the latest one with a thread. A delivered job
+ * may already have its attempt marked succeeded; reclamation reopens it.
+ */
+function reviewedAttempt(db: SqlDatabase, jobId: string, delivered: boolean): { id: string; thread_id: string; launch_id: string } | undefined {
+  const states = delivered ? "'awaiting_review', 'succeeded'" : "'awaiting_review'";
   return db
     .prepare(
       `SELECT id, thread_id, launch_id FROM agency_run_attempt
-       WHERE job_id = ? AND state = 'awaiting_review' AND thread_id IS NOT NULL
+       WHERE job_id = ? AND state IN (${states}) AND thread_id IS NOT NULL
        ORDER BY attempt_no DESC LIMIT 1`,
     )
     .get(jobId) as { id: string; thread_id: string; launch_id: string } | undefined;
@@ -108,17 +117,29 @@ function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expe
     const job = deps.store.getJob(row.job_id);
     if (!job) return fail("not_found", `job ${row.job_id} not found`);
     if (job.state === "running") return ok(job);
+    let revision = expectedRevision;
+    if (job.state === "done") {
+      // Reclamation: the delivered product goes back on the line before it goes back to work.
+      const reopened = deps.store.transitionJob(ctx, {
+        requestId: uuidV5(row.request_id, "agency.rework.reopen"),
+        jobId: row.job_id,
+        expectedRevision,
+        to: "review",
+      });
+      if (!reopened.ok) return reopened;
+      revision = reopened.value.revision;
+    }
     const moved = deps.store.transitionJob(ctx, {
       requestId: uuidV5(row.request_id, "agency.rework.job"),
       jobId: row.job_id,
-      expectedRevision,
+      expectedRevision: revision,
       to: "running",
       reworkComment: row.comment,
     });
     if (!moved.ok) return moved;
     const attempt = deps.reads.getAttempt(ctx, row.attempt_id);
     if (!attempt.ok) return attempt;
-    if (attempt.value.state === "awaiting_review") {
+    if (attempt.value.state === "awaiting_review" || attempt.value.state === "succeeded") {
       const reopened = deps.runs.transitionAttempt(ctx, {
         requestId: uuidV5(row.request_id, "agency.rework.attempt"),
         attemptId: row.attempt_id,
@@ -134,7 +155,7 @@ function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expe
       kind: "comment",
       causationId: null,
       references: [],
-      comment: `Возврат на доработку:\n\n${row.comment}`,
+      comment: `${job.state === "done" ? "Рекламация: заказчик вернул выданный продукт" : "Возврат на доработку"}:\n\n${row.comment}`,
     });
     if (!commented.ok) return commented;
     setSendState(deps.db, row.request_id, "confirmed", new Date().toISOString());
@@ -152,13 +173,25 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   }
   const job = deps.store.getJob(input.jobId);
   if (!job) return fail("not_found", `job ${input.jobId} not found`);
-  if (job.state !== "review") return fail("illegal_transition", `rework needs a job in review, not ${job.state}`);
+  const delivered = job.state === "done";
+  if (delivered) {
+    if (ctx.caller) return fail("reclamation_owner_only", `${job.key} is delivered; only the customer returns a delivered product`);
+    if (job.parentJobId) {
+      return fail(
+        "reclamation_root_only",
+        `${job.key} is a closed station inside a product; return the root job and say what is wrong — the lead decides which station redoes it`,
+      );
+    }
+  } else if (job.state !== "review") {
+    return fail("illegal_transition", `rework needs a job in review or a delivered root job, not ${job.state}`);
+  }
   if (job.revision !== input.expectedRevision) {
     return fail("revision_conflict", "expectedRevision does not match the live job revision");
   }
 
   let row = existing;
-  if (!row && deps.reworkLimit) {
+  // The department limit bounds rounds inside the line; a reclamation is the customer's call.
+  if (!row && deps.reworkLimit && !delivered) {
     const limit = deps.reworkLimit(job);
     const done = (deps.db
       .prepare(`SELECT COUNT(*) AS n FROM agency_rework WHERE job_id = ? AND send_state = 'confirmed'`)
@@ -171,7 +204,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
     }
   }
   if (!row) {
-    const attempt = reviewedAttempt(deps.db, job.id);
+    const attempt = reviewedAttempt(deps.db, job.id, delivered);
     if (!attempt) return fail("rework_no_thread", "no attempt awaiting review with a live thread; relaunch the job instead");
     const hash = await deps.currentPublishedHash(job.id);
     if (!hash) return fail("rework_no_version", "the job has no verified published version to return");

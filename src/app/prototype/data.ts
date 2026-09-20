@@ -20,6 +20,7 @@ export const sections = [
   ["inbox", "Входящие", "MessageSquare"], ["runs", "Запуски", "Terminal"],
   ["usage", "Дашборд", "SlidersHorizontal"],
   ["goals", "Цели", "Target"],
+  ["ideas", "Идеи", "FileText"],
   ["knowledge", "Знания", "Info"], ["settings", "Настройки", "Settings"],
 ] as const;
 export interface TaskFile { id:string; name:string; size:number; content:string; kind:"text"|"image"; version?:number; hash?:string; mime?:string; previousVersions?:{version:number;content:string;at:string}[]; }
@@ -110,6 +111,8 @@ export interface Agent {
   workplaceBindingId?: string;
   customMcps?: CustomMcp[];
   selection: ExperimentalProviderModelPickerValue;
+  /** Owner-set reserves in priority order; a launch takes the first one that starts when the primary does not. */
+  fallbackSelections?: ExperimentalProviderModelPickerValue[];
   permission: "auto" | "full" | "accept-edits";
   hostId: string;
   concurrency: number;

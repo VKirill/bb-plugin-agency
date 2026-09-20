@@ -32,7 +32,7 @@ export function formatPrepareLaunchOutcome(result: MutationOutcome<PrepareLaunch
     return `prepareLaunch fail · ${failure.kind} · ${failureNotice(failure)}`;
   }
   const value = result.value;
-  return `prepareLaunch ok · handshake=${value.handshakeReady} · attempt=${value.attemptId} · snapshot=${value.snapshotId} · ${value.reasonCode ? `${value.reasonCode} · ` : ""}${value.reason}`;
+  return `prepareLaunch ok · attempt=${value.attemptId} · snapshot=${value.snapshotId} · ${value.reasonCode ? `${value.reasonCode} · ` : ""}${value.reason}`;
 }
 
 /** Readiness must refetch when assignee or revision persists, not only jobId. */

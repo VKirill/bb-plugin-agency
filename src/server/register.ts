@@ -4,13 +4,22 @@ import { getKnowledge, KNOWLEDGE_KINDS, knowledgeOrder, listKnowledge, markKnowl
 import { draftLesson, expireLessons, proposeLessonForJob, trimAllDepartments } from "./knowledge/lessons";
 import { getDecisionSettings, saveDecisionSettings, type SaveDecisionSettingsInput } from "./decisions/settings";
 import { askMemoryGate } from "./decisions/memory-gate";
-import { askBriefing } from "./decisions/briefing";
+import { askBriefingDetailed, BRIEFING_POINT } from "./decisions/briefing";
+import { recordLeadIntake } from "./decisions/intake";
+import { askHandInGate } from "./decisions/hand-in-gate";
+import { probeDecisionPoints } from "./decisions/probe";
+import { appendDecisionLog, decisionLogLine, formatDecisionAnswers, listDecisionLog } from "./decisions/log";
 import { listSkillGrants, listSkillPool, logSkillGrants, setSkillPool } from "./organization/skill-pool";
 import { askDecisions } from "./decisions/client";
 import { DECISION_POINTS } from "../shared/decisions";
 import { listEnvKeyOptions, putEnvKey, resolveDecisionKey } from "./decisions/key";
 import { knowledgeDecisionRefusal } from "./knowledge/decide";
 import { listGoals, saveGoal, setJobGoal } from "./organization/goals";
+import { getIdea, listIdeas, saveIdea, setIdeaFileHash, setIdeaStatus } from "./ideas/store";
+import { writeIdeaFile } from "./ideas/files";
+import { presentIdea } from "./ideas/view";
+import type { ListIdeasInput, SaveIdeaInput, SpawnIdeaThreadInput } from "../shared/contracts/idea";
+import { buildIdeaThreadSpawn } from "./ideas/thread";
 import { setDepartmentParent, sweepEscalations } from "./organization/hierarchy";
 import { agentMetrics } from "./insights/metrics";
 import { deleteSavedView, listSavedViews, saveSavedView, searchJobs } from "./insights/archive";
@@ -22,10 +31,17 @@ import { rotateWebhookSecret, saveSourceTopics, sourceTopics, WEBHOOK_SECRETS_FI
 import { createCatalogWebhookSourcePort, createDurableWebhookInbox } from "./triggers/durable-inbox";
 import { handleWebhookIngress } from "./triggers/webhook-ingress/ingress";
 import { createWebhookRateLimiter } from "./triggers/webhook-ingress/rate-limit";
-import { reviewJobText, startAutoReview, type AutoReviewPorts } from "./runtime/auto-review/service";
+import { reviewJobText, type AutoReviewPorts } from "./runtime/auto-review/service";
+import {
+  advanceAfterHandIn,
+  closeBlockedReviewStation,
+  productReadyMessage,
+  sweepStaleReviewStations,
+  type ConveyorPorts,
+} from "./runtime/conveyor";
 import { claimActionIntent, completeActionIntent, dispatchTick, listActionIntents } from "./dispatcher/engine";
 import { createIntentJobPort } from "./dispatcher/job-port";
-import { dequeueLaunch, enqueueLaunch, LAUNCH_QUEUE_SWEEP_MS, listLaunchQueue, repairQueuedJobs, sweepLaunchQueue } from "./runtime/launch-queue/service";
+import { dequeueLaunch, enqueueLaunch, LAUNCH_QUEUE_SWEEP_MS, listAssignedBacklogJobIds, listLaunchQueue, refusalIfLaunchDidNotStart, reopenDroppedAssignedJobs, repairQueuedJobs, sweepLaunchQueue } from "./runtime/launch-queue/service";
 import { uuidV5 } from "./runtime/launch/operation-ids";
 
 const LAUNCH_QUEUE_NAMESPACE = "3d5f1c2e-7a4b-4c8d-9e6f-0a1b2c3d4e5f";
@@ -41,6 +57,7 @@ import { PROVEN_USAGE_PROVIDER_IDS } from "./runtime/dashboard-usage/units";
 import { listStoredBindings, listStoredDepartments, listStoredPolicies } from "./api/catalog";
 import { checkLaunchLimits, listBudgets, type LimitDeps } from "./rules/limits";
 import { acceptedVersions, assertDependenciesDone, sweepNextSteps, type NextStepPorts } from "./flow/service";
+import { assertSpecAccepted } from "./flow/spec-gate";
 import { assertOwnershipFree } from "./flow/ownership";
 import { recheckJobText, sweepNightlyRecheck, type NightlyRecheckPorts } from "./runtime/nightly-recheck/service";
 import { buildDigest, listOwnerMessages, markOwnerMessagesRead, readOwnerMessage, recordOwnerMessage, scriptTemplates, setTelegramState } from "./owner-messages/service";
@@ -79,6 +96,9 @@ import {
 } from "./runtime/isolated-sdk";
 import { createInternalRunStoreReads, createRunStore } from "./runtime/run-store";
 import { flushParentWakes, recoverParentWakesFromActivities } from "./runtime/parent-wake";
+import { enqueueProductReady, flushClientBounces, recoverClientBouncesFromOpenWaits } from "./runtime/client-bounce";
+import { presentOwnerQuestions, presentOwnerQuestionsForCli, registerOwnerQuestionTool } from "./runtime/owner-question";
+import { returnJobForRework } from "./runtime/rework/service";
 import { bindJobCommentHandler, readCliThreadId } from "./comments/register-glue";
 import { CLI_COMMAND_SPECS, runAgencyCli, type CliOperation } from "./cli";
 import { resolveRpcAccess } from "./api/auth";
@@ -106,10 +126,13 @@ import { getPassportSettings, savePassportSettings, type SavePassportSettingsInp
 import { buildPassport, collectPassportMaterial, projectsDueForPassport, type ProjectRulesRead } from "./projects/passport-build.js";
 import { PASSPORT_DELIVERIES, passportText, type PassportSectionKey } from "../shared/passport.js";
 import { modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
+import { fallbackSwitchText, markModelExhausted, nextFreshCandidate } from "./runtime/agent-fallback";
 import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
+import { fallbackModelKey, optionalFallbackModels } from "../shared/contracts";
 import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
 import { DEFAULT_BOARD_POLICY, type BoardPolicy } from "../shared/contracts";
 import { buildAgencyInstructions, DELEGATION_MODES, parseDelegationMode, type DelegationMode } from "./delegation/instructions";
+import { resolveSessionPolicy, saveSessionPolicy } from "./delegation/session-policy";
 
 export function registerAgency(bb: BbPluginApi) {
   const documents = bb.hosts.experimental_client({ contract: documentHostContract });
@@ -143,7 +166,7 @@ export function registerAgency(bb: BbPluginApi) {
       type: "select",
       label: "Инструкция делегирования в сессиях",
       description:
-        "delegate — агент сам поручает крупную работу подходящему отделу; suggest — только предлагает владельцу; off — не добавлять. Треды исполнителей Агентства получают роль руководителя или исполнителя в режимах delegate и suggest.",
+        "Запасной режим, если у проекта нет своей политики чатов. delegate — чат работает как менеджер Агентства (сам не делает, ставит поручения); suggest — спрашивает, сделать здесь или через Агентство; off — не добавлять, модель про Агентство не знает. Проект и этот чат можно сменить списком в поле ввода, слева от MoA.",
       options: [...DELEGATION_MODES],
       default: "delegate",
     },
@@ -249,6 +272,35 @@ export function registerAgency(bb: BbPluginApi) {
       return null;
     }
   });
+  const ownerQuestion = {
+    bb,
+    db,
+    store,
+    reads: createInternalRunStoreReads(db),
+    runs: createRunStore(db),
+    send,
+  };
+  const ownerQuestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const scheduleOwnerQuestion = (originThreadId: string) => {
+    const previous = ownerQuestionTimers.get(originThreadId);
+    if (previous) clearTimeout(previous);
+    ownerQuestionTimers.set(
+      originThreadId,
+      setTimeout(() => {
+        ownerQuestionTimers.delete(originThreadId);
+        void presentOwnerQuestions(ownerQuestion, { threadId: originThreadId }).catch((error) => {
+          bb.log.warn(`Agency owner question card for ${originThreadId}: ${String(error)}`);
+        });
+      }, 500),
+    );
+  };
+  bb.onDispose(() => {
+    for (const timer of ownerQuestionTimers.values()) clearTimeout(timer);
+    ownerQuestionTimers.clear();
+  });
+  if (typeof bb.agents.registerTool === "function") {
+    registerOwnerQuestionTool(bb, ownerQuestion);
+  }
   const domain = createDomainRpc({
     bb,
     store,
@@ -258,6 +310,13 @@ export function registerAgency(bb: BbPluginApi) {
     send,
     boardPolicy: () => boardPolicy,
     archivedJobIds: () => archivedJobIds(db, archiveAfterDays, new Date()),
+    onProductReady: (message) => {
+      void sendOwnerMessage(message, "conveyor");
+      const ready = store.getJob(message.jobId);
+      if (ready) enqueueProductReady(db, ready, new Date().toISOString());
+      void flushClientBounces({ db, send, now: new Date().toISOString() }).catch(() => undefined);
+    },
+    onOwnerQuestion: scheduleOwnerQuestion,
     onAccepted: (jobId) => {
       const job = store.getJob(jobId);
       if (!job) return;
@@ -335,13 +394,15 @@ export function registerAgency(bb: BbPluginApi) {
     },
   };
   /** Every launch, by hand or from the queue: the jobs it depends on are done, then the limits. */
-  const checkLaunchGate = async (job: Job) => {
+  const checkLaunchGate = async (job: Job, pendingJobIds: readonly string[] = []) => {
     const en = agencyLanguage() === "en";
     const dependencies = assertDependenciesDone(db, job, en);
     if (!dependencies.ok) return dependencies;
-    const ownership = assertOwnershipFree(db, job, en);
+    const spec = assertSpecAccepted(db, job, rulesForDepartment(db, job.departmentId), en);
+    if (!spec.ok) return spec;
+    const ownership = assertOwnershipFree(db, job, en, pendingJobIds);
     if (!ownership.ok) return ownership;
-    return checkLaunchLimits(limitDeps, job);
+    return checkLaunchLimits(limitDeps, job, pendingJobIds);
   };
   const catalogRolesFile = join(bb.server.experimental_dataDir, ISOLATED_CATALOG_ROLES_FILENAME);
   const resolveCatalogRoles = async () => {
@@ -426,18 +487,53 @@ export function registerAgency(bb: BbPluginApi) {
     checkHost: (input) => machines.checkLaunch(input),
     checkModel,
     checkLimits: checkLaunchGate,
+    comment: (job, text) => void systemComment(job, text),
     // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу, а из
     // библиотеки отдела открывает недостающее — на один запуск и с записью в журнал.
     briefing: async ({ job, skills, catalog }) => {
+      const settings = getDecisionSettings(db);
+      const access = resolveRpcAccess(db);
+      const stored = store.getJobByKey(job.key);
+      const intake = stored && access.ok
+        ? recordLeadIntake({
+            settings,
+            job: stored,
+            store,
+            ctx: access.value.ctx,
+            log: (entry) => {
+              const row = appendDecisionLog(db, entry, new Date().toISOString());
+              if (row) bb.log.info(decisionLogLine(row));
+            },
+          }).catch(() => undefined)
+        : Promise.resolve();
       const own = new Set(skills.map((skill) => skill.id));
       const poolIds = new Set(listSkillPool(db, job.departmentId));
       const pool = catalog.filter((skill) => poolIds.has(skill.id) && !own.has(skill.id));
-      const result = await askBriefing(getDecisionSettings(db), {
+      const asked = await askBriefingDetailed(settings, {
         job,
         skills,
         pool,
         lessons: listKnowledge(db, { scopeKind: "department", scopeId: job.departmentId, status: "accepted" }).sort(knowledgeOrder),
       });
+      await intake;
+      const grantNames = asked.briefing?.granted.map((row) => row.skill.name).join("|") ?? "";
+      const pickNames = asked.briefing?.skills.map((skill) => skill.name).join("|") ?? "";
+      if (asked.reason !== "disabled") {
+        const briefRow = appendDecisionLog(
+          db,
+          {
+            point: BRIEFING_POINT,
+            jobKey: job.key,
+            outcome: asked.reason,
+            detail: `method=${asked.candidates.skills} pool=${asked.candidates.pool} lessons=${asked.candidates.lessons}${pickNames ? ` picked=${pickNames}` : ""}${grantNames ? ` granted=${grantNames}` : ""}`,
+            answers: asked.answers,
+            ms: asked.ms,
+          },
+          new Date().toISOString(),
+        );
+        if (briefRow) bb.log.info(decisionLogLine(briefRow));
+      }
+      const result = asked.briefing;
       if (!result) return null;
       if (result.granted.length) {
         logSkillGrants(
@@ -694,6 +790,8 @@ export function registerAgency(bb: BbPluginApi) {
           skillIds: version.skillIds,
           mcpIds: version.mcpIds,
           policyVersionId: version.policyVersionId,
+          // A reserve that became the primary leaves the list: the profile never names one pair twice.
+          ...optionalFallbackModels(version.fallbackModels?.filter((pick) => fallbackModelKey(pick) !== fallbackModelKey(choice))),
         },
       });
       rows.push({
@@ -741,6 +839,7 @@ export function registerAgency(bb: BbPluginApi) {
           keyProblem: key.ok ? null : key.reason,
           catalogAvailable: catalog.available,
           keyOptions: catalog.options,
+          log: listDecisionLog(db, 40),
         },
       };
     },
@@ -775,12 +874,88 @@ export function registerAgency(bb: BbPluginApi) {
           ],
         },
       );
+      const row = appendDecisionLog(
+        db,
+        outcome.ok
+          ? {
+              point: "test",
+              jobKey: null,
+              outcome: "ok",
+              detail: "connection",
+              answers: formatDecisionAnswers(outcome.answers),
+              ms: outcome.ms,
+            }
+          : {
+              point: "test",
+              jobKey: null,
+              outcome: "failed",
+              detail: outcome.reason,
+              ms: outcome.ms,
+            },
+        new Date().toISOString(),
+      );
+      if (row) bb.log.info(decisionLogLine(row));
       return {
         ok: true as const,
         value: outcome.ok
           ? { ok: true as const, ms: outcome.ms, answers: outcome.answers }
           : { ok: false as const, ms: outcome.ms, reason: outcome.reason, detail: outcome.detail ?? null },
       };
+    },
+    listDecisionLog: async (input: { limit?: number }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listDecisionLog(db, input.limit ?? 50) };
+    },
+    probeDecisionPoints: async () => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const settings = getDecisionSettings(db);
+      const probed = await probeDecisionPoints(settings);
+      const now = new Date().toISOString();
+      const rows = [
+        {
+          point: "intake",
+          jobKey: "probe-intake",
+          outcome: probed.intake ? "proposal" : "silent",
+          detail: probed.intake
+            ? `${probed.intake.size}/${probed.intake.risk}/${probed.intake.decision}`
+            : probed.intakeTrace.reason,
+          answers: probed.intakeTrace.answers,
+          ms: probed.intakeTrace.ms,
+        },
+        {
+          point: "hand-in-gate",
+          jobKey: "probe-junk",
+          outcome: probed.junk?.action ?? "failed",
+          detail: probed.junk?.action === "rework" ? "expected_rework" : probed.junk ? "unexpected_proceed" : "no_answer",
+          answers: probed.junk?.answers ?? "",
+          ms: probed.junk?.ms ?? 0,
+        },
+        {
+          point: "hand-in-gate",
+          jobKey: "probe-solid",
+          outcome: probed.solid?.action ?? "failed",
+          detail: probed.solid?.action === "proceed" ? "expected_proceed" : probed.solid ? "unexpected_rework" : "no_answer",
+          answers: probed.solid?.answers ?? "",
+          ms: probed.solid?.ms ?? 0,
+        },
+        {
+          point: "launch-briefing",
+          jobKey: "probe-briefing",
+          outcome: probed.briefing.reason,
+          detail: probed.briefing.skills.length || probed.briefing.granted.length
+            ? `picked=${probed.briefing.skills.join("|")} granted=${probed.briefing.granted.join("|")}`
+            : probed.briefing.reason,
+          answers: probed.briefing.answers,
+          ms: probed.briefing.ms,
+        },
+      ];
+      for (const entry of rows) {
+        const row = appendDecisionLog(db, entry, now);
+        if (row) bb.log.info(decisionLogLine(row));
+      }
+      return { ok: true as const, value: probed };
     },
   };
 
@@ -946,6 +1121,34 @@ export function registerAgency(bb: BbPluginApi) {
       const removed = deletePassport(db, input.bbProjectId);
       if (removed.ok && removed.value.removed) onChanged();
       return removed;
+    },
+  };
+
+  const sessionPolicyHandlers = {
+    getSessionPolicy: async (input: { bbProjectId?: string; bindingId?: string; threadId?: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      let bbProjectId = input.bbProjectId;
+      if (!bbProjectId && input.threadId) {
+        try {
+          const row = await bb.sdk.threads.get({ threadId: input.threadId });
+          const view = isolatedViewFromRecord(row);
+          const nested = row && typeof row === "object" ? Reflect.get(row, "project") : undefined;
+          const nestedId = nested && typeof nested === "object" ? Reflect.get(nested, "id") : undefined;
+          if (view.projectId) bbProjectId = view.projectId;
+          else if (typeof nestedId === "string" && nestedId.length > 0) bbProjectId = nestedId;
+        } catch {
+          // Thread-only resolution still returns the Agency fallback.
+        }
+      }
+      return { ok: true as const, value: resolveSessionPolicy(db, { ...input, bbProjectId }, delegationMode) };
+    },
+    saveSessionPolicy: async (input: { requestId: string; scope: "project" | "binding" | "thread"; scopeId: string; mode: "inherit" | "ordinary" | "suggest" | "pm" }) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      const saved = saveSessionPolicy(db, input, new Date().toISOString());
+      if (saved.ok) onChanged();
+      return saved;
     },
   };
 
@@ -1133,10 +1336,10 @@ export function registerAgency(bb: BbPluginApi) {
       if (restored.ok) onChanged();
       return restored;
     },
-    listKnowledge: async () => {
+    listKnowledge: async (input: { scopeKind?: "agency" | "department" | "project" | "section"; scopeId?: string; parentBindingId?: string | null; status?: "proposal" | "accepted" | "archived" } | null) => {
       const access = readOnly();
       if (!access.ok) return access;
-      return { ok: true as const, value: listKnowledge(db) };
+      return { ok: true as const, value: listKnowledge(db, input ?? {}) };
     },
     getKnowledge: async (input: { id: string }) => {
       const access = readOnly();
@@ -1150,6 +1353,9 @@ export function registerAgency(bb: BbPluginApi) {
     saveKnowledge: async (input: SaveKnowledgeInput) => {
       const access = readOnly();
       if (!access.ok) return access;
+      if (input.scopeKind === "section" && input.parentBindingId && !store.getBinding(input.parentBindingId)) {
+        return fail("not_found", `Привязка проекта-родителя ${input.parentBindingId} не найдена.`);
+      }
       // An employee's material is a proposal until the owner accepts it.
       const saved = saveKnowledge(db, input, { proposedBy: access.value.ctx.caller?.agentId ?? null }, new Date().toISOString());
       if (saved.ok) onChanged();
@@ -1163,6 +1369,80 @@ export function registerAgency(bb: BbPluginApi) {
       const saved = setKnowledgeStatus(db, input, new Date().toISOString());
       if (saved.ok) onChanged();
       return saved;
+    },
+    listIdeas: async (input: ListIdeasInput) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const filter = input ?? {};
+      const projectBindingIds = filter.bbProjectId
+        ? listStoredBindings(db)
+            .filter((binding) => binding.bbProjectId === filter.bbProjectId)
+            .map((binding) => binding.id)
+        : null;
+      if (projectBindingIds && projectBindingIds.length === 0) return { ok: true as const, value: [] };
+      const items = listIdeas(db, {
+        bindingId: filter.bindingId,
+        sectionId: filter.sectionId,
+        kind: filter.kind,
+        status: filter.status,
+      }).filter((item) => !projectBindingIds || projectBindingIds.includes(item.bindingId));
+      return {
+        ok: true as const,
+        value: items.map((item) => presentIdea(item, store.getBinding(item.bindingId), Boolean(item.fileHash))),
+      };
+    },
+    getIdea: async (input: { id: string }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const item = getIdea(db, input.id);
+      if (!item) return fail("not_found", `idea ${input.id} not found`);
+      return { ok: true as const, value: presentIdea(item, store.getBinding(item.bindingId), Boolean(item.fileHash)) };
+    },
+    saveIdea: async (input: SaveIdeaInput) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const binding = store.getBinding(input.bindingId);
+      if (!binding) return fail("not_found", `Привязка проекта ${input.bindingId} не найдена.`);
+      const saved = saveIdea(db, input, new Date().toISOString());
+      if (!saved.ok) return saved;
+      const written = await writeIdeaFile(documents, binding, saved.value);
+      if (written.ok) {
+        setIdeaFileHash(db, saved.value.id, written.value.hash);
+        onChanged();
+        return { ok: true as const, value: presentIdea({ ...saved.value, fileHash: written.value.hash }, binding, true) };
+      }
+      onChanged();
+      return {
+        ok: true as const,
+        value: presentIdea(saved.value, binding, false),
+      };
+    },
+    setIdeaStatus: async (input: { id: string; expectedRevision: number; status: "open" | "parked" | "done" | "archived" }) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const saved = setIdeaStatus(db, input, new Date().toISOString());
+      if (!saved.ok) return saved;
+      const binding = store.getBinding(saved.value.bindingId);
+      if (binding) {
+        const written = await writeIdeaFile(documents, binding, saved.value);
+        if (written.ok) setIdeaFileHash(db, saved.value.id, written.value.hash);
+        onChanged();
+        return { ok: true as const, value: presentIdea({ ...saved.value, fileHash: written.ok ? written.value.hash : saved.value.fileHash }, binding, written.ok || Boolean(saved.value.fileHash)) };
+      }
+      onChanged();
+      return { ok: true as const, value: presentIdea(saved.value, binding, Boolean(saved.value.fileHash)) };
+    },
+    spawnIdeaThread: async (input: SpawnIdeaThreadInput) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      const item = getIdea(db, input.id);
+      if (!item) return fail("not_found", `idea ${input.id} not found`);
+      const packed = buildIdeaThreadSpawn(item, input.request);
+      if (!packed.ok) return packed;
+      const spawned = await bb.sdk.threads.spawn(packed.value as Parameters<typeof bb.sdk.threads.spawn>[0]);
+      const threadId = spawned && typeof spawned === "object" && "id" in spawned && typeof spawned.id === "string" ? spawned.id : "";
+      if (!threadId) return fail("host_error", "threads.spawn returned no thread id");
+      return { ok: true as const, value: { threadId } };
     },
     listGoals: async () => {
       const access = readOnly();
@@ -1357,7 +1637,40 @@ export function registerAgency(bb: BbPluginApi) {
       return pinCurrentSkills(skillPinDeps);
     },
   };
-  const handlers = { ...domain, ...launch, ...dispatcher, ...dashboardUsage.handlers, ...budgets, ...agentModelHandlers, ...workProfileHandlers, ...passportHandlers, ...decisionHandlers, ...skillPoolHandlers } satisfies Pick<
+  const handlers = {
+    ...domain,
+    ...launch,
+    createJob: async (input: Parameters<typeof domain.createJob>[0]) => {
+      const created = await domain.createJob(input);
+      if (!created.ok || !created.value.assignedAgentId) return created;
+      const live = store.getJob(created.value.id);
+      if (!live) return created;
+      const queued = queueJobForLaunch(live, uuidV5(LAUNCH_QUEUE_NAMESPACE, `create-queue:${live.id}`));
+      if (!queued.ok) return created;
+      return { ok: true as const, value: store.getJob(live.id) ?? live };
+    },
+    updateJob: async (input: Parameters<typeof domain.updateJob>[0]) => {
+      const updated = await domain.updateJob(input);
+      if (updated.ok) {
+        void flushClientBounces({ db, send, now: new Date().toISOString() }).catch(() => undefined);
+      }
+      if (!updated.ok) return updated;
+      const live = store.getJob(updated.value.id);
+      if (!live?.assignedAgentId || (live.state !== "backlog" && live.state !== "queued")) return updated;
+      const queued = queueJobForLaunch(live, uuidV5(LAUNCH_QUEUE_NAMESPACE, `assign-queue:${live.id}`));
+      if (!queued.ok) return updated;
+      return { ok: true as const, value: store.getJob(live.id) ?? live };
+    },
+    ...dispatcher,
+    ...dashboardUsage.handlers,
+    ...budgets,
+    ...agentModelHandlers,
+    ...workProfileHandlers,
+    ...sessionPolicyHandlers,
+    ...passportHandlers,
+    ...decisionHandlers,
+    ...skillPoolHandlers,
+  } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
     | "getSkillPool"
     | "setSkillPool"
@@ -1365,6 +1678,8 @@ export function registerAgency(bb: BbPluginApi) {
     | "getDecisionSettings"
     | "saveDecisionSettings"
     | "testDecisionModel"
+    | "listDecisionLog"
+    | "probeDecisionPoints"
     | "listBudgets"
     | "providerUsage"
     | "getSkillPins"
@@ -1374,6 +1689,10 @@ export function registerAgency(bb: BbPluginApi) {
     | "listKnowledge"
     | "saveKnowledge"
     | "setKnowledgeStatus"
+    | "listIdeas"
+    | "getIdea"
+    | "saveIdea"
+    | "setIdeaStatus"
     | "listGoals"
     | "saveGoal"
     | "setJobGoal"
@@ -1475,6 +1794,8 @@ export function registerAgency(bb: BbPluginApi) {
     | "claimActionIntent"
     | "approveActionIntent"
     | "completeActionIntent"
+    | "getSessionPolicy"
+    | "saveSessionPolicy"
   >;
   const runs = createRunStore(db);
   const runReads = createInternalRunStoreReads(db);
@@ -1494,6 +1815,82 @@ export function registerAgency(bb: BbPluginApi) {
       references: [],
       comment,
     }).ok;
+  };
+  const conveyorPorts = (): ConveyorPorts | null => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return null;
+    return {
+      db,
+      store: {
+        getJob: (jobId) => store.getJob(jobId),
+        acceptArtifactVersion: (ctx, input) => store.acceptArtifactVersion(ctx, input),
+        transitionJob: (ctx, input) => store.transitionJob(ctx, input),
+      },
+      ctx: access.value.ctx,
+      requestId: (seed) => uuidV5(LAUNCH_QUEUE_NAMESPACE, seed),
+      comment: systemComment,
+      productReady: (job, result) => {
+        void sendOwnerMessage(productReadyMessage(db, job, result), "conveyor");
+        enqueueProductReady(db, job, new Date().toISOString());
+        void flushClientBounces({ db, send, now: new Date().toISOString() }).catch(() => undefined);
+      },
+      autoReview: autoReviewPorts(),
+      handInGate: async (job) => {
+        if (store.memberRole(job.departmentId, job.assignedAgentId) !== "executor") {
+          const row = appendDecisionLog(
+            db,
+            { point: "hand-in-gate", jobKey: job.key, outcome: "skipped", detail: "not_executor" },
+            new Date().toISOString(),
+          );
+          if (row) bb.log.info(decisionLogLine(row));
+          return null;
+        }
+        const latest = [...store.listActivity(job.id)].reverse().find((row) => row.kind === "comment" && row.comment);
+        const asked = await askHandInGate(getDecisionSettings(db), job, latest?.comment ?? "");
+        const row = appendDecisionLog(
+          db,
+          asked
+            ? {
+                point: "hand-in-gate",
+                jobKey: job.key,
+                outcome: asked.action,
+                detail: asked.action === "rework" ? "junk" : "not_junk",
+                answers: asked.answers,
+                ms: asked.ms,
+              }
+            : { point: "hand-in-gate", jobKey: job.key, outcome: "failed", detail: "no_answer" },
+          new Date().toISOString(),
+        );
+        if (row) bb.log.info(decisionLogLine(row));
+        if (asked?.action !== "rework") return null;
+        return { action: "rework" as const, remark: asked.remark };
+      },
+      returnForRework: async (job, comment) =>
+        returnJobForRework(
+          {
+            db,
+            store,
+            runs,
+            reads: runReads,
+            send,
+            reworkLimit: (reworkJob) => store.rulesForDepartment(reworkJob.departmentId).reworkLimit,
+            currentPublishedHash: async (jobId) => {
+              const published = await readJobPublishedArtifact(
+                { ctx: access.value.ctx, store, db, documents },
+                jobId,
+              );
+              return published.ok && published.value.publishedVerified ? published.value.publishedHash : null;
+            },
+          },
+          access.value.ctx,
+          {
+            requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `conveyor-rework:${job.id}:${job.revision}`),
+            jobId: job.id,
+            expectedRevision: job.revision,
+            comment,
+          },
+        ),
+    };
   };
   /** Blocked with a system reason; parent wake tells the lead. */
   const blockWithReason = (job: Job, comment: string): boolean => {
@@ -1524,18 +1921,19 @@ export function registerAgency(bb: BbPluginApi) {
     limit: (job) => store.rulesForDepartment(job.departmentId).completionReminders,
   });
   /** Why BB put the thread in error, from its own events; null when it did not say. */
-  const providerErrorDetail = async (threadId: string): Promise<string | null> => {
+  const providerErrorDetail = async (threadId: string): Promise<{ detail: string | null; willRetry: boolean | null }> => {
     try {
       const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "20", types: ["provider/error"] });
       for (const event of events as readonly { data?: unknown }[]) {
-        const data = event.data as { detail?: unknown; message?: unknown } | undefined;
+        const data = event.data as { detail?: unknown; message?: unknown; willRetry?: unknown } | undefined;
         const text = [data?.detail, data?.message].find((value) => typeof value === "string" && value.trim());
-        if (typeof text === "string") return text;
+        const willRetry = typeof data?.willRetry === "boolean" ? data.willRetry : null;
+        if (typeof text === "string" || willRetry !== null) return { detail: typeof text === "string" ? text : null, willRetry };
       }
     } catch {
       /* the thread could not be read: the watch decides without a reason */
     }
-    return null;
+    return { detail: null, willRetry: null };
   };
   const jobHostOnline = async (job: Job): Promise<boolean | null> => {
     const binding = store.getBinding(job.bindingId);
@@ -1546,6 +1944,33 @@ export function registerAgency(bb: BbPluginApi) {
       return null;
     }
   };
+  const usedLaunchModel = (version: { providerId: string; model: string }, launchId: string) => {
+    const attempt = db
+      .prepare(`SELECT snapshot_id FROM agency_run_attempt WHERE launch_id = ?`)
+      .get(launchId) as { snapshot_id: string } | undefined;
+    if (!attempt?.snapshot_id) return { providerId: version.providerId, model: version.model };
+    const snap = db
+      .prepare(`SELECT snapshot_json FROM agency_context_snapshot WHERE id = ?`)
+      .get(attempt.snapshot_id) as { snapshot_json: string } | undefined;
+    if (!snap) return { providerId: version.providerId, model: version.model };
+    try {
+      const parsed = JSON.parse(snap.snapshot_json) as { agentVersion?: { providerId?: string; model?: string } };
+      if (parsed.agentVersion?.providerId && parsed.agentVersion.model) {
+        return { providerId: parsed.agentVersion.providerId, model: parsed.agentVersion.model };
+      }
+    } catch {
+      /* stored profile */
+    }
+    return { providerId: version.providerId, model: version.model };
+  };
+  const canUseFallback = (job: Job, row: { launchId: string }) => {
+    if (!job.assignedAgentId) return false;
+    const agent = store.getAgent(job.assignedAgentId);
+    const version = agent ? store.getAgentVersion(agent.currentVersionId) : null;
+    if (!agent || !version) return false;
+    // The pair that hit the limit counts as exhausted already: is there a fresh one after it?
+    return Boolean(nextFreshCandidate(db, agent.id, version, usedLaunchModel(version, row.launchId), new Date().toISOString()));
+  };
   const runWatchPorts = (extra?: Partial<RunWatchPorts>): RunWatchPorts => ({
     db,
     getJob: (jobId) => store.getJob(jobId),
@@ -1553,6 +1978,7 @@ export function registerAgency(bb: BbPluginApi) {
     lastProgressAt: (threadId, jobId) => lastProgressFromDatabase(db, threadId, jobId),
     comment: systemComment,
     block: blockWithReason,
+    canSwitchToFallback: canUseFallback,
     now: () => new Date().toISOString(),
     thresholds: (job) => {
       const rules = store.rulesForDepartment(job.departmentId);
@@ -1574,6 +2000,19 @@ export function registerAgency(bb: BbPluginApi) {
     try {
       // A launch that vanished from the queue goes back in line before the sweep.
       if (repairQueuedJobs(db, new Date().toISOString()).length) onChanged();
+      if (reopenDroppedAssignedJobs(db, new Date().toISOString()).length) onChanged();
+      const pins = await readSkillPinStatus(skillPinDeps);
+      if (pins.ok && pins.value.editable && !pins.value.inSync && pins.value.rows.every((row) => row.currentHash)) {
+        const pinned = await pinCurrentSkills(skillPinDeps);
+        if (pinned.ok) bb.log.info("Launch queue: pinned current Agency skill versions");
+        else bb.log.warn(`Launch queue: could not pin skill versions: ${pinned.error.message}`);
+      }
+      for (const jobId of listAssignedBacklogJobIds(db)) {
+        const waiting = store.getJob(jobId);
+        if (!waiting) continue;
+        const queued = queueJobForLaunch(waiting, uuidV5(LAUNCH_QUEUE_NAMESPACE, `backlog-queue:${waiting.id}`));
+        if (queued.ok) onChanged();
+      }
       const result = await sweepLaunchQueue({
         db,
         getJob: (jobId) => store.getJob(jobId),
@@ -1583,9 +2022,8 @@ export function registerAgency(bb: BbPluginApi) {
             requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `${job.id}:${requestedAt}:${job.revision}`),
             jobId: job.id,
             expectedRevision: job.revision,
-          })) as { ok: true; value: { launched: unknown; reason: string } } | { ok: false; error: { code: string; message: string } };
-          if (prepared.ok && !prepared.value.launched) return { ok: false, error: { code: "launch_not_started", message: prepared.value.reason } };
-          return prepared as { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
+          })) as { ok: true; value: { launched: unknown; reason: string; reasonCode?: string } } | { ok: false; error: { code: string; message: string } };
+          return refusalIfLaunchDidNotStart(prepared);
         },
         comment: systemComment,
         notifyOwner: (input) => {
@@ -1594,6 +2032,12 @@ export function registerAgency(bb: BbPluginApi) {
         now: () => new Date().toISOString(),
       });
       if (result.launched || result.removed) onChanged();
+      const conveyor = conveyorPorts();
+      if (conveyor) {
+        const closed = sweepStaleReviewStations(conveyor);
+        if (closed > 0) onChanged();
+      }
+      await flushClientBounces({ db, send, now: new Date().toISOString() });
     } catch (error) {
       bb.log.warn(`Launch queue: ${String(error)}`);
     } finally {
@@ -1602,6 +2046,69 @@ export function registerAgency(bb: BbPluginApi) {
   };
   const queueSweep = setInterval(() => void runLaunchQueue(), LAUNCH_QUEUE_SWEEP_MS);
   bb.onDispose(() => clearInterval(queueSweep));
+  void runLaunchQueue();
+  const switchJobToFallback = (job: Job, row: { launchId: string }): boolean => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return false;
+    const live = store.getJob(job.id);
+    if (!live || live.state !== "running" || !live.assignedAgentId) return false;
+    const agent = store.getAgent(live.assignedAgentId);
+    const version = agent ? store.getAgentVersion(agent.currentVersionId) : null;
+    if (!agent || !version) return false;
+    const attempt = db
+      .prepare(`SELECT id, state, revision, snapshot_id, thread_id FROM agency_run_attempt WHERE launch_id = ?`)
+      .get(row.launchId) as
+      | { id: string; state: string; revision: number; snapshot_id: string; thread_id: string | null }
+      | undefined;
+    if (!attempt || attempt.state !== "running") return false;
+    const used = usedLaunchModel(version, row.launchId);
+    const now = new Date().toISOString();
+    // The thread of this attempt keeps its model. The attempt ends, and a new one starts on the next fresh pair.
+    const fallback = nextFreshCandidate(db, agent.id, version, used, now);
+    if (!fallback) return false;
+    markModelExhausted(db, { agentId: agent.id, providerId: used.providerId, model: used.model, now });
+    const stop = Reflect.get(bb.sdk.threads, "stop");
+    if (attempt.thread_id && typeof stop === "function") {
+      void Promise.resolve((stop as (args: { threadId: string }) => Promise<unknown>)({ threadId: attempt.thread_id })).catch(
+        () => undefined,
+      );
+    }
+    const canceled = runs.transitionAttempt(access.value.ctx, {
+      requestId: randomUUID(),
+      attemptId: attempt.id,
+      expectedRevision: attempt.revision,
+      to: "canceled",
+    });
+    if (!canceled.ok) return false;
+    const blocked = store.transitionJob(access.value.ctx, {
+      requestId: randomUUID(),
+      jobId: live.id,
+      expectedRevision: live.revision,
+      to: "blocked",
+    });
+    if (!blocked.ok) return false;
+    systemComment(
+      blocked.value,
+      fallbackSwitchText({
+        jobKey: live.key,
+        fromProviderId: used.providerId,
+        fromModel: used.model,
+        toProviderId: fallback.providerId,
+        toModel: fallback.model,
+      }),
+    );
+    const queued = store.transitionJob(access.value.ctx, {
+      requestId: randomUUID(),
+      jobId: blocked.value.id,
+      expectedRevision: blocked.value.revision,
+      to: "queued",
+    });
+    if (!queued.ok) return false;
+    enqueueLaunch(db, queued.value.id, now);
+    onChanged();
+    void runLaunchQueue();
+    return true;
+  };
   // Dispatcher: accepted events → rule matches → intents; queued intents (auto mode or approved) become jobs.
   const dispatcherEngine = { db, launch: intentJobs };
   let dispatcherBusy = false;
@@ -1648,6 +2155,8 @@ export function registerAgency(bb: BbPluginApi) {
           brief: step.brief,
           acceptance: step.acceptance,
           parentJobId: source.parentJobId,
+          sectionId: source.sectionId ?? null,
+          workKind: source.workKind ?? null,
           assignedAgentId: null,
           assignment: step.assignment,
           priority: source.priority,
@@ -1956,12 +2465,15 @@ export function registerAgency(bb: BbPluginApi) {
         return applied.value;
       })();
       if (applied.reviewApplied) {
-        void startAutoReview(autoReviewPorts(), row.jobId).then(
-          (outcome) => {
-            if (outcome !== "skipped") onChanged();
-          },
-          (error) => bb.log.warn(`Auto review for ${row.jobId}: ${String(error)}`),
-        );
+        const conveyor = conveyorPorts();
+        if (conveyor) {
+          void advanceAfterHandIn(conveyor, row.jobId).then(
+            (outcome) => {
+              if (outcome !== "pending" && outcome !== "idle") onChanged();
+            },
+            (error) => bb.log.warn(`Conveyor after hand-in ${row.jobId}: ${String(error)}`),
+          );
+        }
       }
       try {
         // A published version without the closing comment still needs a reminder, about the comment.
@@ -1978,18 +2490,33 @@ export function registerAgency(bb: BbPluginApi) {
       try {
         // A thread in error may be waiting for BB itself: read the reason and the machine first.
         let errorDetail: string | null = null;
+        let bbWillRetry: boolean | null = null;
         let hostOnline: boolean | null = null;
         if (reading.threadStatus === "error") {
-          errorDetail = await providerErrorDetail(row.threadId);
+          const reported = await providerErrorDetail(row.threadId);
+          errorDetail = reported.detail;
+          bbWillRetry = reported.willRetry;
           const job = store.getJob(row.jobId);
           hostOnline = job ? await jobHostOnline(job) : null;
         }
-        const watched = superviseRun(runWatchPorts({ providerError: () => errorDetail, hostOnline: () => hostOnline }), row, {
+        const watched = superviseRun(runWatchPorts({
+          providerError: () => errorDetail,
+          bbWillRetry: () => bbWillRetry,
+          hostOnline: () => hostOnline,
+          switchToFallback: switchJobToFallback,
+        }), row, {
           threadStatus: reading.threadStatus,
           threadUpdatedAt: thread?.updatedAt ? new Date(thread.updatedAt).toISOString() : null,
           backgroundAgents: thread?.activeBackgroundAgentCount ?? 0,
         });
         if (watched === "warned" || watched === "blocked") onChanged();
+        if (watched === "blocked") {
+          const conveyor = conveyorPorts();
+          if (conveyor) {
+            const closed = closeBlockedReviewStation(conveyor, row.jobId);
+            if (closed.ok && closed.value) onChanged();
+          }
+        }
       } catch (error) {
         bb.log.warn(`Run watch for ${row.jobId}: ${String(error)}`);
       }
@@ -2047,6 +2574,7 @@ export function registerAgency(bb: BbPluginApi) {
     modelPrices: async () => pricesView(),
     ...agentModelHandlers,
     ...workProfileHandlers,
+    ...sessionPolicyHandlers,
     ...passportHandlers,
     ...decisionHandlers,
     ...skillPoolHandlers,
@@ -2079,7 +2607,9 @@ export function registerAgency(bb: BbPluginApi) {
   };
   const recoveredAt = new Date().toISOString();
   recoverParentWakesFromActivities(db, recoveredAt);
+  recoverClientBouncesFromOpenWaits(db, recoveredAt);
   void flushParentWakes({ db, send, now: recoveredAt }).catch(() => undefined);
+  void flushClientBounces({ db, send, now: recoveredAt }).catch(() => undefined);
   bb.rpc.register(rpcContract, rpcHandlers);
   bb.cli.register({
     name: "agency",
@@ -2091,6 +2621,8 @@ export function registerAgency(bb: BbPluginApi) {
           status,
           notify,
           cliThreadId: readCliThreadId(ctx),
+          cliSignal: ctx && typeof ctx === "object" && "signal" in ctx ? (ctx as { signal?: AbortSignal }).signal : undefined,
+          askOwner: (input) => presentOwnerQuestionsForCli(ownerQuestion, input),
           jobComment: bindJobCommentHandler({
             store,
             reads: runReads,

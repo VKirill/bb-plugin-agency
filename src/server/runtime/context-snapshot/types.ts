@@ -3,6 +3,7 @@ import type { CatalogMcpId, CatalogSkillId } from "../../../shared/contracts/ids
 import type { ProjectBinding } from "../../../shared/contracts/project-binding.js";
 import type { Job } from "../../../shared/contracts/job.js";
 import type { AgentVersion, PolicyVersion, ProcessVersion, ReasoningEffort, ServiceTier } from "../../../shared/contracts/versions.js";
+import type { AttemptPackFile, SnapshotPack } from "./pack.js";
 
 export type { CatalogMcpId, CatalogSkillId };
 
@@ -90,6 +91,8 @@ export type CompileContextSnapshotInput = {
   roleInstructions?: string | null;
   /** "full" when the work rule «Запуск без песочницы» applies to this launch. */
   permissionMode?: "full" | null;
+  /** `primary` or `fallback N`: which pair of the profile `agentVersion.providerId+model` is for this launch. */
+  launchModelSource?: string | null;
   /** Other folders of the project, workplaces and the main job's folder; absent when there are none. */
   placement?: {
     projectFolders: readonly { bindingId: string; hostId: string; root: string }[];
@@ -98,6 +101,10 @@ export type CompileContextSnapshotInput = {
   } | null;
   /** Installed plugins the employee's profile selects: their tools and skills for this launch. */
   pluginGrants?: readonly PluginGrant[];
+  /** Membership role of the assignee in the job's department: picks the CLI card of the pack. */
+  memberRole?: string | null;
+  /** Language of the pack's own headings; brief and instructions stay as written. */
+  packLanguage?: "ru" | "en";
 };
 
 export type SelectedSkill = {
@@ -201,6 +208,8 @@ export type ContextSnapshot = {
     policyVersionId: string;
     skillIds: CatalogSkillId[];
     mcpIds: CatalogMcpId[];
+    /** `fallback N` when providerId+model are the owner's N-th reserve, not the primary. Absent for the primary. */
+    modelSource?: string;
   };
   processVersion: {
     id: string;
@@ -250,6 +259,8 @@ export type ContextSnapshot = {
   };
   provenance: SnapshotProvenance;
   prompt: CompiledContextPrompt;
+  /** Files of the attempt pack as written to disk. Absent on snapshots made before the pack. */
+  pack?: SnapshotPack;
   digest: string;
 };
 
@@ -259,5 +270,5 @@ export type CompileContextSnapshotError = {
 };
 
 export type CompileContextSnapshotResult =
-  | { ok: true; snapshot: ContextSnapshot }
+  | { ok: true; snapshot: ContextSnapshot; packFiles: readonly AttemptPackFile[] }
   | { ok: false; error: CompileContextSnapshotError };

@@ -1,10 +1,10 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { officialSdkAllowsIsolatedSpawn } from "./sdk-isolation-contract.js";
-import type {
-  IsolatedThreadListArgs,
-  IsolatedThreadSpawnArgs,
-  OfficialThreadListArgs,
-  OfficialThreadSpawnArgs,
+import {
+  AGENCY_PLUGIN_ID,
+  type IsolatedThreadListArgs,
+  type IsolatedThreadSpawnArgs,
+  type OfficialThreadListArgs,
+  type OfficialThreadSpawnArgs,
 } from "./sdk-isolation-contract.js";
 import {
   isDispatchedUserRow,
@@ -32,10 +32,50 @@ function readNested(record: object, key: string): object | null | undefined {
   return undefined;
 }
 
+function parseAgencyPluginMetadata(value: unknown): IsolatedThreadView["pluginMetadata"] {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, unknown>;
+  const source =
+    obj.pluginMetadata && typeof obj.pluginMetadata === "object" && typeof obj.agencyLaunchId !== "string"
+      ? (obj.pluginMetadata as Record<string, unknown>)
+      : obj;
+  const agencyLaunchId = typeof source.agencyLaunchId === "string" && source.agencyLaunchId ? source.agencyLaunchId : undefined;
+  const agencyAttemptId = typeof source.agencyAttemptId === "string" && source.agencyAttemptId ? source.agencyAttemptId : undefined;
+  const agencyJobId = typeof source.agencyJobId === "string" && source.agencyJobId ? source.agencyJobId : undefined;
+  if (!agencyLaunchId && !agencyAttemptId && !agencyJobId) return undefined;
+  return {
+    ...(agencyLaunchId ? { agencyLaunchId } : {}),
+    ...(agencyAttemptId ? { agencyAttemptId } : {}),
+    ...(agencyJobId ? { agencyJobId } : {}),
+  };
+}
+
+async function loadPluginMetadata(
+  threads: BbPluginApi["sdk"]["threads"],
+  threadId: string,
+): Promise<IsolatedThreadView["pluginMetadata"]> {
+  const fn = Reflect.get(threads, "getPluginMetadata");
+  if (typeof fn !== "function") return undefined;
+  try {
+    return parseAgencyPluginMetadata(await fn.call(threads, { threadId }));
+  } catch {
+    return undefined;
+  }
+}
+
+function mergePluginMetadata(
+  view: IsolatedThreadView,
+  extra: IsolatedThreadView["pluginMetadata"],
+): IsolatedThreadView {
+  if (!extra) return view;
+  return { ...view, pluginMetadata: { ...view.pluginMetadata, ...extra } };
+}
+
 /** Map a threads.get/list row without asserting SDK result types. */
 export function isolatedViewFromRecord(value: object): IsolatedThreadView {
   const host = readNested(value, "host");
   const environment = readNested(value, "environment");
+  const pluginMetadata = parseAgencyPluginMetadata(Reflect.get(value, "pluginMetadata"));
   return {
     id: readOptionalString(value, "id") ?? "",
     status: readOptionalString(value, "status"),
@@ -43,9 +83,7 @@ export function isolatedViewFromRecord(value: object): IsolatedThreadView {
     providerId: readOptionalString(value, "providerId"),
     model: readOptionalString(value, "model"),
     environmentId: readOptionalString(value, "environmentId"),
-    experimental_callerLaunchId: readOptionalString(value, "experimental_callerLaunchId"),
-    experimental_callerAttemptId: readOptionalString(value, "experimental_callerAttemptId"),
-    experimental_callerJobId: readOptionalString(value, "experimental_callerJobId"),
+    ...(pluginMetadata ? { pluginMetadata } : {}),
     ...(readOptionalNumber(value, "updatedAt") !== undefined ? { updatedAt: readOptionalNumber(value, "updatedAt") } : {}),
     ...(readOptionalNumber(value, "activeBackgroundAgentCount") !== undefined
       ? { activeBackgroundAgentCount: readOptionalNumber(value, "activeBackgroundAgentCount") }
@@ -62,10 +100,9 @@ export function isolatedViewFromRecord(value: object): IsolatedThreadView {
 }
 
 /**
- * Compile-true mapping. Pin 0.4.87-agy16.431; public 0.4.87 fails this assignability.
- * Core `resolveProjectExecutionDefaultsForCreate` ignores a spawn field when
- * `executionInputSources` is present and that field's source is omitted — project
- * defaults then win. SDK source enum: `explicit` | `client-preference`.
+ * Public 0.43 createThread keys only. Extra experimental fields fail `.strict()`
+ * on the live server. `executionInputSources` must mark provider/model explicit
+ * or project defaults win.
  */
 function officialSpawnArgs(args: IsolatedThreadSpawnArgs): OfficialThreadSpawnArgs {
   return {
@@ -74,12 +111,10 @@ function officialSpawnArgs(args: IsolatedThreadSpawnArgs): OfficialThreadSpawnAr
     model: args.model,
     prompt: args.prompt,
     environment: args.environment,
-    isolatedSkillDelivery: args.isolatedSkillDelivery,
-    skillIds: args.skillIds,
+    origin: args.origin,
+    originPluginId: args.originPluginId ?? AGENCY_PLUGIN_ID,
     visibility: args.visibility,
-    experimental_callerLaunchId: args.experimental_callerLaunchId,
-    experimental_callerAttemptId: args.experimental_callerAttemptId,
-    ...(args.experimental_callerJobId ? { experimental_callerJobId: args.experimental_callerJobId } : {}),
+    pluginMetadata: args.pluginMetadata,
     executionInputSources: {
       providerId: "explicit" as const,
       model: "explicit" as const,
@@ -90,33 +125,23 @@ function officialSpawnArgs(args: IsolatedThreadSpawnArgs): OfficialThreadSpawnAr
     ...(args.reasoningLevel ? { reasoningLevel: args.reasoningLevel } : {}),
     ...(args.serviceTier ? { serviceTier: args.serviceTier } : {}),
     ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
-    ...(args.instructionPluginIds?.length ? { instructionPluginIds: args.instructionPluginIds } : {}),
-    ...(args.dynamicToolNames?.length ? { dynamicToolNames: args.dynamicToolNames } : {}),
-    ...(args.allowBridgeToolProxy ? { allowBridgeToolProxy: true } : {}),
   };
 }
 
 function officialListArgs(args?: IsolatedThreadListArgs): OfficialThreadListArgs {
   return {
-    ...(args?.experimental_callerLaunchId
-      ? { experimental_callerLaunchId: args.experimental_callerLaunchId }
-      : {}),
     ...(args?.includeHidden !== undefined ? { includeHidden: args.includeHidden } : {}),
     ...(args?.projectId ? { projectId: args.projectId } : {}),
+    originPluginId: args?.originPluginId ?? AGENCY_PLUGIN_ID,
   };
 }
 
 /**
- * Typed spawn/list on compile pin 0.4.87-agy16.431. No casts.
- * Runtime spawn is still gated by GET experimental_thread-spawn-contract
- * (`createIsolatedSpawnPort(..., supported)`). Engines / ordinary 0.4.87 ≠ readiness.
+ * Typed spawn/get/list on the public `threads` SDK.
  */
 export function bindOfficialThreads(threads: BbPluginApi["sdk"]["threads"]): IsolatedThreadsApi {
   return {
     async spawn(args: IsolatedThreadSpawnArgs): Promise<{ id: string }> {
-      if (!officialSdkAllowsIsolatedSpawn()) {
-        throw new Error("official SDK types lack experimental_callerLaunchId; compile pin required");
-      }
       const result = await threads.spawn(officialSpawnArgs(args));
       const id = readOptionalString(result, "id");
       if (!id) throw new Error("threads.spawn returned no thread id");
@@ -127,13 +152,16 @@ export function bindOfficialThreads(threads: BbPluginApi["sdk"]["threads"]): Iso
         threadId: args.threadId,
         ...(args.include ? { include: args.include } : {}),
       });
-      return isolatedViewFromRecord(result);
+      return mergePluginMetadata(isolatedViewFromRecord(result), await loadPluginMetadata(threads, args.threadId));
     },
     async list(args?: IsolatedThreadListArgs) {
       const listed = await threads.list(officialListArgs(args));
       const rows = Reflect.get(listed, "threads");
       if (!Array.isArray(rows)) return [];
-      return rows.filter((row): row is object => Boolean(row) && typeof row === "object").map(isolatedViewFromRecord);
+      const views = rows.filter((row): row is object => Boolean(row) && typeof row === "object").map(isolatedViewFromRecord);
+      return Promise.all(
+        views.map(async (view) => mergePluginMetadata(view, view.id ? await loadPluginMetadata(threads, view.id) : undefined)),
+      );
     },
     async send(args: IsolatedThreadSendArgs) {
       const result = await threads.send({

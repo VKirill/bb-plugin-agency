@@ -1,5 +1,6 @@
 import { tr } from "../i18n";
-import { CONTRACT_PARTS, type JobState } from "../../shared/contracts";
+import { CONTRACT_PARTS, optionalFallbackModels, type JobState } from "../../shared/contracts";
+import { fallbackModelsFromPicks, fallbackProblems, type FallbackProblem } from "./agent-fallbacks";
 import type { Agent, Group, Job, TaskFile } from "../prototype/data";
 import type { AgencyApi } from "./agency-api";
 import { asRelativePath, bytesToBase64, fileBytes, isOpaqueRecordId, mimeOf, sha256Hex } from "./content-hash";
@@ -241,9 +242,22 @@ export async function persistAgentPatch(
   const named = next.role.trim() || currentVersion?.role || "Роль";
   const instructions = next.instructions.trim() || currentVersion?.instructions || "Задайте инструкции сотрудника.";
   const providerId = next.selection.providerId.trim() || currentVersion?.providerId || DEFAULT_PROVIDER_ID;
+  const primaryModel = next.selection.model.trim() || currentVersion?.model || "";
+  // The list goes to the server as the owner built it: a wrong row is named here, never dropped in silence.
+  const picks = next.fallbackSelections ?? [];
+  const problem = fallbackProblems({ providerId, model: primaryModel }, picks)[0];
+  if (problem) {
+    return { ok: false, failure: { kind: "domain", error: { code: "invalid_command", message: fallbackProblemText(problem) } } };
+  }
+  const reserves = fallbackModelsFromPicks(picks);
   // The owner picked this CLI: a policy that lists other CLIs (older ones name only Claude Code) gets it added.
   const chosenPolicy = snapshot.policies.find((policy) => policy.id === chosenPolicyId);
-  const widened = chosenPolicy ? policyWithProvider(chosenPolicy, providerId) : null;
+  let widened = chosenPolicy ? policyWithProvider(chosenPolicy, providerId) : null;
+  for (const reserve of reserves) {
+    const base = widened ?? chosenPolicy;
+    const extra = base ? policyWithProvider(base, reserve.providerId) : null;
+    if (extra) widened = extra;
+  }
   let policyVersionId = chosenPolicyId;
   if (widened) {
     const resolved = await resolvePolicyContent(api, snapshot, widened);
@@ -273,6 +287,7 @@ export async function persistAgentPatch(
       mcpIds: next.mcps.map((item) => item.trim()).filter(Boolean),
       pluginIds: (next.plugins ?? []).map((item) => item.trim()).filter(Boolean),
       policyVersionId,
+      ...optionalFallbackModels(reserves),
     },
   });
   return result.ok ? { ok: true } : result;
@@ -455,7 +470,7 @@ export async function persistAcceptArtifact(
   });
 }
 
-/** acceptArtifactVersion (exact version+hash), then transitionJob(done) if the server still allows it. */
+/** acceptArtifactVersion (exact version+hash). The store closes review→done; this only transitions if an older server left the job in review. */
 export async function persistAcceptThenDone(
   api: AgencyApi,
   input: { expectedRevision: number; jobId: string; artifactId: string; version: number; hash: string },
@@ -520,4 +535,12 @@ export async function persistProjectAnyCli(api: AgencyApi, snapshot: WorkspaceSn
   const resolved = await resolvePolicyContent(api, snapshot, open);
   if (!resolved.ok) return resolved;
   return api.updateProjectBinding({ requestId: newRequestId(), expectedRevision: binding.revision, bindingId, policyVersionId: resolved.value });
+}
+
+/** Why a reserve row cannot be saved, in the owner's words; the row number is 1-based. */
+export function fallbackProblemText(problem: FallbackProblem): string {
+  const row = String(problem.index + 1);
+  if (problem.kind === "same_as_primary") return tr("Запасная модель {row} совпадает с основной. Выберите другую CLI или модель либо уберите строку.", { row });
+  if (problem.kind === "repeated") return tr("Запасная модель {row} повторяет строку выше. Выберите другую или уберите строку.", { row });
+  return tr("В запасной модели {row} не выбрана CLI или модель.", { row });
 }

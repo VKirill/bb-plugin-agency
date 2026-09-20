@@ -17,11 +17,20 @@ export const needsInputSourceRefSchema = z
   })
   .strict();
 
+export const needsInputChoiceSchema = z
+  .object({
+    id: z.string().trim().min(1).max(40),
+    label: z.string().trim().min(1).max(80),
+    description: z.string().trim().min(1).max(400).optional(),
+  })
+  .strict();
+
 export const needsInputQuestionSchema = z
   .object({
     id: z.string().trim().min(1).max(80),
     text: z.string().trim().min(1).max(4_000),
     sourceRefs: z.array(needsInputSourceRefSchema).min(1).max(8),
+    choices: z.array(needsInputChoiceSchema).min(2).max(4).optional(),
   })
   .strict();
 
@@ -113,6 +122,7 @@ export const answerNeedsInputRecordSchema = z
 export const answerNeedsInputRpcSchema = answerNeedsInputCommandSchema;
 
 export type NeedsInputSourceRef = z.infer<typeof needsInputSourceRefSchema>;
+export type NeedsInputChoice = z.infer<typeof needsInputChoiceSchema>;
 export type NeedsInputQuestion = z.infer<typeof needsInputQuestionSchema>;
 export type ReportNeedsInputCommand = z.infer<typeof reportNeedsInputCommandSchema>;
 export type NeedsInputRecord = z.infer<typeof needsInputRecordSchema>;

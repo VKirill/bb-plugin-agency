@@ -9,7 +9,6 @@ import { openMigratedDatabase } from "../src/server/db";
 import { createPluginDirectory, isEmployeePluginCandidate, toPluginView } from "../src/server/integrations/plugin-directory";
 import type { ContextSnapshot } from "../src/server/runtime/context-snapshot/types";
 import { bindOfficialThreads } from "../src/server/runtime/isolated-sdk/bind-official-threads";
-import { handshakeFromSpawnContract } from "../src/server/runtime/isolated-sdk/core-capability";
 import { spawnArgsFromContract } from "../src/server/runtime/isolated-sdk/spawn-args";
 import { createDomainStore, type ServiceContext } from "../src/server/services";
 import { agentVersionSchema } from "../src/shared/contracts";
@@ -137,43 +136,35 @@ describe("plugin allowlists in the spawn", () => {
     ({
       schemaVersion: 2,
       digest: "d".repeat(64),
+      job: { key: "AG-1", title: "T" },
+      agentVersion: { role: "Developer" },
       prompt: { digest: "p".repeat(64), levels: { platform: "p", agency: "a", project: "pr", department: "d", agent: "ag", job: "Бриф.", handoff: "" } },
       binding: { id: "bnd_aaaaaaaa", hostId: "host_mini", canonicalRoot: "/tmp/agency-root", revision: 1, bbProjectId: "proj_trusted", environmentId: "env_1", policyVersionId: "pol_aaaaaaaa" },
       ...over,
     }) as ContextSnapshot;
 
-  it("sends nothing extra without plugins and the allowlists with them", async () => {
+  it("sends nothing extra without plugins and does not put experimental plugin allowlists on the wire", async () => {
     const plain = spawnArgsFromContract(contract, snapshot(), "job_aaaaaaaaaaaaaaaaaaaaaaaa");
     expect(plain.ok && "instructionPluginIds" in plain.value).toBe(false);
 
     const built = spawnArgsFromContract(contract, snapshot({ plugins: { ids: ["file-gateway"], toolNames: ["bb_file_gateway"] } }), "job_aaaaaaaaaaaaaaaaaaaaaaaa");
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    expect(built.value).toMatchObject({ instructionPluginIds: ["file-gateway"], dynamicToolNames: ["bb_file_gateway"], allowBridgeToolProxy: true });
-
-    const instructionsOnly = spawnArgsFromContract(contract, snapshot({ plugins: { ids: ["project-folders"], toolNames: [] } }), "job_aaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(instructionsOnly.ok && instructionsOnly.value.dynamicToolNames).toBeFalsy();
-    expect(instructionsOnly.ok && instructionsOnly.value.allowBridgeToolProxy).toBeFalsy();
+    expect("instructionPluginIds" in built.value).toBe(false);
+    expect("dynamicToolNames" in built.value).toBe(false);
+    expect("allowBridgeToolProxy" in built.value).toBe(false);
 
     const spawned: Record<string, unknown>[] = [];
     const threads = { spawn: async (args: Record<string, unknown>) => { spawned.push(args); return { id: "thr_1" }; }, get: async () => ({ id: "thr_1" }), list: async () => ({ threads: [] }) };
     await bindOfficialThreads(threads as never).spawn(built.value);
-    expect(spawned[0]).toMatchObject({ instructionPluginIds: ["file-gateway"], dynamicToolNames: ["bb_file_gateway"], allowBridgeToolProxy: true });
-  });
-
-  it("reads plugin delivery support from the core spawn contract", () => {
-    const base = {
-      protocol: "bb-experimental-thread-spawn-contract-v1",
-      appVersion: "0.43.1",
-      fingerprint: "a".repeat(64),
-      createThreadRequestKeys: ["experimental_callerLaunchId", "experimental_callerAttemptId", "experimental_callerJobId", "isolatedSkillDelivery", "skillIds", "originPluginId"],
-      threadListQueryKeys: ["experimental_callerLaunchId", "originPluginId", "includeHidden"],
-      threadResponseKeys: ["experimental_callerLaunchId", "experimental_callerAttemptId", "experimental_callerJobId"],
-      persist: { table: "thread_caller_launches", unique: ["origin_plugin_id", "caller_launch_id"] },
-      policies: { forkDoesNotInheritCallerIdentity: true, hiddenVisibilitySupported: true },
-    };
-    expect(handshakeFromSpawnContract(base).extensions).toEqual({ contextAllowlists: false, permissionMode: false });
-    const newer = { ...base, createThreadRequestKeys: [...base.createThreadRequestKeys, "dynamicToolNames", "instructionPluginIds", "allowBridgeToolProxy", "permissionMode"] };
-    expect(handshakeFromSpawnContract(newer).extensions).toEqual({ contextAllowlists: true, permissionMode: true });
+    expect(spawned[0]?.instructionPluginIds).toBeUndefined();
+    expect(spawned[0]?.dynamicToolNames).toBeUndefined();
+    expect(spawned[0]?.allowBridgeToolProxy).toBeUndefined();
+    expect(spawned[0]?.originPluginId).toBe("agency");
+    expect(spawned[0]?.pluginMetadata).toEqual({
+      agencyLaunchId: contract.launchId,
+      agencyAttemptId: contract.attemptId,
+      agencyJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    });
   });
 });

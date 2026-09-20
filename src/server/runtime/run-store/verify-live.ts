@@ -7,6 +7,7 @@ import { sameCanonical } from "../../services/request-identity";
 import { sha256Hex } from "../context-snapshot/canonical.js";
 import { effectivePolicy, policyContentHash } from "../context-snapshot/policy.js";
 import type { ContextSnapshot } from "../context-snapshot/types.js";
+import { profileNamesModel } from "../agent-fallback.js";
 
 function listsEqual(left: readonly string[], right: readonly string[]): boolean {
   return sameCanonical([...left].sort(), [...right].sort());
@@ -143,8 +144,8 @@ export function verifyLiveLaunchIdentity(
   const processVersion = repos.processVersion.get(department.processVersionId);
   if (!processVersion) return fail("not_found", `processVersion ${department.processVersionId} not found`);
   if (
-    snapshot.agentVersion.model !== agentVersion.model ||
-    snapshot.agentVersion.providerId !== agentVersion.providerId ||
+    // The launch runs on the primary or on a reserve the owner listed in this very version.
+    !profileNamesModel(agentVersion, snapshot.agentVersion) ||
     snapshot.agentVersion.version !== agentVersion.version ||
     snapshot.agentVersion.role !== agentVersion.role ||
     snapshot.agentVersion.instructionsHash !== sha256Hex(agentVersion.instructions) ||

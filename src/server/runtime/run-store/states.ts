@@ -12,7 +12,8 @@ const TRANSITIONS: Readonly<Record<RunAttemptState, readonly RunAttemptState[]>>
   // running: the owner returned the version for rework in the same thread.
   awaiting_review: ["running", "succeeded", "failed", "canceled", "unknown"],
   unknown: ["running", "failed", "canceled", "succeeded"],
-  succeeded: [],
+  // running: reclamation — the customer returned a delivered product; the same thread reworks it.
+  succeeded: ["running"],
   failed: [],
   canceled: [],
 };

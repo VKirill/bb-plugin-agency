@@ -58,7 +58,7 @@ describe("executor → reviewer chain", () => {
   it("creates one review next to the handed-in work, assigns a reviewer and queues it", async () => {
     const t = setup();
     expect(await startAutoReview(t.ports, t.work.id)).toBe("created");
-    expect(await startAutoReview(t.ports, t.work.id)).toBe("skipped");
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("pending");
     const review = (t.db.prepare(`SELECT id FROM agency_job WHERE title LIKE 'Проверка %'`).all() as { id: string }[]).map((row) => t.s.store.getJob(row.id)!);
     expect(review).toHaveLength(1);
     expect(review[0]).toMatchObject({ parentJobId: t.main.id, assignedAgentId: t.s.reviewer, priority: "high" });

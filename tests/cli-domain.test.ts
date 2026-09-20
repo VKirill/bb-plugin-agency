@@ -343,7 +343,7 @@ describe("agency CLI → domain", () => {
         }),
       ]);
 
-      const got = await requireCliOk<{ job: { assignedAgentId: string } }>(harness, ["job", "get", "--job-id", job.id]);
+      const got = await requireCliOk<{ job: { assignedAgentId: string; revision: number } }>(harness, ["job", "get", "--job-id", job.id]);
       expect(got.job.assignedAgentId).toBe(agent.agent.id);
 
       const stale = await cliJson(harness, [
@@ -410,7 +410,7 @@ describe("agency CLI → domain", () => {
         "--input-json",
         JSON.stringify({
           requestId: requestId(),
-          expectedRevision: 2,
+          expectedRevision: got.job.revision,
           jobId: job.id,
           artifactId: artifact.id,
           version: published.version,

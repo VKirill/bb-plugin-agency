@@ -1,5 +1,5 @@
 import type { OwnerMessageView, StarterKitViewRecord } from "../../shared/rpc-contract";
-import type { AgentMetricsView, BackupFileView, DependencyLinkRecord, GoalViewRecord, JobNextStepRecord, JobSearchHitView, KnowledgeItemView, NextStepViewRecord, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
+import type { AgentMetricsView, BackupFileView, DependencyLinkRecord, GoalViewRecord, IdeaItemView, JobNextStepRecord, JobSearchHitView, KnowledgeItemView, NextStepViewRecord, PluginDirectoryView, SavedViewRecord } from "../../shared/rpc-contract";
 import type { RuleScheduleView, WebhookSourceView } from "../../shared/rpc-contract";
 import type { AgencyRulesView, TemplateView } from "../../shared/rpc-contract";
 import type { BudgetStatusView, ProviderUsageView } from "../../shared/rpc-contract";
@@ -153,8 +153,24 @@ export interface AgencyApi {
   createBackup(): Promise<MutationOutcome<BackupFileView>>;
   restoreBackup(input: { name: string }): Promise<MutationOutcome<{ restored: string; safetyBackup: BackupFileView; tables: number }>>;
   listKnowledge(): Promise<MutationOutcome<KnowledgeItemView[]>>;
-  saveKnowledge(input: { id?: string; expectedRevision: number; title: string; body: string; source: string; scopeKind: KnowledgeItemView["scopeKind"]; scopeId: string | null }): Promise<MutationOutcome<KnowledgeItemView>>;
+  saveKnowledge(input: { id?: string; expectedRevision: number; title: string; body: string; source: string; scopeKind: KnowledgeItemView["scopeKind"]; scopeId: string | null; parentBindingId?: string }): Promise<MutationOutcome<KnowledgeItemView>>;
   setKnowledgeStatus(input: { id: string; expectedRevision: number; status: KnowledgeItemView["status"] }): Promise<MutationOutcome<KnowledgeItemView>>;
+  listIdeas(input: { bindingId?: string; bbProjectId?: string; sectionId?: string; kind?: IdeaItemView["kind"]; status?: IdeaItemView["status"] } | null): Promise<MutationOutcome<IdeaItemView[]>>;
+  getIdea(input: { id: string }): Promise<MutationOutcome<IdeaItemView>>;
+  saveIdea(input: {
+    id?: string;
+    expectedRevision: number;
+    title: string;
+    body: string;
+    kind?: IdeaItemView["kind"];
+    status?: IdeaItemView["status"];
+    bindingId: string;
+    sectionId?: string | null;
+    sectionLabel?: string;
+    sourceThreadId?: string | null;
+  }): Promise<MutationOutcome<IdeaItemView>>;
+  setIdeaStatus(input: { id: string; expectedRevision: number; status: IdeaItemView["status"] }): Promise<MutationOutcome<IdeaItemView>>;
+  spawnIdeaThread(input: { id: string; request: Record<string, unknown> }): Promise<MutationOutcome<{ threadId: string }>>;
   listGoals(): Promise<MutationOutcome<GoalViewRecord[]>>;
   saveGoal(input: { id?: string; expectedRevision: number; title: string; description: string; status: GoalViewRecord["status"]; dueAt: string | null }): Promise<MutationOutcome<GoalViewRecord>>;
   setJobGoal(input: { jobId: string; goalId: string | null }): Promise<MutationOutcome<{ jobId: string; goalId: string | null }>>;

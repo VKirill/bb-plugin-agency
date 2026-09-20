@@ -7,9 +7,8 @@ export {
 export { launchContractFromSnapshot } from "./contract.js";
 export { createLaunchCoordinator, LAUNCH_COORDINATOR_STATUS, LAUNCH_DURABILITY_LIMIT } from "./coordinator.js";
 export { launchOpRequestId } from "./operation-ids.js";
-export { DEPLOYED_CORE_ISOLATED_SPAWN_FIELDS, isReadyToSpawn, unavailableReadinessPort } from "./readiness.js";
+export { NATIVE_SPAWN_READINESS, isReadyToSpawn, unavailableReadinessPort } from "./readiness.js";
 export {
-  deployedSdkHasIsolatedSpawnFields,
   unsupportedSdkSpawnPort,
   unsupportedSdkThreadVerifyPort,
 } from "./sdk-spawn.js";

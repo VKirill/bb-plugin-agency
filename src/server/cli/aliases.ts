@@ -41,10 +41,19 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "save") return "saveKnowledge";
     if (rest[0] === "status") return "setKnowledgeStatus";
   }
+  if ((head === "idea" || head === "ideas") && rest.length === 1) {
+    if (rest[0] === "list") return "listIdeas";
+    if (rest[0] === "get") return "getIdea";
+    if (rest[0] === "save") return "saveIdea";
+    if (rest[0] === "status") return "setIdeaStatus";
+    if (rest[0] === "thread") return "spawnIdeaThread";
+  }
   if (head === "decisions" && rest.length === 1) {
     if (rest[0] === "get") return "getDecisionSettings";
     if (rest[0] === "save") return "saveDecisionSettings";
     if (rest[0] === "test") return "testDecisionModel";
+    if (rest[0] === "log") return "listDecisionLog";
+    if (rest[0] === "probe") return "probeDecisionPoints";
   }
   if (head === "goal" && rest.length === 1) {
     if (rest[0] === "list") return "listGoals";
@@ -110,6 +119,12 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "delete" && rest.length === 1) return "deleteProjectBinding";
     if (rest[0] === "rules" && rest.length === 1) return "readProjectRules";
     if (rest[0] === "rules-save" && rest.length === 1) return "saveProjectRules";
+    if (rest[0] === "session" && rest[1] === "get") return "getSessionPolicy";
+    if (rest[0] === "session" && rest[1] === "save") return "saveSessionPolicy";
+  }
+  if (head === "session" && rest.length === 1) {
+    if (rest[0] === "get") return "getSessionPolicy";
+    if (rest[0] === "save") return "saveSessionPolicy";
   }
   if (head === "job" && rest.length === 1) {
     if (rest[0] === "create") return "createJob";

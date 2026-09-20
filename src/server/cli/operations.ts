@@ -1,10 +1,11 @@
 import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../shared/rpc-contract";
-import { saveDecisionSettingsInputSchema, addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, saveKnowledgeInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
+import { saveDecisionSettingsInputSchema, addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, listKnowledgeInputSchema, saveKnowledgeInputSchema, listIdeasInputSchema, saveIdeaInputSchema, setIdeaStatusInputSchema, spawnIdeaThreadInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
 import { saveAgencyRulesInputSchema, saveTemplateInputSchema } from "../../shared/rpc-contract";
 import { savePassportInputSchema, savePassportSettingsInputSchema } from "../../shared/rpc-contract";
 import { getWorkRulesInputSchema } from "../../shared/rpc-contract";
 import { saveWorkRulesCommandSchema } from "../../shared/contracts/work-rules";
+import { getSessionPolicyInputSchema, saveSessionPolicyInputSchema } from "../../shared/contracts/session-policy";
 import { listDashboardUsageInputSchema } from "../../shared/contracts/dashboard-usage";
 import type { ZodType } from "zod";
 import {
@@ -65,6 +66,8 @@ import {
 const emptyObjectSchema = z.object({}).strict();
 
 export const CLI_OPERATIONS = {
+  getSessionPolicy: { input: getSessionPolicyInputSchema, summary: "Режим обычных чатов: проект, папка, этот тред" },
+  saveSessionPolicy: { input: saveSessionPolicyInputSchema, summary: "Задать режим чатов проекта, папки или этого треда" },
   listWorkspace: { input: listWorkspaceInputSchema, summary: "Снимок workspace, включая полный PolicyVersion" },
   listBbCatalog: { input: emptyObjectSchema, summary: "Каталог BB-проектов и окружений; label политики не есть права" },
   listCapabilityCatalog: { input: capabilityCatalogInputSchema, summary: "Read-only навыки/MCP из SDK" },
@@ -95,11 +98,18 @@ export const CLI_OPERATIONS = {
   saveTemplate: { input: saveTemplateInputSchema, summary: "Сохранить шаблон (text) или сбросить к стандартному (text: null); expectedRevision из listTemplates" },
   getAgencyRules: { input: emptyObjectSchema, summary: "Общие правила Агентства: действующая версия и история" },
   saveAgencyRules: { input: saveAgencyRulesInputSchema, summary: "Новая версия общих правил Агентства; пустой текст выключает слой. expectedVersion = latestVersion" },
-  listKnowledge: { input: emptyObjectSchema, summary: "Знания Агентства, отделов и проектов: принятые (идут в запуски по области), предложения и архив" },
-  saveKnowledge: { input: saveKnowledgeInputSchema, summary: "Материал знаний; из треда сотрудника сохраняется как предложение до решения владельца" },
-  getDecisionSettings: { input: emptyObjectSchema, summary: "Оценщик: настройки, точки решения, состояние ключа и имена переменных Env Catalog" },
+  listKnowledge: { input: listKnowledgeInputSchema, summary: "Знания Агентства, отделов, проектов и разделов: принятые (идут в запуски по области), предложения и архив; фильтр scopeKind/scopeId/parentBindingId/status" },
+  saveKnowledge: { input: saveKnowledgeInputSchema, summary: "Материал знаний Агентства, отдела, проекта или раздела; из треда сотрудника сохраняется как предложение до решения владельца" },
+  listIdeas: { input: listIdeasInputSchema, summary: "Склад идей и туду: фильтр bindingId / bbProjectId / sectionId / kind / status; в ответе title, projectPath и relativePath для ссылок в чате" },
+  getIdea: { input: z.object({ id: z.string() }).strict(), summary: "Одна идея целиком: markdown-тело и путь файла в проекте" },
+  saveIdea: { input: saveIdeaInputSchema, summary: "Записать обсуждённую идею или туду: база Агентства и файл .bb/agency/ideas/<id>.md в корне привязанного проекта" },
+  setIdeaStatus: { input: setIdeaStatusInputSchema, summary: "Сменить статус идеи: open, parked, done, archived" },
+  spawnIdeaThread: { input: spawnIdeaThreadInputSchema, summary: "Создать видимый тред BB по идее: штатный композер, не скрытый запуск сотрудника" },
+  getDecisionSettings: { input: emptyObjectSchema, summary: "Оценщик: настройки, точки решения, журнал, состояние ключа и имена переменных Env Catalog" },
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, summary: "Включить оценщика, выбрать модель, имя ключа и точки решения; expectedRevision из getDecisionSettings" },
   testDecisionModel: { input: emptyObjectSchema, summary: "Задать оценщику один вопрос и показать ответ, уверенность и время" },
+  listDecisionLog: { input: z.object({ limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Журнал оценщика: точка, задача, исход, ответы с уверенностью и время" },
+  probeDecisionPoints: { input: emptyObjectSchema, summary: "Живая проверка оценки на входе, подсказки к запуску и привратника сдачи на учебных брифах без запуска сотрудника" },
   listGoals: { input: emptyObjectSchema, summary: "Цели над главными задачами с прогрессом" },
   setJobGoal: { input: z.object({ jobId: z.string(), goalId: z.string().nullable() }).strict(), summary: "Привязать главную задачу к цели (goalId null — отвязать)" },
   searchJobs: { input: z.object({ query: z.string().max(200), limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Поиск задач по ключу, названию, брифу и комментариям, включая архив" },
@@ -173,7 +183,7 @@ export const CLI_OPERATIONS = {
     input: answerNeedsInputRpcSchema,
     summary: "Ответ на needsInput: waitId текущего цикла, тот же thread/attempt, official send, без spawn и accept",
   },
-  acceptArtifactVersion: { input: acceptArtifactRpcSchema, summary: "Принять текущую версию" },
+  acceptArtifactVersion: { input: acceptArtifactRpcSchema, summary: "Принять текущую версию и закрыть станцию" },
   openArtifact: { input: openArtifactRpcSchema, summary: "Открыть версию; bytes в CLI не печатаются" },
   enqueueLaunch: {
     input: enqueueLaunchRpcSchema,
@@ -182,10 +192,10 @@ export const CLI_OPERATIONS = {
   dequeueLaunch: { input: dequeueLaunchRpcSchema, summary: "Убрать задачу из очереди запуска" },
   prepareLaunch: {
     input: prepareLaunchRpcSchema,
-    summary: "Prepare launch на текущем instance; spawn только после handshake этого runtime",
+    summary: "Prepare launch на текущем instance; native threads.spawn (скрытый plugin-тред); не respawn",
   },
   getLaunch: { input: getLaunchRpcSchema, summary: "Прочитать launch receipt по launchId или attemptId" },
-  reconcileLaunch: { input: reconcileLaunchRpcSchema, summary: "Сверить thread по experimental_callerLaunchId; не respawn" },
+  reconcileLaunch: { input: reconcileLaunchRpcSchema, summary: "Сверить thread по pluginMetadata.agencyLaunchId; не respawn" },
   interpretWorkerCompletion: {
     input: interpretWorkerCompletionRpcSchema,
     summary: "Сверить completion с core get + open/hash; caller flags не принимаются",
@@ -196,7 +206,7 @@ export const CLI_OPERATIONS = {
   },
   getIsolationReadiness: {
     input: getIsolationReadinessRpcSchema,
-    summary: "GET spawn-contract + typed spawn; engines не готовность; любой CLI, подключённый в BB, если его разрешают политики проекта и сотрудника",
+    summary: "Native threads.spawn + assigned CLI; любой CLI, подключённый в BB, если его разрешают политики проекта и сотрудника",
   },
   returnJobForRework: {
     input: returnJobForReworkCommandSchema,

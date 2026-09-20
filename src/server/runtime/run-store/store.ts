@@ -324,7 +324,30 @@ function createRunStoreParts(db: SqlDatabase): { writes: RunStore; reads: Intern
           }
           const active = findActiveAttempt(input.snapshot.job.id);
           if (active) {
-            return fail("active_attempt_exists", `job ${input.snapshot.job.id} already has an active attempt`);
+            const orphanPrepared =
+              active.state === "prepared" && active.thread_id == null && active.launch_id == null;
+            if (!orphanPrepared) {
+              return fail("active_attempt_exists", `job ${input.snapshot.job.id} already has an active attempt`);
+            }
+            if (active.digest === input.snapshot.digest) {
+              return ok({
+                snapshotId: active.snapshot_id,
+                digest: active.digest,
+                attempt: mapAttempt(active),
+              });
+            }
+            const canceledAt = nowUtc(ctx);
+            const canceled = db
+              .prepare(
+                `UPDATE agency_run_attempt
+                 SET state = 'canceled', revision = revision + 1, updated_at = ?
+                 WHERE id = ? AND revision = ? AND state = 'prepared'
+                   AND thread_id IS NULL AND launch_id IS NULL`,
+              )
+              .run(canceledAt, active.id, active.revision);
+            if (canceled.changes !== 1) {
+              return fail("active_attempt_exists", `job ${input.snapshot.job.id} already has an active attempt`);
+            }
           }
           const attempt: RunAttempt = {
             attemptId: newOpaqueId("runAttempt"),

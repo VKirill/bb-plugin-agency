@@ -61,6 +61,7 @@ export const EN_CORE: Record<string, string> = {
   "Запуски": "Runs",
   "Дашборд": "Dashboard",
   "Знания": "Knowledge",
+  "Идеи": "Ideas",
   "Настройки": "Settings",
   "Раздел агентства": "Agency section",
 

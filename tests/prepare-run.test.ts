@@ -17,16 +17,10 @@ import {
 } from "../src/server/runtime/launch";
 import {
   createPrepareRun,
-  EXPERIMENTAL_ISOLATED_NAMES,
-  PUBLIC_SDK_CALLER_FIELDS,
-  isHandshakeReady,
-  parseHandshakePayload,
   pinBindingRuleSource,
-  readinessFromHandshake,
   hashCatalogSkillPackage,
   referencedSkillPaths,
   skillPackageHash,
-  unavailableHandshakePort,
   type ExplicitCatalogRoles,
   type LiveCatalogSkill,
   type SkillCatalogPort,
@@ -36,6 +30,9 @@ import { createInternalRunStoreReads, createRunStore } from "../src/server/runti
 import { openMigratedDatabase, type SqlDatabase } from "../src/server/db";
 import { createDomainStore, type ServiceContext } from "../src/server/services";
 import type { CatalogSkillId } from "../src/shared/contracts/ids";
+import { applyLaunchCandidate, launchCandidates, type LaunchCandidate } from "../src/server/runtime/agent-fallback";
+import { launchOnFirstReadyCandidate } from "../src/server/runtime/prepare-run/model-candidates";
+import { fail, ok } from "../src/domain";
 
 const AGENCY_SKILL =
   "skill_6153a163fb7fac8c435f3befc88db8417cd0722ba8fdf5ecc37b2b5069ffc3ff" as CatalogSkillId;
@@ -289,45 +286,12 @@ function runPrepare(
     store: seeded.store,
     files: opts.files,
     catalog: opts.catalog ?? catalogFor(seeded),
-    handshake: unavailableHandshakePort(),
     runs: opts.runs,
     server: opts.server,
   }).prepare(seeded.ctx, publicInput(seeded));
 }
 
 describe("prepare-run", () => {
-  it("uses public experimental_ caller field names; internal launchId stays internal", () => {
-    expect(PUBLIC_SDK_CALLER_FIELDS.experimental_callerLaunchId).toBe("experimental_callerLaunchId");
-    expect(PUBLIC_SDK_CALLER_FIELDS.experimental_callerAttemptId).toBe("experimental_callerAttemptId");
-    expect(PUBLIC_SDK_CALLER_FIELDS.experimental_callerJobId).toBe("experimental_callerJobId");
-    expect(EXPERIMENTAL_ISOLATED_NAMES.internalLaunchId).toBe("launchId");
-    expect(EXPERIMENTAL_ISOLATED_NAMES.threadVisibilityValue).toBe("hidden");
-  });
-
-  it("does not treat types or instance name as handshake readiness", () => {
-    const parsed = parseHandshakePayload({
-      protocol: "agency-isolated-capability-v1",
-      instanceName: "agy-16-0431",
-      hasIsolatedTypes: true,
-      capabilities: {
-        isolatedSkillDelivery: false,
-        skillIds: false,
-        originPluginId: false,
-        experimental_callerLaunchId: false,
-        experimental_callerAttemptId: false,
-        experimental_callerJobId: false,
-        uniqueLookupFork: false,
-        forkDoesNotInheritIdentity: false,
-        threadVisibilityHidden: false,
-      },
-    });
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) throw new Error(parsed.error.message);
-    expect(isHandshakeReady(parsed.value)).toBe(false);
-    expect(readinessFromHandshake(parsed.value).executionAvailable).toBe(false);
-    expect(readinessFromHandshake(parsed.value).isolationReady).toBe(false);
-  });
-
   it("does not treat backticks or <filename>.meta.json examples as package references", async () => {
     const canonical = readFileSync(join(FIXTURES, "agency-artifacts-skill.md"), "utf8");
     expect(canonical).toContain("`<filename>.meta.json`");
@@ -432,6 +396,7 @@ describe("prepare-run", () => {
     expect(prepared.value.roles.helperSkillIds).toEqual([HELPER_SKILL]);
     expect(prepared.value.snapshot.selectedMcps).toEqual([]);
     expect(prepared.value.reserved.attempt.state).toBe("prepared");
+    expect(readFileSync(join(root, `.agency/jobs/${seeded.job.key}/TASK.md`), "utf8")).toContain(seeded.job.brief);
     opened.close();
   });
 
@@ -642,6 +607,38 @@ describe("prepare-run", () => {
     opened.close();
   });
 
+  it("holds the reserve gate only for the reservation, after the snapshot is compiled", async () => {
+    const opened = openFileDb();
+    const root = bindingRoot();
+    writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+    const seeded = await seedProject(opened.db, root);
+    const steps: string[] = [];
+    const base = { store: seeded.store, files: createLocalHostFilePort("host_mini"), catalog: catalogFor(seeded), runs: createRunStore(opened.db), server: serverBinding([".bb/AGENTS.md"]) };
+    const refused = await createPrepareRun({
+      ...base,
+      briefing: async () => {
+        steps.push("briefing");
+        return null;
+      },
+      reserveGate: async () => {
+        steps.push("gate");
+        return { ok: false, error: { code: "concurrency_limit_reached", message: "limit" } };
+      },
+    }).prepare(seeded.ctx, publicInput(seeded));
+    // The slow part ran before the gate, and a refusal at the gate reserves nothing.
+    expect(steps).toEqual(["briefing", "gate"]);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error("expected the gate refusal");
+    expect(refused.error.code).toBe("concurrency_limit_reached");
+    expect((opened.db.prepare(`SELECT COUNT(*) AS n FROM agency_run_attempt`).get() as { n: number }).n).toBe(0);
+
+    // No attempt was reserved, so the pack the refused launch left behind is replaced.
+    const passed = await createPrepareRun({ ...base, hasLiveAttempt: () => false, reserveGate: async (reserve) => reserve() }).prepare(seeded.ctx, publicInput(seeded));
+    if (!passed.ok) throw new Error(passed.error.message);
+    expect(passed.value.reserved.attempt.state).toBe("prepared");
+    opened.close();
+  });
+
   it("verifies reserved snapshot through real coordinator without spawn", async () => {
     const opened = openFileDb();
     const root = bindingRoot();
@@ -733,4 +730,160 @@ describe("prepare-run", () => {
     if (!edited.ok) throw new Error(edited.error.message);
     expect(edited.value.hash).not.toBe(hashed.value.hash);
   });
+
+  describe("reserve models of the employee", () => {
+    const RESERVES = [
+      { providerId: "codex", model: "gpt-5.5", reasoningEffort: "medium" as const },
+      { providerId: "codex", model: "gpt-5.4-mini" },
+    ];
+
+    async function seedWithReserves(db: SqlDatabase, root: string, reserves = RESERVES) {
+      const seeded = await seedProject(db, root);
+      const agent = seeded.store.getAgent(seeded.job.assignedAgentId!)!;
+      const current = seeded.store.getAgentVersion(agent.currentVersionId)!;
+      const { id: _id, agentId: _agentId, ...draft } = current;
+      const saved = seeded.store.saveAgentProfile({ actor: { kind: "system" }, allowedBindingIds: [] }, {
+        requestId: requestId(),
+        expectedRevision: agent.revision,
+        agentId: agent.id,
+        name: agent.name,
+        state: "active",
+        version: { ...draft, version: current.version + 1, fallbackModels: reserves },
+      });
+      if (!saved.ok) throw new Error(saved.error.message);
+      return { ...seeded, agentId: agent.id, version: saved.value.version };
+    }
+
+    /** The launch as launch-rpc runs it: readiness per pair, then a real prepare on the pair that passed. */
+    function launchWalk(
+      seeded: Awaited<ReturnType<typeof seedWithReserves>>,
+      db: SqlDatabase,
+      runs: ReturnType<typeof createRunStore>,
+      unavailable: readonly string[],
+    ) {
+      const base = requestId();
+      return launchOnFirstReadyCandidate({
+        candidates: launchCandidates(db, seeded.agentId, seeded.version, new Date().toISOString()),
+        check: async (candidate: LaunchCandidate) =>
+          unavailable.includes(candidate.model) ? fail("model_unavailable", `${candidate.model} is not in the machine catalog`) : ok(undefined),
+        launch: (candidate) =>
+          createPrepareRun({
+            store: seeded.store,
+            files: createLocalHostFilePort("host_mini"),
+            catalog: catalogFor(seeded),
+            runs,
+            server: serverBinding([".bb/AGENTS.md"]),
+            effectiveAgentVersion: (version) => applyLaunchCandidate(version, candidate),
+          }).prepare(seeded.ctx, { requestId: base, jobId: seeded.job.id, expectedRevision: seeded.job.revision }),
+        spawnRefusal: () => null,
+      });
+    }
+
+    function attemptCount(db: SqlDatabase, jobId: string): number {
+      return (db.prepare(`SELECT COUNT(*) AS n FROM agency_run_attempt WHERE job_id = ?`).get(jobId) as { n: number }).n;
+    }
+
+    it("launches on the primary when it is ready; the snapshot names no reserve", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root);
+      const walk = await launchWalk(seeded, opened.db, createRunStore(opened.db), []);
+      if (!walk.result.ok) throw new Error(walk.result.error.message);
+      expect(walk.used?.source).toBe("primary");
+      expect(walk.result.value.snapshot.agentVersion).toMatchObject({ providerId: "codex", model: "gpt-5.6" });
+      expect(walk.result.value.snapshot.agentVersion.modelSource).toBeUndefined();
+      opened.close();
+    });
+
+    it("takes the first reserve that is ready; the snapshot holds the real model and where it came from", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root);
+      const walk = await launchWalk(seeded, opened.db, createRunStore(opened.db), ["gpt-5.6", "gpt-5.5"]);
+      if (!walk.result.ok) throw new Error(walk.result.error.message);
+      expect(walk.used?.source).toBe("fallback 2");
+      expect(walk.tried.map((item) => item.candidate.model)).toEqual(["gpt-5.6", "gpt-5.5"]);
+      const snapshot = walk.result.value.snapshot;
+      expect(snapshot.agentVersion).toMatchObject({ id: seeded.version.id, providerId: "codex", model: "gpt-5.4-mini", modelSource: "fallback 2" });
+      // The reserve's own reasoning level, not the primary's, and one attempt only.
+      expect(snapshot.execution?.reasoningLevel).toBeUndefined();
+      expect(attemptCount(opened.db, seeded.job.id)).toBe(1);
+      // The profile is not rewritten: the primary stays the primary.
+      const live = seeded.store.getAgentVersion(seeded.store.getAgent(seeded.agentId)!.currentVersionId)!;
+      expect(live.id).toBe(seeded.version.id);
+      expect(live.model).toBe("gpt-5.6");
+      opened.close();
+    });
+
+    it("reserves nothing when no model is ready and names every pair it tried", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root);
+      const walk = await launchWalk(seeded, opened.db, createRunStore(opened.db), ["gpt-5.6", "gpt-5.5", "gpt-5.4-mini"]);
+      expect(walk.result.ok).toBe(false);
+      if (walk.result.ok) throw new Error("expected a refusal");
+      expect(walk.result.error.code).toBe("fallback_models_refused");
+      for (const model of ["gpt-5.6", "gpt-5.5", "gpt-5.4-mini"]) expect(walk.result.error.message).toContain(model);
+      expect(attemptCount(opened.db, seeded.job.id)).toBe(0);
+      opened.close();
+    });
+
+    it("without reserves the refusal is the primary's own, as before", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root, []);
+      expect(seeded.version.fallbackModels).toBeUndefined();
+      const walk = await launchWalk(seeded, opened.db, createRunStore(opened.db), ["gpt-5.6"]);
+      if (walk.result.ok) throw new Error("expected a refusal");
+      expect(walk.result.error.code).toBe("model_unavailable");
+      expect(attemptCount(opened.db, seeded.job.id)).toBe(0);
+      opened.close();
+    });
+
+    it("refuses a model the owner did not list: the catalog's closest one never launches by itself", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root);
+      const prepared = await createPrepareRun({
+        store: seeded.store,
+        files: createLocalHostFilePort("host_mini"),
+        catalog: catalogFor(seeded),
+        runs: createRunStore(opened.db),
+        server: serverBinding([".bb/AGENTS.md"]),
+        effectiveAgentVersion: (version) => ({ ...version, model: "gpt-5.6-closest" }),
+      }).prepare(seeded.ctx, publicInput(seeded));
+      expect(prepared.ok).toBe(false);
+      if (!prepared.ok) expect(prepared.error.code).toBe("live_version_mismatch");
+      expect(attemptCount(opened.db, seeded.job.id)).toBe(0);
+      opened.close();
+    });
+
+    it("does not move a job that already has a live attempt onto another model", async () => {
+      const opened = openFileDb();
+      const root = bindingRoot();
+      writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+      const seeded = await seedWithReserves(opened.db, root);
+      const runs = createRunStore(opened.db);
+      const first = await launchWalk(seeded, opened.db, runs, []);
+      if (!first.result.ok) throw new Error(first.result.error.message);
+      opened.db
+        .prepare(`UPDATE agency_run_attempt SET state = 'running', thread_id = 'thr_live', launch_id = ? WHERE job_id = ?`)
+        .run(randomUUID(), seeded.job.id);
+      // The primary has since left the machine; the job's attempt is alive, so the reserve is not taken.
+      const second = await launchWalk(seeded, opened.db, runs, ["gpt-5.6"]);
+      expect(second.result.ok).toBe(false);
+      // Whatever guard answers first, it is not a refusal of the model: the walk stops on the primary.
+      if (!second.result.ok) expect(["active_attempt_exists", "artifact_immutable"]).toContain(second.result.error.code);
+      expect(second.tried).toEqual([{ candidate: expect.objectContaining({ model: "gpt-5.6" }), error: expect.objectContaining({ code: "model_unavailable" }) }]);
+      expect(second.used).toBeNull();
+      expect(attemptCount(opened.db, seeded.job.id)).toBe(1);
+      opened.close();
+    });
+  });
 });
+

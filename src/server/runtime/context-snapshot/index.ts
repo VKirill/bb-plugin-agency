@@ -1,6 +1,8 @@
 export { AGENCY_SKILL_COMMANDS, AGENCY_SKILL_FORBIDDEN_SURFACES } from "./agency-commands.js";
 export { canonicalizeJson, sha256Hex } from "./canonical.js";
 export { compileContextSnapshot, computeHandoffHash } from "./compile.js";
+export { attemptPackDir, buildAttemptPack, PACK_ENTRY, PACK_FILE_NAMES, roleCliCommands } from "./pack.js";
+export type { AttemptPackFile, SnapshotPack } from "./pack.js";
 export {
   PROMPT_LAYER_ORDER,
   PROMPT_PRECEDENCE_DEPARTMENT,

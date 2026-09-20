@@ -19,6 +19,9 @@ import { answerNeedsInput } from "../runtime/needs-input/answer.js";
 import { readNeedsInputRecord, reportNeedsInput } from "../runtime/needs-input/report.js";
 import type { IsolatedSendPort } from "../runtime/isolated-sdk/send-port.js";
 import { flushParentWakes } from "../runtime/parent-wake";
+import { flushClientBounces } from "../runtime/client-bounce";
+import { acceptOnLine, productReadyMessage } from "../runtime/conveyor";
+import { uuidV5 } from "../runtime/launch/operation-ids";
 import { createInternalRunStoreReads, createRunStore } from "../runtime/run-store";
 import { hashBytes } from "../../host/guarded-fs";
 import { createArtifactStorage, type ArtifactMetadataPort } from "../artifacts";
@@ -129,6 +132,10 @@ export function createDomainRpc(deps: {
   archivedJobIds?: () => Set<string>;
   /** Принятая версия задачи: повод предложить владельцу урок. */
   onAccepted?: (jobId: string) => void;
+  /** The conveyor closed a root job after this accept: tell the customer the product is ready. */
+  onProductReady?: (message: { text: string; jobId: string; dedupeKey: string }) => void;
+  /** Open the native composer choice card in the commissioning chat after a factory pause. */
+  onOwnerQuestion?: (originThreadId: string) => void;
 }): DomainHandlers {
   const { bb, store, db, onChanged, documents } = deps;
   const runs = createRunStore(db);
@@ -444,7 +451,11 @@ export function createDomainRpc(deps: {
       withAccess(async (access) => {
         const result = mutated(reportNeedsInput({ db, store, runs, reads }, access.ctx, input));
         if (result.ok && deps.send) {
-          await flushParentWakes({ db, send: deps.send, now: new Date().toISOString() });
+          const now = new Date().toISOString();
+          await flushParentWakes({ db, send: deps.send, now });
+          await flushClientBounces({ db, send: deps.send, now });
+          const origin = store.getJob(input.jobId)?.originThreadId?.trim();
+          if (origin && deps.onOwnerQuestion) deps.onOwnerQuestion(origin);
         }
         return result;
       }),
@@ -483,8 +494,21 @@ export function createDomainRpc(deps: {
 
     acceptArtifactVersion: (input) =>
       withAccess((access) => {
-        const accepted = store.acceptArtifactVersion(access.ctx, input);
-        // Приняли главную задачу — Агентство складывает черновик урока в знания отдела.
+        const accepted = acceptOnLine(
+          {
+            db,
+            store: {
+              getJob: (id) => store.getJob(id),
+              acceptArtifactVersion: (ctx, command) => store.acceptArtifactVersion(ctx, command),
+              transitionJob: (ctx, command) => store.transitionJob(ctx, command),
+            },
+            ctx: access.ctx,
+            requestId: (seed) => uuidV5(input.requestId, seed),
+            comment: () => true,
+            productReady: (job, result) => deps.onProductReady?.(productReadyMessage(db, job, result)),
+          },
+          input,
+        );
         if (accepted.ok) deps.onAccepted?.(input.jobId);
         return mutated(accepted);
       }),

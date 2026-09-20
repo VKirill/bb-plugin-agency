@@ -89,4 +89,31 @@ describe("work rules", () => {
     if (!second.ok) expect(second.error.code).toBe("rework_limit_reached");
     db.close();
   });
+
+  it("stores and reads agency spec gate keys and rejects them on a department", () => {
+    const db = open();
+    const s = seed(db);
+    const saved = s.store.saveWorkRules(s.bootstrap, {
+      requestId: randomUUID(),
+      scope: "agency",
+      expectedRevision: 0,
+      rules: { specDepartmentId: "dep_product01", specGatedDepartmentIds: ["dep_develop01", "dep_design01"] },
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(saved.value.effective.specDepartmentId).toBe("dep_product01");
+    expect(saved.value.effective.specGatedDepartmentIds).toEqual(["dep_develop01", "dep_design01"]);
+    expect(saved.value.sources.specDepartmentId).toBe("agency");
+    const read = s.store.getWorkRules("agency");
+    expect(read.ok && read.value.stored.specDepartmentId).toBe("dep_product01");
+    const refused = s.store.saveWorkRules(s.bootstrap, {
+      requestId: randomUUID(),
+      scope: `department:${s.departmentId}`,
+      expectedRevision: 0,
+      rules: { specDepartmentId: "dep_product01", specGatedDepartmentIds: [s.departmentId] },
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.code).toBe("rule_not_in_scope");
+    db.close();
+  });
 });

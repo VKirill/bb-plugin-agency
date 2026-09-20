@@ -43,6 +43,10 @@ type JobRow = {
   priority: Job["priority"];
   due_at: string | null;
   contract_json?: string | null;
+  work_profile_key?: string | null;
+  origin_thread_id?: string | null;
+  section_id?: string | null;
+  work_kind?: string | null;
   revision: number;
   updated_at: string;
   closed_at?: string | null;
@@ -105,12 +109,16 @@ function mapJob(row: JobRow): Job {
     acceptance: row.acceptance,
     state: row.state,
     parentJobId: row.parent_job_id,
+    sectionId: row.section_id ?? null,
+    workKind: (row.work_kind ?? null) as Job["workKind"],
     assignedAgentId: row.assigned_agent_id,
     reviewerAgentIds: parseTeamIds(row.reviewer_agent_ids),
     observerAgentIds: parseTeamIds(row.observer_agent_ids),
     priority: row.priority,
     dueAt: row.due_at,
     ...parseContract(row.contract_json),
+    ...(row.work_profile_key ? { workProfileKey: row.work_profile_key } : {}),
+    ...(row.origin_thread_id ? { originThreadId: row.origin_thread_id } : {}),
     revision: row.revision,
     updatedAt: row.updated_at,
     ...(row.closed_at ? { closedAt: row.closed_at } : {}),

@@ -20,8 +20,8 @@ export const LAUNCH_RPC_UNREGISTERED =
 export const LAUNCH_LIST_UNREGISTERED =
   "Список попыток появится, когда instance отдаст listJobAttempts по jobId в scope. Сейчас доска пустая.";
 
-export const LAUNCH_HANDSHAKE_HINT =
-  "Запуск откроется, когда среда подтвердит изолированную работу. Сейчас проверен только сотрудник на Claude.";
+export const LAUNCH_READINESS_HINT =
+  "Запуск начнётся, когда у задачи будет исполнитель, доступный CLI и правила проекта.";
 
 /** Wire states from shared `RUN_ATTEMPT_STATE_VALUES`. Unknown enum → blocked, not prepare. */
 export const KNOWN_RUN_ATTEMPT_STATES = [
@@ -102,7 +102,6 @@ export type LaunchCoordinatorView = {
 };
 
 export type PrepareLaunchView = {
-  handshakeReady: boolean;
   snapshotId: string;
   digest: string;
   attemptId: string;
@@ -130,11 +129,8 @@ export type LiveAssignedProviderView = {
 };
 
 export type IsolationReadiness = {
-  handshakeReady: boolean;
   executionAvailable: boolean;
   isolationReady: boolean;
-  isolatedSpawnFields: boolean;
-  sdkTypedSpawnReady: boolean;
   assignedProvider: LiveAssignedProviderView | null;
   launchAllowedForAssigned: boolean;
   reason: string;
@@ -245,7 +241,6 @@ export function parsePrepareLaunch(value: unknown): PrepareLaunchView | null {
   const reason = text(row.reason);
   if (!snapshotId || !digest || !attemptId || !reason) return null;
   return {
-    handshakeReady: row.handshakeReady === true,
     snapshotId,
     digest,
     attemptId,
@@ -303,11 +298,8 @@ export function parseIsolationReadiness(value: unknown): IsolationReadiness | nu
     if (!assignedProvider) return null;
   }
   return {
-    handshakeReady: row.handshakeReady === true,
     executionAvailable: row.executionAvailable === true,
     isolationReady: row.isolationReady === true,
-    isolatedSpawnFields: row.isolatedSpawnFields === true,
-    sdkTypedSpawnReady: row.sdkTypedSpawnReady === true,
     assignedProvider,
     launchAllowedForAssigned: row.launchAllowedForAssigned,
     reason: row.reason,
@@ -318,13 +310,7 @@ export function parseIsolationReadiness(value: unknown): IsolationReadiness | nu
 }
 
 export function canLaunchFromReadiness(readiness: IsolationReadiness | null): boolean {
-  return Boolean(
-    readiness?.handshakeReady &&
-      readiness.executionAvailable &&
-      readiness.isolationReady &&
-      readiness.isolatedSpawnFields &&
-      readiness.sdkTypedSpawnReady,
-  );
+  return Boolean(readiness?.executionAvailable && readiness.isolationReady);
 }
 
 export function readinessAllowsProvider(
@@ -431,7 +417,7 @@ export function launchStateLabel(state: string): string {
 
 export function readinessBlocksLaunch(prepare: PrepareLaunchView | null): string | null {
   if (!prepare) return null;
-  if (prepare.handshakeReady && prepare.launched) return null;
+  if (prepare.launched) return null;
   return prepare.reason;
 }
 
@@ -439,7 +425,8 @@ export type LaunchUiAction = "prepare" | "reconcile" | "wait" | "blocked";
 
 export function nextLaunchAction(input: {
   jobReady: boolean;
-  handshakeReady: boolean;
+  /** Readiness answered that this job's assignee may launch now. */
+  launchReady: boolean;
   lastPrepare: PrepareLaunchView | null;
   attemptState?: string | null;
   launchedKind?: string | null;
@@ -456,8 +443,8 @@ export function nextLaunchAction(input: {
   if (state === "awaiting_review") return "wait";
   if (unknown) return input.hasLaunchId ? "reconcile" : "blocked";
   if (state && (state === UNSUPPORTED_ATTEMPT_STATE || !isKnownRunAttemptState(state))) return "blocked";
-  if (!input.handshakeReady) return "blocked";
-  if (input.lastPrepare && !input.lastPrepare.handshakeReady) return "blocked";
+  if (!input.launchReady) return "blocked";
+  if (input.lastPrepare && !input.lastPrepare.launched) return "blocked";
   if (input.launchedKind === "running" || (state && isKnownActiveAttemptState(state))) return "wait";
   if (input.jobReady) return "prepare";
   return "blocked";

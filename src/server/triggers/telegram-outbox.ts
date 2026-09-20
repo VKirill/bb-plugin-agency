@@ -20,8 +20,8 @@ export const TELEGRAM_OUTBOX_MIGRATION = `CREATE TABLE agency_telegram_delivery 
 /** Only recent changes are sent: turning the bridge on does not replay history. */
 export const TELEGRAM_RECENT_MS = 24 * 60 * 60 * 1000;
 
+// Review is a station of the line, not a wait for the customer: it is never sent.
 const STATE_LABEL: Record<string, string> = {
-  review: "ждёт вашего решения",
   waiting_input: "ждёт вашего ответа",
   blocked: "ожидает решения",
   done: "готово",
@@ -44,7 +44,7 @@ export async function sweepTelegramOutbox(ports: TelegramOutboxPorts): Promise<n
     .prepare(
       `SELECT j.id, j.key, j.title, j.state, j.revision FROM agency_job j
        JOIN agency_project_binding b ON b.id = j.binding_id
-       WHERE j.parent_job_id IS NULL AND j.state IN ('review', 'waiting_input', 'blocked', 'done')
+       WHERE j.parent_job_id IS NULL AND j.state IN ('waiting_input', 'blocked', 'done')
          AND b.bb_project_id = ? AND j.updated_at >= ?`,
     )
     .all(pref.projectId, since) as { id: string; key: string; title: string; state: string; revision: number }[];

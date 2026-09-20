@@ -2,13 +2,18 @@ import type { SqlDatabase } from "../db/sql";
 import { agencyLanguage, type AgencyLanguage } from "../i18n/language";
 import { rulesForDepartment } from "../rules/work-rules";
 import type { MembershipRole } from "../../shared/contracts/membership";
+import type { SessionEffectiveMode } from "../../shared/contracts/session-policy";
+import { resolveSessionPolicy } from "./session-policy";
+import { formatPendingClientQuestions } from "../runtime/client-bounce";
 
 /**
  * Instructions the Agency gives to agents, in English; the work itself is written
  * in the Agency language.
  *
  * - An ordinary chat in a project bound to the Agency gets thread instructions:
- *   do the work here or delegate it to the department that owns that result.
+ *   Agency / plugin-delegate = project manager (do not implement); suggest = ask
+ *   first; ordinary / off = no Agency text unless this chat has open factory
+ *   questions (waiting_input bounced here).
  * - An Agency launch gets its role in the launch prompt (isolated launches do not
  *   receive plugin thread instructions): a lead orchestrates, an executor does the
  *   job, a reviewer checks someone else's version.
@@ -332,17 +337,17 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     const tail = [
       "",
       "How to work:",
-      `0. Intake first: \`bb agency job comment\` on jobId ${worker.jobId} with a short reason and references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return).`,
+      `0. Intake first: if the job history already has intake_size, intake_risk and intake_decision, do not rewrite them unless you disagree. Otherwise \`bb agency job comment\` on jobId ${worker.jobId} with a short reason and references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return). Then staff the chain: S+low → assistant, cheapest/low-reasoning model, no extra review (a button colour). M → executor; extra review only if the department requires it. L or high risk → executor plus independent review. clarify → report-needs-input (questions bounce to the client chat). Mixed product → split, not return. A pile of jobs: intake each; keep own; foreign → child or return.`,
       `1. Split the job into subtasks with a checkable result: \`bb agency job create\` with parentJobId=${worker.jobId}, the departmentId and the member's assignedAgentId. The server assigns the key. Work of another department is a subtask in that department for its lead.`,
       "   Give implementation subtasks a `contract`: readFirst (what to read before starting), interfaces (signatures and invariants to keep), mayChange (only the files this subtask owns), mustNotTouch, checks (the commands it must pass). It is frozen at launch. The subtask's bindingId is this job's folder unless the job layer lists other project folders or employee workplaces.",
       "   Two subtasks that may change the same files do not run at once: the Agency holds the later one in the launch queue until the first is done. Give each subtask its own files, or order them with `job depend`.",
       "2. Implementation and rework go to executors, review to reviewers. Pass inputs with `bb agency job attach-input`. Launch with `bb agency launch readiness`, then `launch prepare`.",
-      "   Order: `bb agency job depend` (jobId waits for dependsOnJobId), then `bb agency launch queue` for each subtask; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
-      "3. When a subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Do not poll in a loop: end your turn and wait.",
+      "   Order: `bb agency job depend` (jobId waits for dependsOnJobId). Creating an assigned subtask already puts it in the launch queue; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
+      "3. When a work subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Automatic QC children do not. Do not poll in a loop: end your turn and wait.",
       "4. Check each subtask against its acceptance criteria. A defect means a rework subtask and another independent review, not a fix by your own hands. Accept (`bb agency artifact accept`) only versions of subtasks you assigned; the server blocks accepting your own work.",
       ...leadRuleLines(worker.rules),
       "5. Finish with a summary report .agency/jobs/<main job key>/report.md published as a version and a final job comment. Do not accept your own result: acceptance belongs to the owner. Comments are Markdown: first line the outcome, details as a list, no run_/thr_/job_ ids unless needed.",
-      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not take it. `bb agency job comment` \"Return: why it is not ours; which department fits\", then `bb agency job transition` to blocked.",
+      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not implement it. Mixed product → children in accepting departments, not a Return of the root. Return + blocked only when no department fits.",
       "A subtask returned to you as blocked with \"Return\" (or \"Возврат\"): reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
       workLanguageLine(),
     ];
@@ -351,7 +356,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
   const common = [
     "- Job comments are Markdown: first line the outcome, details as a list (`\\n` line breaks in JSON), technical ids only when needed. Long material goes to the report.",
     "- Do not create new Agency jobs and do not hand this work on: splitting work is the lead's job.",
-    "- A question for the owner or conflicting instructions: `bb agency job report-needs-input`, then end your turn.",
+    "- A question for the owner or conflicting instructions: `bb agency job report-needs-input`, then end your turn. The questions go to the chat that commissioned the job, not the Agency card.",
     "- Handing in means a published version and a final job comment. Without the final comment after publishing, the job does not go to review.",
     `- Ending a turn without a published version or a final comment brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
     `- The Agency watches the attempt: ${worker.rules?.watchStallMinutes ?? 30} min without new events or ${worker.rules?.watchCeilingHours ?? 2} h of continuous work sends the job to the lead as blocked. Split long work into stages and note them in comments.`,
@@ -401,7 +406,7 @@ function withPlaybook(worker: WorkerContext, lines: string[]): string {
 
 /** Instructions for ordinary BB chats: route work to the Agency or do it in the chat. */
 export function buildSessionInstructions(input: {
-  mode: Exclude<DelegationMode, "off">;
+  mode: Exclude<SessionEffectiveMode, "ordinary">;
   routes: ProjectRoutes;
   totalDepartments: number;
 }): string | null {
@@ -412,25 +417,45 @@ export function buildSessionInstructions(input: {
       "## BB Agency",
       `This BB has an Agency: departments of AI employees with leads (${input.totalDepartments}). ${workplaces.length === 0 ? "This project is not connected to it." : "No department serves this project."}`,
       "If the owner asks to hand larger work to a team, say the project has to be connected in the Agency (Projects section). Do not create a job yourself.",
+      "Ask the owner to connect it with `bb agency project bind`. Do not create the folder tree or bindings yourself.",
     ].join("\n");
   }
+  const pm = input.mode === "pm" || input.mode === "delegate";
   const suggest = input.mode === "suggest";
   const single = workplaces.length === 1 ? workplaces[0] : null;
-  const head = [
-    "## BB Agency: where the work goes",
-    "This BB runs an Agency: standing departments of AI employees, each with a lead, a job queue and acceptance by the owner. Departments are shared and take jobs from any connected project. Pick a route before you start:",
-    "- Do it here: answers and explanations, one-off commands, small edits, urgent fixes, setting up BB or the Agency.",
-    `- ${suggest ? "Propose handing it to" : "Hand it to"} the Agency: multi-step work with its own result (code, text, research, audit), work that needs independent review or outlives this chat, or the owner asks to delegate.`,
-    "- Not sure: name the route to the owner in one sentence and wait.",
-    "- You are a child thread or subagent already given part of a job: do that part, do not delegate it again.",
-    "",
-    single
-      ? `Work of this project runs on ${single.hostName ?? single.hostId} in ${single.root} (bindingId ${single.bindingId}).`
-      : "Where work runs: pick the folder of your environment (compare with pwd); the employee launches on that machine.",
-    ...(single ? [] : workplaces.map((place) => `- ${place.bindingId}: ${place.hostName ?? place.hostId} — ${place.root}`)),
-    "",
-    "Departments (choose by the kind of result, not by model):",
-  ];
+  const workplaceLine = single
+    ? `Work of this project runs on ${single.hostName ?? single.hostId} in ${single.root} (bindingId ${single.bindingId}).`
+    : "Where work runs: pick the folder of your environment (compare with pwd); the employee launches on that machine.";
+  const extraPlaces = single ? [] : workplaces.map((place) => `- ${place.bindingId}: ${place.hostName ?? place.hostId} — ${place.root}`);
+  const head = pm
+    ? [
+        "## BB Agency: you are the project manager",
+        "This chat is the Agency office. The owner only talks to you. You decide the route and hand work to department leads — the Agency analog of a solo PM / orchestrator. You do not implement.",
+        "If an Agency job pauses for materials, a native choice card opens in this chat. Do not list A/B/C in a message. If the card does not appear, call agency_ask_owner and wait for Send. Do not send them to the Agency card.",
+        "Do here: short answers, status of jobs you created, one-off facts, urgent BB or Agency setup.",
+        "Never do here: code, research reports, audits, copy, design, or any multi-step result. Those become Agency jobs on the department lead immediately. Do not ask the owner to create the job or confirm twice, unless they are choosing between options.",
+        "Not sure which department: name the route in one sentence and wait.",
+        "You are a child thread or subagent already given part of a job: do that part, do not delegate it again.",
+        "",
+        workplaceLine,
+        ...extraPlaces,
+        "",
+        "Departments (choose by the kind of result, not by model):",
+        "New program or service: the root job goes to the spec department with `\"workKind\":\"new-program\"`. A bugfix or one function in a known module: `bugfix` / `feature` on a job in the department that owns that result.",
+      ]
+    : [
+        "## BB Agency: ask before handing work",
+        "You may answer trivia and one-off facts here.",
+        "For any real task (code, research, writing, design, audit, or a result that should outlive this chat): ask the owner once — do it in this chat, or create an Agency job for the department that owns that result.",
+        "After they choose Agency, create the job. After they choose this chat, do the work here. Do not create a job until they answer, unless they already said to delegate.",
+        "You are a child thread or subagent already given part of a job: do that part, do not delegate it again.",
+        "",
+        workplaceLine,
+        ...extraPlaces,
+        "",
+        "Departments (choose by the kind of result, not by model):",
+        "New program or service: the root job goes to the spec department with `\"workKind\":\"new-program\"`. A bugfix or one function in a known module: `bugfix` / `feature` on a job in the department that owns that result.",
+      ];
   const list = departments.map(
     (department) =>
       `- "${department.name}": ${department.purpose} Lead: ${department.leadName} (${department.leadAgentId}); members: ${department.memberCount}; departmentId ${department.departmentId}${department.onlyBindingIds ? `; only for ${department.onlyBindingIds.join(", ")}` : ""}`,
@@ -439,11 +464,18 @@ export function buildSessionInstructions(input: {
   const tail = [
     "No department fits: do not create a job; tell the owner which department is missing.",
     "",
-    suggest ? "After the owner agrees, delegate:" : "Delegate:",
-    `\`bb agency job create --input-json '{"requestId":"<new UUID>","bindingId":"${bindingId}","departmentId":"…","assignedAgentId":"<department lead>","title":"…","brief":"…","acceptance":"…"}'\``,
+    "Before creating a job: this chat folder must sit inside a binding canonicalRoot on this machine (`bb agency workspace --json`). One binding per project; do not bind a section.",
+    "No matching binding: tell the owner to connect the project (`bb agency project bind`). Do not create the job, folder tree, or bindings yourself.",
+    "Chat folder is inside a BB section (`bb project-folders list`: deepest folder with this project's projectId whose path contains the chat folder): pass that folder id as `sectionId`. Section-only facts: knowledge save with scopeKind \"section\", scopeId = that id, parentBindingId = the binding. Project-wide facts use scopeKind \"project\".",
+    "",
+    pm ? "Create the job now:" : suggest ? "After the owner agrees, delegate:" : "Delegate:",
+    `\`bb agency job create --input-json '{"requestId":"<new UUID>","bindingId":"${bindingId}","departmentId":"…","assignedAgentId":"<department lead>","title":"…","brief":"…","acceptance":"…","sectionId":"<section folder id or omit>","workKind":"<new-program|feature|bugfix or omit>"}'\``,
     "- The server assigns the key. brief: goal, inputs, limits (what not to touch). acceptance: a checkable criterion.",
+    "- workKind (optional): `new-program` for a new program or service (root job in the spec department); `feature` or `bugfix` for one function or a fix in a known module (that department). Omit on older jobs.",
     "- Assign the department lead: the lead splits the work and assigns it. Do not assign executors past the lead.",
-    "- Then tell the owner the AG-N key and the next step. Do not do the delegated work yourself; never announce a launch without a `bb agency launch prepare` receipt.",
+    pm
+      ? "- Tell the owner the AG-N key. Creating the job puts it in the launch queue; do not ask the owner to queue or press Launch. If the environment is not ready, say it is waiting and will start itself. Never announce a live run without a `bb agency launch prepare` receipt."
+      : "- Then tell the owner the AG-N key and the next step. Do not do the delegated work yourself; never announce a launch without a `bb agency launch prepare` receipt.",
     "- Creating departments or employees and writing job descriptions: follow the `agency` skill.",
     workLanguageLine(),
   ];
@@ -460,11 +492,14 @@ export function buildAgencyInstructions(
   mode: DelegationMode,
   hostName?: (hostId: string) => string | undefined,
 ): string | null {
-  if (mode === "off") return null;
   if (readWorkerContext(db, ctx.threadId)) return null;
-  return buildSessionInstructions({
-    mode,
+  const pending = formatPendingClientQuestions(db, ctx.threadId);
+  const route = resolveSessionPolicy(db, { bbProjectId: ctx.projectId, threadId: ctx.threadId }, mode);
+  const session = route.effective === "ordinary" ? null : buildSessionInstructions({
+    mode: route.effective,
     routes: readProjectRoutes(db, ctx.projectId, hostName),
     totalDepartments: countAllDepartments(db),
   });
+  if (!pending && !session) return null;
+  return [pending, session].filter(Boolean).join("\n\n");
 }

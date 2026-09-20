@@ -1,6 +1,7 @@
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
+import { isUsageLimitDetail } from "../agent-fallback.js";
 
 /**
  * Watches a running attempt for signs of life. The completion reminder covers
@@ -69,12 +70,21 @@ export type RunWatchPorts = {
   block: (job: Job, text: string) => boolean;
   /** Why the thread is in error, as BB reported it; null when unknown. */
   providerError?: (threadId: string) => string | null;
+  /**
+   * What BB said on the error event: false = it will not continue this thread.
+   * Null when BB did not say. A usage limit with willRetry false is a dead attempt.
+   */
+  bbWillRetry?: (threadId: string) => boolean | null;
   /** False when the machine of the job is offline: the attempt waits for it to come back. */
   hostOnline?: (job: Job) => boolean | null;
+  /** Owner-set reserve is ready for this attempt (still on the primary). */
+  canSwitchToFallback?: (job: Job, row: RunWatchRow) => boolean;
+  /** Cancel this attempt and requeue on the reserve. Does not rewrite the profile. */
+  switchToFallback?: (job: Job, row: RunWatchRow) => boolean;
   now: () => string;
 };
 
-export type RunWatchOutcome = "skipped" | "ok" | "warned" | "blocked";
+export type RunWatchOutcome = "skipped" | "ok" | "warned" | "blocked" | "fallback";
 
 export type RunWatchThresholds = { quietMs: number; stallMs: number; startMs: number; errorMs: number; ceilingMs: number };
 
@@ -106,7 +116,7 @@ function minutes(ms: number): number {
 }
 
 export function runWatchText(
-  kind: "quiet" | "stalled" | "not_started" | "error" | "ceiling" | "provider_wait",
+  kind: "quiet" | "stalled" | "not_started" | "error" | "ceiling" | "provider_wait" | "usage_limit",
   jobKey: string,
   lang: AgencyLanguage = agencyLanguage(),
   t: RunWatchThresholds = DEFAULT_RUN_WATCH_THRESHOLDS,
@@ -131,6 +141,8 @@ export function runWatchText(
         return `Agency: ${jobKey} has worked non-stop for more than ${minutes(RUN_WATCH_CEILING_MS) / 60} h — the limit of one attempt. The job moved to «needs decision»: check that the employee is not looping and split the work. ${stopEn}`;
       case "provider_wait":
         return `Agency: the ${jobKey} thread is in error, and BB is waiting to carry it on by itself — a subscription window, an overload or a machine that went offline. The job stays in work; nothing is lost. ${stopEn}`;
+      case "usage_limit":
+        return `Agency: ${jobKey} hit a usage limit, and BB will not continue this thread. The employee has no reserve model, so the job moved to «needs decision». Set a reserve on the employee and relaunch, or wait for the window to reset. ${stopEn}`;
     }
   }
   const stop = `Остановить попытку: bb agency launch cancel; затем перезапустить или переназначить ${jobKey}.`;
@@ -147,6 +159,8 @@ export function runWatchText(
       return `Агентство: ${jobKey} работает без перерыва дольше ${minutes(RUN_WATCH_CEILING_MS) / 60} ч — это потолок одной попытки. Задача переведена в «Ожидает решения»: проверьте, не зациклился ли сотрудник, и разбейте работу. ${stop}`;
     case "provider_wait":
       return `Агентство: тред ${jobKey} в ошибке, но BB сам ждёт возможности продолжить — окно подписки, перегрузка провайдера или машина не в сети. Задача остаётся в работе, ничего не потеряно. ${stop}`;
+    case "usage_limit":
+      return `Агентство: у ${jobKey} закончился лимит провайдера, и BB этот тред продолжать не будет. У сотрудника нет запасной модели — задача переведена в «Ожидает решения». Задайте резерв у сотрудника и перезапустите, либо дождитесь сброса окна. ${stop}`;
   }
 }
 
@@ -227,7 +241,7 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
       ? now
       : latest([record.progress_at, observation.threadUpdatedAt, ports.lastProgressAt(row.threadId, job.id)]) || now;
 
-  const finish = (kind: "stalled" | "not_started" | "error" | "ceiling"): RunWatchOutcome => {
+  const finish = (kind: "stalled" | "not_started" | "error" | "ceiling" | "usage_limit"): RunWatchOutcome => {
     const blocked = ports.block(job, runWatchText(kind, job.key, agencyLanguage(), t));
     if (blocked) {
       record.outcome = kind;
@@ -246,8 +260,21 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
   }
   const inStatusMs = nowMs - Date.parse(record.status_since);
   if (status === "error") {
+    const detail = ports.providerError?.(row.threadId);
+    if (isUsageLimitDetail(detail) && ports.canSwitchToFallback?.(job, row) && ports.switchToFallback) {
+      const switched = ports.switchToFallback(job, row);
+      if (switched) {
+        record.outcome = "fallback";
+        record.outcome_at = now;
+        save(ports.db, record, now);
+        return "fallback";
+      }
+    }
+    // BB said it will not continue this thread: a usage limit is then a dead attempt, not a wait.
+    const bbRetries = ports.bbWillRetry?.(row.threadId);
+    if (isUsageLimitDetail(detail) && bbRetries === false) return finish("usage_limit");
     // BB retries a subscription window or an overload by itself; the attempt is not dead yet.
-    const waiting = providerWillRetry(ports.providerError?.(row.threadId)) || ports.hostOnline?.(job) === false;
+    const waiting = (bbRetries !== false && providerWillRetry(detail)) || ports.hostOnline?.(job) === false;
     if (waiting && inStatusMs < RUN_WATCH_PROVIDER_WAIT_MS) {
       if (!record.warned_at && ports.comment(job, runWatchText("provider_wait", job.key, agencyLanguage(), t))) record.warned_at = now;
       save(ports.db, record, now);

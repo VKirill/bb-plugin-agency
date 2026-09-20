@@ -46,9 +46,11 @@ function boundView(row: BoundExecutingCandidate, status = "active"): BoundThread
   return {
     id: row.threadId,
     status,
-    experimental_callerJobId: row.jobId,
-    experimental_callerLaunchId: row.launchId,
-    experimental_callerAttemptId: row.attemptId,
+    pluginMetadata: {
+      agencyJobId: row.jobId,
+      agencyLaunchId: row.launchId,
+      agencyAttemptId: row.attemptId,
+    },
   };
 }
 

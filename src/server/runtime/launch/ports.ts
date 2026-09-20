@@ -92,7 +92,6 @@ export type LiveIdentityPort = {
 export type CapabilityReadiness = {
   executionAvailable: boolean;
   isolationReady: boolean;
-  isolatedSpawnFields: boolean;
   reason: string;
 };
 

@@ -32,8 +32,8 @@ describe("job attention", () => {
   });
 
   it("escalates a decision the person has been holding for a day", () => {
-    expect(jobAttention({ state: "review", updatedAt: ago(OVERDUE_AFTER_MS) }, now).tone).toBe("overdue");
-    expect(jobAttention({ state: "review", updatedAt: ago(OVERDUE_AFTER_MS - 1000) }, now).tone).toBe("waiting");
+    expect(jobAttention({ state: "waiting_input", updatedAt: ago(OVERDUE_AFTER_MS) }, now).tone).toBe("overdue");
+    expect(jobAttention({ state: "waiting_input", updatedAt: ago(OVERDUE_AFTER_MS - 1000) }, now).tone).toBe("waiting");
   });
 
   it("keeps agency-side work quiet but still timed", () => {
@@ -42,6 +42,7 @@ describe("job attention", () => {
     expect(running.age).toBe("6 ч");
     expect(jobAttention({ state: "queued", updatedAt: ago(1000 * 60) }, now).tone).toBe("quiet");
     expect(jobAttention({ state: "backlog", updatedAt: ago(1000 * 60) }, now).tone).toBe("quiet");
+    expect(jobAttention({ state: "review", updatedAt: ago(1000 * 60) }, now).tone).toBe("quiet");
   });
 
   it("shows nothing for finished and cancelled jobs", () => {
@@ -54,7 +55,7 @@ describe("job attention", () => {
 
   it("explains the wait in words, not just colour", () => {
     expect(jobAttention({ state: "review", updatedAt: ago(2 * 60 * 60 * 1000) }, now).hint)
-      .toBe("Ждёт вашего решения. Без изменений 2 ч");
+      .toBe("На проверке: линия закроет станцию сама. Без изменений 2 ч");
     expect(jobAttention({ state: "waiting_input", updatedAt: ago(2 * 60 * 60 * 1000) }, now).hint)
       .toContain("Ждёт вашего ответа");
     expect(jobAttention({ state: "blocked" }, now).hint).toBe("Ждёт уточнения вводных");
@@ -63,6 +64,6 @@ describe("job attention", () => {
   it("never claims an age the job does not carry", () => {
     const view = jobAttention({ state: "review" }, now);
     expect(view.age).toBeNull();
-    expect(view.tone).toBe("waiting");
+    expect(view.tone).toBe("quiet");
   });
 });

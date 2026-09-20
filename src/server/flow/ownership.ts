@@ -78,26 +78,34 @@ function familyIds(db: SqlDatabase, jobId: string): Set<string> {
 /**
  * Jobs of the same project folder with a live attempt, outside this job's own family.
  * Another folder is another checkout, so its files cannot collide with this one.
+ * `pendingJobIds` are jobs the queue is launching right now: their attempt may not be
+ * reserved yet, and they own their files already.
  */
-function runningJobs(db: SqlDatabase, job: Pick<Job, "id" | "bindingId">): { key: string; contract: JobContract | null }[] {
+function runningJobs(db: SqlDatabase, job: Pick<Job, "id" | "bindingId">, pendingJobIds: readonly string[]): { key: string; contract: JobContract | null }[] {
   const placeholders = LIVE_ATTEMPT_STATES.map(() => "?").join(", ");
+  const pending = pendingJobIds.map(() => "?").join(", ");
   const family = familyIds(db, job.id);
   const rows = db
     .prepare(
       `SELECT j.id, j.key, j.contract_json FROM agency_job j
-       WHERE j.binding_id = ? AND EXISTS (
+       WHERE j.binding_id = ? AND (EXISTS (
          SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id AND a.state IN (${placeholders})
-       )
+       )${pendingJobIds.length ? ` OR j.id IN (${pending})` : ""})
        ORDER BY j.rowid`,
     )
-    .all(job.bindingId, ...LIVE_ATTEMPT_STATES) as { id: string; key: string; contract_json: string | null }[];
+    .all(job.bindingId, ...LIVE_ATTEMPT_STATES, ...pendingJobIds) as { id: string; key: string; contract_json: string | null }[];
   return rows.filter((row) => !family.has(row.id)).map((row) => ({ key: row.key, contract: contractOf(row.contract_json) }));
 }
 
 /** Launch gate: waits while another running job owns one of this job's files. */
-export function assertOwnershipFree(db: SqlDatabase, job: Pick<Job, "id" | "bindingId" | "contract">, en: boolean): DomainResult<true> {
+export function assertOwnershipFree(
+  db: SqlDatabase,
+  job: Pick<Job, "id" | "bindingId" | "contract">,
+  en: boolean,
+  pendingJobIds: readonly string[] = [],
+): DomainResult<true> {
   if (!job.contract?.mayChange?.length) return ok(true);
-  for (const running of runningJobs(db, job)) {
+  for (const running of runningJobs(db, job, pendingJobIds)) {
     const line = contractsOverlap(job.contract, running.contract);
     if (!line) continue;
     return fail(

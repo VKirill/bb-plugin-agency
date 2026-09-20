@@ -1,4 +1,5 @@
 import { tr } from "../i18n";
+import { picksFromFallbackModels } from "./agent-fallbacks";
 import { policySummary } from "./role-types";
 import { charterPurpose } from "./charter";
 import type { Activity, Job as DomainJob, JobPriority, JobState } from "../../shared/contracts";
@@ -220,6 +221,7 @@ export function mapAgents(snapshot: WorkspaceSnapshot): Agent[] {
         reasoningLevel: version?.reasoningEffort ?? "medium",
         ...(version?.serviceTier ? { serviceTier: version.serviceTier } : {}),
       },
+      ...(version?.fallbackModels?.length ? { fallbackSelections: picksFromFallbackModels(version.fallbackModels) } : {}),
       permission: "auto",
       hostId: "",
       concurrency: 1,
@@ -309,7 +311,7 @@ export function queueCounts(jobs: Job[], server?: WorkspaceSnapshot["counts"]): 
   }
   return {
     total: Object.values(byState).reduce((sum, value) => sum + value, 0),
-    attention: byState.review + byState.blocked + byState.waiting_input,
+    attention: byState.blocked + byState.waiting_input,
     active: byState.running,
     byState,
   };

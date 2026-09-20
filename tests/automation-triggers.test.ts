@@ -83,9 +83,12 @@ describe("telegram queue", () => {
     };
     expect(await sweepTelegramOutbox(ports)).toBe(0);
     pref = { ...pref, enabled: true };
+    // Review is a station of the line: the customer is not pinged about it.
+    expect(await sweepTelegramOutbox(ports)).toBe(0);
+    db.prepare(`UPDATE agency_job SET state = 'blocked', revision = revision + 1 WHERE id = ?`).run(job.id);
     expect(await sweepTelegramOutbox(ports)).toBe(1);
     expect(await sweepTelegramOutbox(ports)).toBe(0);
-    expect(sent[0]).toMatchObject({ kind: "notification", title: expect.stringContaining("ждёт вашего решения") });
+    expect(sent[0]).toMatchObject({ kind: "notification", title: expect.stringContaining("ожидает решения") });
     pref = { ...pref, projectId: "proj_other" };
     db.prepare(`UPDATE agency_job SET state = 'waiting_input', revision = revision + 1 WHERE id = ?`).run(job.id);
     expect(await sweepTelegramOutbox(ports)).toBe(0);

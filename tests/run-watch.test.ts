@@ -148,6 +148,50 @@ describe("run watch", () => {
     expect(superviseRun(broke.ports, broke.row, { ...active, threadStatus: "error" })).toBe("blocked");
   });
 
+  it("switches to the owner-set reserve immediately on a usage limit", () => {
+    const switched: string[] = [];
+    const limited = harness({
+      providerError: () => "Codex usage limit reached. Your subscription window resets in 5h",
+      canSwitchToFallback: () => true,
+      switchToFallback: (rowJob) => {
+        switched.push(rowJob.key);
+        return true;
+      },
+    });
+    expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("fallback");
+    expect(switched).toEqual(["AG-601"]);
+    expect(limited.blocked).toEqual([]);
+    expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("skipped");
+  });
+
+  it("blocks immediately when BB will not retry a usage limit and there is no reserve", () => {
+    const dead = harness({
+      providerError: () => "You've hit your usage limit. Try again at Sep 21st, 2026 7:46 PM.",
+      bbWillRetry: () => false,
+      canSwitchToFallback: () => false,
+    });
+    expect(superviseRun(dead.ports, dead.row, { ...active, threadStatus: "error" })).toBe("blocked");
+    expect(dead.blocked[0]).toContain("нет запасной модели");
+    expect(superviseRun(dead.ports, dead.row, { ...active, threadStatus: "error" })).toBe("skipped");
+  });
+
+  it("waits when the reserve is missing or the switch is refused", () => {
+    const waiting = harness({
+      providerError: () => "Codex usage limit reached",
+      canSwitchToFallback: () => false,
+    });
+    expect(superviseRun(waiting.ports, waiting.row, { ...active, threadStatus: "error" })).toBe("warned");
+    waiting.tick(RUN_WATCH_ERROR_MS + 1000);
+    expect(superviseRun(waiting.ports, waiting.row, { ...active, threadStatus: "error" })).toBe("ok");
+
+    const failed = harness({
+      providerError: () => "Codex usage limit reached",
+      canSwitchToFallback: () => true,
+      switchToFallback: () => false,
+    });
+    expect(superviseRun(failed.ports, failed.row, { ...active, threadStatus: "error" })).toBe("warned");
+  });
+
   it("leaves idle threads to the completion reminder and restarts the episode", () => {
     const h = harness();
     superviseRun(h.ports, h.row, active);

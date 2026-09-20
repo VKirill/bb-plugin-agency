@@ -44,7 +44,7 @@ describe("accept then done", () => {
     expect(result).toEqual({ ok: false, failure: { kind: "domain", error: { code: "lifecycle_guard", message: ACCEPT_THEN_DONE_NOTICE } } });
   });
 
-  it("accepts exact version/hash then transitions", async () => {
+  it("accepts exact version/hash and skips a second transition when the store already closed", async () => {
     const hash = "e".repeat(64);
     const api = {
       acceptArtifactVersion: vi.fn(async (input: { version: number; hash: string }) => ({
@@ -53,9 +53,9 @@ describe("accept then done", () => {
       })),
       getJob: vi.fn(async () => ({
         ok: true as const,
-        value: { job: { ...snapshot.jobs[0], revision: 5, state: "review" }, artifacts: [], activity: [], needsInput: null },
+        value: { job: { ...snapshot.jobs[0], revision: 5, state: "done" }, artifacts: [], activity: [], needsInput: null },
       })),
-      transitionJob: vi.fn(async () => ({ ok: true as const, value: { ...snapshot.jobs[0], state: "done", revision: 6 } })),
+      transitionJob: vi.fn(),
     } as unknown as AgencyApi;
     const result = await persistAcceptThenDone(api, {
       expectedRevision: 4,
@@ -72,6 +72,6 @@ describe("accept then done", () => {
       hash,
       expectedRevision: 4,
     }));
-    expect(api.transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "done", expectedRevision: 5 }));
+    expect(api.transitionJob).not.toHaveBeenCalled();
   });
 });

@@ -63,12 +63,14 @@ function spawnArgs(over: Partial<IsolatedThreadSpawnArgs> = {}): IsolatedThreadS
       hostId: "host_mini",
       workspace: { type: "unmanaged", path: "/tmp/agy-bind" },
     },
-    isolatedSkillDelivery: true,
-    skillIds: [skillId],
+    origin: "plugin",
+    originPluginId: "agency",
     visibility: "hidden",
-    experimental_callerLaunchId: "11111111-1111-4111-8111-111111111111",
-    experimental_callerAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
-    experimental_callerJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    pluginMetadata: {
+      agencyLaunchId: "11111111-1111-4111-8111-111111111111",
+      agencyAttemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      agencyJobId: "job_aaaaaaaaaaaaaaaaaaaaaaaa",
+    },
     ...over,
   };
 }
@@ -77,6 +79,8 @@ function snapshot(over: Partial<ContextSnapshot> = {}): ContextSnapshot {
   return {
     schemaVersion: 2,
     digest: "d".repeat(64),
+    job: { key: "AG-1", title: "T" },
+    agentVersion: { role: "copywriter" },
     prompt: {
       digest: "p".repeat(64),
       levels: {
@@ -231,7 +235,7 @@ describe("typed spawn reasoningLevel", () => {
     if (!built.ok) return;
     expect(built.value.reasoningLevel).toBe("medium");
     expect(built.value.executionInputSources).toEqual({ reasoningLevel: "explicit" });
-    expect(built.value.prompt).toContain("## Job (job)\nJob brief for worker.");
+    expect(built.value.prompt).toContain(".agency/jobs/");
     expect("reasoningEffort" in built.value).toBe(false);
   });
 

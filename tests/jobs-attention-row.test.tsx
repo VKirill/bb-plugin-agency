@@ -54,15 +54,15 @@ describe("jobs list attention marker", () => {
   });
 
   it("marks how long a decision has been waiting on the person", async () => {
-    const { container, root } = await renderList([makeJob("AG-10", "review", 3)]);
-    const marked = row(container, "AG-10")?.querySelector('[aria-label*="Ждёт вашего решения"]');
+    const { container, root } = await renderList([makeJob("AG-10", "waiting_input", 3)]);
+    const marked = row(container, "AG-10")?.querySelector('[aria-label*="Ждёт вашего ответа"]');
     expect(marked?.textContent).toBe("3 ч");
     await act(async () => { root.unmount(); });
   });
 
   it("escalates a decision held for more than a day", async () => {
-    const { container, root } = await renderList([makeJob("AG-11", "review", 30)]);
-    const marked = row(container, "AG-11")?.querySelector('[aria-label*="Ждёт вашего решения"]') as HTMLElement;
+    const { container, root } = await renderList([makeJob("AG-11", "waiting_input", 30)]);
+    const marked = row(container, "AG-11")?.querySelector('[aria-label*="Ждёт вашего ответа"]') as HTMLElement;
     expect(marked.textContent).toBe("1 дн");
     expect(marked.className).toContain("amber");
     await act(async () => { root.unmount(); });

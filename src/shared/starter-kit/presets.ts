@@ -10,7 +10,7 @@ import type { KitModel } from "../starter-kit.js";
 export const FABLE: KitModel = {
   providerId: "claude-code",
   model: "claude-fable-5-1",
-  reasoningEffort: "high",
+  reasoningEffort: "medium",
   label: { ru: "Claude Fable 5.1 · Claude Code", en: "Claude Fable 5.1 · Claude Code" },
 };
 

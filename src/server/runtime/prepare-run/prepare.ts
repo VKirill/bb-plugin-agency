@@ -1,18 +1,16 @@
 import { assertBindingActive, assertDepartmentOnBinding, assertJobTransition, fail, ok, type DomainResult } from "../../../domain";
 import type { HostFilePort } from "../../../host/file-port.js";
 import { requestIdSchema } from "../../../shared/contracts";
+import type { AgentVersion } from "../../../shared/contracts/versions.js";
 import type { Job } from "../../../shared/contracts/job.js";
 import { assertBindingScope, type ServiceContext } from "../../services/context.js";
 import type { DomainStore } from "../../services/domain-store.js";
 import { compileContextSnapshot } from "../context-snapshot/compile.js";
+import { PACK_FILE_NAMES, type AttemptPackFile, type SnapshotPack } from "../context-snapshot/pack.js";
+import { agencyLanguage } from "../../i18n/language.js";
 import type { CatalogSkillEntry, ContextSnapshot, PluginGrant } from "../context-snapshot/types.js";
 import type { ReservedPreparedRun, RunStore } from "../run-store/types.js";
 import { selectCatalogRoles } from "./catalog-roles.js";
-import {
-  isHandshakeReady,
-  type IsolatedCapabilityHandshake,
-  type IsolatedCapabilityHandshakePort,
-} from "./handshake.js";
 import type { SkillCatalogPort } from "./ports.js";
 import {
   bindingHostFilePorts,
@@ -24,6 +22,7 @@ import {
 import type { VerifiedPrepareConfig } from "./server-config.js";
 import type { JobInputPort } from "./job-input.js";
 import { hashCatalogSkillPackage } from "./skill-package.js";
+import { launchModelSource } from "../agent-fallback.js";
 
 const PREPARE_JOB_STATES = new Set(["backlog", "queued"]);
 
@@ -37,8 +36,6 @@ export type PrepareRunPublicInput = {
 export type PreparedRun = {
   snapshot: ContextSnapshot;
   reserved: ReservedPreparedRun;
-  handshake: IsolatedCapabilityHandshake;
-  handshakeReady: boolean;
   projectRules: LoadedProjectRules;
   catalogSkills: readonly CatalogSkillEntry[];
   roles: {
@@ -52,7 +49,6 @@ export type PrepareRunDeps = {
   store: DomainStore;
   files: HostFilePort;
   catalog: SkillCatalogPort;
-  handshake: IsolatedCapabilityHandshakePort;
   runs: RunStore;
   server: VerifiedPrepareConfig;
   ruleFiles?: ProjectRulesFilePorts;
@@ -69,6 +65,18 @@ export type PrepareRunDeps = {
   }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
+  /** Overlay the pair this launch runs on (primary or an owner-set reserve) without rewriting the stored profile. */
+  effectiveAgentVersion?: (version: AgentVersion) => AgentVersion;
+  /**
+   * Wraps only the slot reservation. The snapshot is compiled outside of it (files, skills, the
+   * briefing), so one job's slow preparation never holds another job's launch.
+   */
+  reserveGate?: (reserve: () => DomainResult<ReservedPreparedRun>) => Promise<DomainResult<ReservedPreparedRun>>;
+  /**
+   * No longer consulted: the pack is written after the reservation, by the prepare that owns the
+   * attempt, so a refused prepare never touches the pack of a thread that is starting or working.
+   */
+  hasLiveAttempt?: (jobId: string) => boolean;
 };
 
 /** BB accepts at most 32 skills, tools and instruction plugins per isolated thread. */
@@ -93,9 +101,6 @@ export function createPrepareRun(deps: PrepareRunDeps) {
     async prepare(ctx: ServiceContext, input: PrepareRunPublicInput): Promise<DomainResult<PreparedRun>> {
       const requestId = requestIdSchema.safeParse(input.requestId);
       if (!requestId.success) return fail("invalid_command", "requestId must be a UUID");
-
-      const handshake = await deps.handshake.probe();
-      if (!handshake.ok) return handshake;
 
       const job = deps.store.getJob(input.jobId);
       if (!job) return fail("not_found", `job ${input.jobId} not found`);
@@ -123,11 +128,12 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       if (!job.assignedAgentId) return fail("assignee_required", "job.assignedAgentId is required");
       const agent = deps.store.getAgent(job.assignedAgentId);
       if (!agent) return fail("not_found", `agent ${job.assignedAgentId} not found`);
-      const agentVersion = deps.store.getAgentVersion(agent.currentVersionId);
-      if (!agentVersion) return fail("not_found", `agent version ${agent.currentVersionId} not found`);
-      if (agentVersion.agentId !== agent.id) {
+      const storedVersion = deps.store.getAgentVersion(agent.currentVersionId);
+      if (!storedVersion) return fail("not_found", `agent version ${agent.currentVersionId} not found`);
+      if (storedVersion.agentId !== agent.id) {
         return fail("version_mismatch", "currentVersionId must belong to this agent");
       }
+      const agentVersion = deps.effectiveAgentVersion?.(storedVersion) ?? storedVersion;
 
       const processVersion = deps.store.getProcessVersion(department.processVersionId);
       if (!processVersion) return fail("not_found", `process version ${department.processVersionId} not found`);
@@ -161,15 +167,9 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       if (!roles.ok) return roles;
 
       const withoutSandbox = deps.store.rulesForLaunch?.(job.departmentId, agent.id, binding.hostId).runWithoutSandbox === true;
-      if (withoutSandbox && !handshake.value.extensions?.permissionMode) {
-        return fail("sandbox_mode_unsupported", "Эта версия BB не принимает режим прав при запуске: правило «Запуск без песочницы» не выполняется. Выключите правило или обновите BB.");
-      }
       const pluginIds = agentVersion.pluginIds ?? [];
       const pluginGrants: PluginGrant[] = [];
       if (pluginIds.length) {
-        if (!handshake.value.extensions?.contextAllowlists) {
-          return fail("plugin_delivery_unsupported", "Эта версия BB не передаёт инструменты и инструкции плагинов в запуск. Уберите плагины в профиле сотрудника или обновите BB.");
-        }
         if (!deps.pluginTools) return fail("plugin_delivery_unsupported", "Каталог плагинов недоступен: запуск с плагинами не выполняется.");
         const tools = await deps.pluginTools(pluginIds);
         if (!tools.ok) return tools;
@@ -200,11 +200,15 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       const briefing = deps.briefing
         ? await deps.briefing({
             job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, departmentId: job.departmentId, assignedAgentId: job.assignedAgentId ?? "" },
-            skills: [...neededIds]
+            // The evaluator is asked about method skills only. Core and helper skills (the agency
+            // skill itself) ride in every launch: asking about them spends the question and, on a
+            // short profile, drowns the hint in its own noise rule.
+            skills: roles.value.methodSkillIds
               .map((id) => listed.value.find((skill) => skill.id === id))
               .filter((skill): skill is (typeof listed.value)[number] => Boolean(skill))
-              .map((skill) => ({ id: skill.id, name: skill.name, ...(skill.description ? { description: skill.description } : {}) })),
-            catalog: listed.value.map((skill) => ({ id: skill.id, name: skill.name, ...(skill.description ? { description: skill.description } : {}) })),
+              .map(briefingSkill),
+            // What already rides in the launch is not a library candidate either.
+            catalog: listed.value.filter((skill) => !neededIds.has(skill.id)).map(briefingSkill),
           }).catch(() => null)
         : null;
       for (const skillId of briefing?.addSkillIds ?? []) {
@@ -251,7 +255,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         providerLimits: {},
         handoff: persistedInputs.value.handoff,
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
-        knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id, briefing?.lessonIds ?? null) ?? null,
+        knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id, briefing?.lessonIds ?? null, job.sectionId) ?? null,
         workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,
         passport: deps.store.passportForLaunch?.(binding.id, job.departmentId, job.assignedAgentId ?? null, binding.hostId) ?? null,
         briefing,
@@ -259,32 +263,82 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         placement: deps.store.placementForLaunch?.(job) ?? null,
         permissionMode: withoutSandbox ? "full" : null,
         roleInstructions: deps.roleInstructions?.(job.id) ?? null,
+        launchModelSource: launchModelSource(storedVersion, agentVersion),
+        memberRole: deps.store.memberRole(job.departmentId, job.assignedAgentId),
+        packLanguage: agencyLanguage(),
       });
       if (!compiled.ok) return fail(compiled.error.code, compiled.error.message);
 
-      const reserved = deps.runs.reservePreparedRun(ctx, {
-        requestId: input.requestId,
-        snapshot: compiled.snapshot,
-        attestation: {
-          accessVerified: true,
-          revisionsVerified: true,
-          expectedJobRevision: job.revision,
-          expectedBindingRevision: binding.revision,
-        },
-      });
+      const reserve = () =>
+        deps.runs.reservePreparedRun(ctx, {
+          requestId: input.requestId,
+          snapshot: compiled.snapshot,
+          attestation: {
+            accessVerified: true,
+            revisionsVerified: true,
+            expectedJobRevision: job.revision,
+            expectedBindingRevision: binding.revision,
+          },
+        });
+      const reserved = deps.reserveGate ? await deps.reserveGate(reserve) : reserve();
       if (!reserved.ok) return reserved;
+
+      // The pack goes to disk after the reservation: only the prepare that owns the attempt writes
+      // it, and what it writes is what the reserved digest pins.
+      if (reserved.value.digest !== compiled.snapshot.digest || !compiled.snapshot.pack) {
+        return fail("snapshot_digest_conflict", "the reserved attempt pins another snapshot; its pack is left as it is");
+      }
+      const written = await writeAttemptPack(deps.files, binding.canonicalRoot, compiled.snapshot.pack, compiled.packFiles);
+      if (!written.ok) return written;
 
       return ok({
         snapshot: compiled.snapshot,
         reserved: reserved.value,
-        handshake: handshake.value,
-        handshakeReady: isHandshakeReady(handshake.value),
         projectRules: projectRules.value,
         catalogSkills,
         roles: roles.value,
       });
     },
   };
+}
+
+function briefingSkill(skill: { id: string; name: string; description?: string }) {
+  return { id: skill.id, name: skill.name, ...(skill.description ? { description: skill.description } : {}) };
+}
+
+/**
+ * Bring the folder to the pinned pack: a file with the pinned hash stays, another one is replaced,
+ * a pack file of an earlier preparation that this pack lacks (an old handoff or hint) goes away.
+ * `report.md` and everything else in the folder is the employee's and is not touched.
+ */
+async function writeAttemptPack(
+  files: HostFilePort,
+  canonicalRoot: string,
+  pack: SnapshotPack,
+  bodies: readonly AttemptPackFile[],
+): Promise<DomainResult<true>> {
+  for (const pinned of pack.files) {
+    const body = bodies.find((file) => file.name === pinned.name);
+    if (!body) return fail("pack_mismatch", `pack file ${pinned.name} has no body`);
+    const path = `${pack.dir}/${pinned.name}`;
+    const existing = await files.stat(canonicalRoot, path);
+    if (!existing.ok) return existing;
+    if (existing.value?.hash === pinned.hash) continue;
+    if (existing.value) {
+      const removed = await files.remove(canonicalRoot, path);
+      if (!removed.ok) return removed;
+    }
+    const written = await files.writeAtomic(canonicalRoot, path, new TextEncoder().encode(body.body));
+    if (!written.ok) return written;
+    if (written.value.hash !== pinned.hash) return fail("pack_mismatch", `${path} on disk does not match the snapshot`);
+  }
+  const current = new Set(pack.files.map((file) => file.name));
+  for (const name of PACK_FILE_NAMES) {
+    if (current.has(name)) continue;
+    const removed = await files.remove(canonicalRoot, `${pack.dir}/${name}`);
+    if (!removed.ok) return removed;
+  }
+  return ok(true);
 }
 
 function agencyRulesInput(rules: { id: string; version: number; hash: string; text: string } | null) {

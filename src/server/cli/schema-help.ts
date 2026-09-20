@@ -8,11 +8,13 @@ bb agency call <operation> --input-json '<payload>' [--json]
 bb agency catalog [--json]
 bb agency catalog capabilities [--input-json '<payload>'] [--json]
 bb agency workspace [--binding-id <id>] [--json]
+bb agency idea list|get|save|status --input-json '...' [--json]
 bb agency policy create --input-json '<payload>' [--json]
 bb agency agent create|get|save ...
 bb agency department create|get|save|membership ...
-bb agency project bind|get|link-department ...
-bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|attempts|comment ...
+bb agency project bind|get|link-department|session get|session save ...
+bb agency session get|save --input-json '<payload>'
+bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|ask-owner|attempts|comment ...
 bb agency artifact create|publish|open|accept|versions ...
 bb agency launch prepare|get|reconcile|cancel|interpret-completion|readiness|attempts ...
 bb agency status [--json]
@@ -33,7 +35,7 @@ bb CLI run исполняется на машине плагина (server), н�
 canonicalRoot из payload не является правом на чтение чужого host.
 Новый BB project CLI не создаёт: только bind существующего каталога.
 Spawn не обещать из help: смотри bb agency launch readiness / getIsolationReadiness
-этого instance (GET spawn-contract, CLI в BB, политики). Произвольный RPC закрыт allowlist.
+этого instance (native threads.spawn, CLI в BB, политики). Произвольный RPC закрыт allowlist.
 bytesBase64 и значения секретов в stdout не печатаются.
 `;
 
@@ -46,8 +48,9 @@ export const CLI_COMMAND_SPECS = [
   { name: "policy", summary: "Неизменяемые политики", usage: "bb agency policy create --input-json '<payload>'" },
   { name: "agent", summary: "Сотрудник", usage: "bb agency agent create|get|save|delete|metrics" },
   { name: "department", summary: "Отдел и membership", usage: "bb agency department create|get|save|availability|archive|restore|delete|membership" },
-  { name: "project", summary: "Привязка существующего каталога", usage: "bb agency project bind|get|link-department" },
-  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|attempts|comment|usage|return" },
+  { name: "project", summary: "Привязка существующего каталога", usage: "bb agency project bind|get|link-department|session get|session save" },
+  { name: "session", summary: "Режим обычных чатов проекта или этого треда", usage: "bb agency session get|save --input-json '<payload>'" },
+  { name: "job", summary: "Задача", usage: "bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|ask-owner|attempts|comment|usage|return" },
   { name: "rules", summary: "Правила работы: лимиты, пороги, модели по умолчанию", usage: "bb agency rules get|save --input-json '<payload>'" },
   { name: "usage", summary: "Токены и оценка стоимости; rootJobId — задача с подзадачами", usage: "bb agency usage --input-json '{\"rootJobId\":\"<jobId>\"}'" },
   { name: "artifact", summary: "Версии файлов", usage: "bb agency artifact create|publish|open|accept|versions" },

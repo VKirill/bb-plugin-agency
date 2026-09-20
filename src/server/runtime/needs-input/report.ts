@@ -13,6 +13,7 @@ import { assertBindingAccess, nowUtc, type ServiceContext } from "../../services
 import type { DomainStore } from "../../services";
 import { payloadWithoutRequestId, sameActor, sameCanonical } from "../../services/request-identity.js";
 import { uuidV5 } from "../launch/operation-ids.js";
+import { enqueueClientBounce } from "../client-bounce/index.js";
 import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
 
 export type ReportNeedsInputDeps = {
@@ -244,6 +245,8 @@ export function reportNeedsInput(
       if (!nextAttempt.ok) return nextAttempt;
       attemptRevision = nextAttempt.value.revision;
     }
+    const latest = deps.store.getJob(input.jobId) ?? job;
+    enqueueClientBounce(deps.db, latest, waitId, now);
     return ok({
       waitId,
       jobId: input.jobId,
