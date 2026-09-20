@@ -16,6 +16,7 @@ import { exampleFiles } from "./demo/files";
 import { FileChip, FilePicker } from "./task-files";
 import { Button, AgentMark, Icon, TextField, Choice, Status, Field, InfoHint } from "./shared";
 import { RailCard, RailPerson, RailRow } from "./job-rail";
+import { canOpenNativeThread } from "../data/job-work-thread";
 
 import { TaskQuestionBlock } from "./task-question";
 import { JobNeedsInputPanel } from "./job-needs-input";
@@ -416,6 +417,7 @@ export function JobDetail({agents,projects=[],departments=[],job,jobs,update,add
      <RailCard title="Параметры">
       <RailRow label="Проект" value={projectName&&liveBinding&&openProject?<Button size="sm" variant="ghost" className="h-auto px-0" onClick={()=>openProject(liveBinding)}>{projectName}</Button>:projectName||tr("не задан")} tone={projectName?"default":"muted"}/>
       <RailRow label="Отдел" value={departmentName&&liveDepartment&&openDepartment?<Button size="sm" variant="ghost" className="h-auto px-0" onClick={()=>openDepartment(liveDepartment)}>{departmentName}</Button>:departmentName||tr("не задан")} tone={departmentName?"default":"muted"}/>
+      {!demoMode&&job.originThreadId?.trim()&&<RailRow label="Чат постановки" value={canOpenNativeThread(navigate)?<Button size="sm" variant="ghost" className="h-auto px-0" onClick={()=>navigate.toThread(job.originThreadId!.trim())}>{tr("Открыть чат")}</Button>:job.originThreadId.trim()} mono={!canOpenNativeThread(navigate)} info={<p>{tr("Чат, из которого поставили задачу. Рабочий тред запуска открывается отдельно, в подробностях работы.")}</p>}/>}
       <RailRow label="Приоритет" value={tr(job.priority)}/>
       {!demoMode&&!job.parentId&&<RailRow label="Цель" value={<JobGoalChoice job={job} notice={notice}/>} info={<p>{tr("Цель, ради которой идёт главная задача. Прогресс целей — в разделе «Цели».")}</p>}/>}
       {job.escalatedToId&&<RailRow label="Эскалация" value={<span className="text-amber-700 dark:text-amber-400">{tr("в отдел «{name}»",{name:departments.find(item=>item.id===job.escalatedToId)?.name??job.escalatedToId})}</span>} info={<p>{tr("Задача ждёт решения дольше срока правила отдела и эскалирована в вышестоящий отдел. Эскалация закрывается, когда задача выходит из «Ожидает решения».")}</p>}/>}

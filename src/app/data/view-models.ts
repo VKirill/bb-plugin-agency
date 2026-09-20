@@ -179,6 +179,7 @@ export function mapJobs(snapshot: WorkspaceSnapshot): Job[] {
       comments: [],
       parentId: job.parentJobId ? snapshot.jobs.find((item) => item.id === job.parentJobId)?.key : undefined,
       ...(job.closedAt ? { closedAt: job.closedAt } : {}),
+      ...(job.originThreadId?.trim() ? { originThreadId: job.originThreadId.trim() } : {}),
     };
   });
 }

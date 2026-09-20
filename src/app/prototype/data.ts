@@ -70,6 +70,8 @@ export interface Job {
   closedAt?: string;
   /** Domain JobState before asUiState; launch guard uses this when the label differs. */
   sourceState?: string;
+  /** BB thread that commissioned the job. Not the launch work thread. */
+  originThreadId?: string;
 }
 export interface DemoRun {
   id: string;
