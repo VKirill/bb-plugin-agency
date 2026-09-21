@@ -5,7 +5,7 @@ import { bbProjectIdSchema, opaqueIdSchema, requestIdSchema } from "./ids";
 export const SESSION_POLICY_MODES = ["inherit", "ordinary", "suggest", "pm"] as const;
 export type SessionPolicyMode = (typeof SESSION_POLICY_MODES)[number];
 
-export const SESSION_SCOPES = ["project", "binding", "thread"] as const;
+export const SESSION_SCOPES = ["project", "binding", "thread", "pending"] as const;
 export type SessionPolicyScope = (typeof SESSION_SCOPES)[number];
 
 /** What the ordinary chat actually receives after resolution. */
@@ -50,6 +50,8 @@ export const sessionPolicyViewSchema = z
     effective: sessionEffectiveModeSchema,
     source: z.enum(["thread", "binding", "project", "agency"]),
     layers: sessionPolicyLayersSchema,
+    /** Next unsent chat in this project; inherit means none. Not the project default. */
+    pending: sessionPolicyModeSchema,
     bbProjectId: z.string().nullable(),
     bindingId: z.string().nullable(),
     threadId: z.string().nullable(),

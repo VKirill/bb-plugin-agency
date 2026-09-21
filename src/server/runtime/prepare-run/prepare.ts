@@ -62,7 +62,7 @@ export type PrepareRunDeps = {
     skills: readonly { id: string; name: string; description?: string }[];
     /** Весь каталог машины: из него берётся библиотека отдела. */
     catalog: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
+  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[]; reasoningEffort?: "low" | "medium" | "high" } | null>;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
   /** Overlay the pair this launch runs on (primary or an owner-set reserve) without rewriting the stored profile. */
@@ -133,7 +133,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       if (storedVersion.agentId !== agent.id) {
         return fail("version_mismatch", "currentVersionId must belong to this agent");
       }
-      const agentVersion = deps.effectiveAgentVersion?.(storedVersion) ?? storedVersion;
+      let agentVersion = deps.effectiveAgentVersion?.(storedVersion) ?? storedVersion;
 
       const processVersion = deps.store.getProcessVersion(department.processVersionId);
       if (!processVersion) return fail("not_found", `process version ${department.processVersionId} not found`);
@@ -216,6 +216,10 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         if (neededIds.size >= ISOLATED_LIST_LIMIT) break;
         if (listed.value.some((skill) => skill.id === skillId)) neededIds.add(skillId);
       }
+      const memberRole = deps.store.memberRole(job.departmentId, job.assignedAgentId);
+      if (briefing?.reasoningEffort && (memberRole === "executor" || memberRole === "assistant")) {
+        agentVersion = { ...agentVersion, reasoningEffort: briefing.reasoningEffort };
+      }
 
       const catalogSkills: CatalogSkillEntry[] = [];
       for (const skill of listed.value) {
@@ -264,7 +268,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         permissionMode: withoutSandbox ? "full" : null,
         roleInstructions: deps.roleInstructions?.(job.id) ?? null,
         launchModelSource: launchModelSource(storedVersion, agentVersion),
-        memberRole: deps.store.memberRole(job.departmentId, job.assignedAgentId),
+        memberRole,
         packLanguage: agencyLanguage(),
       });
       if (!compiled.ok) return fail(compiled.error.code, compiled.error.message);

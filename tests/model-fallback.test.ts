@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelChoiceNote, modelFamily, resolveModelChoice, type CatalogModel } from "../src/server/runtime/model-fallback";
+import { catalogReserves, mergedReserves, modelChoiceNote, modelFamily, resolveModelChoice, type CatalogModel } from "../src/server/runtime/model-fallback";
 
 const claude: CatalogModel[] = [
   { providerId: "claude-code", model: "claude-opus-5", isDefault: true },
@@ -80,5 +80,36 @@ describe("model fallback", () => {
     expect(modelChoiceNote(choice, true)).toContain("is used instead");
     expect(modelChoiceNote({ status: "exact", providerId: "claude-code", model: "claude-opus-5" }, false)).toBeNull();
     expect(modelChoiceNote({ status: "missing", wanted: { providerId: "x", model: "y" } }, false)).toContain("замены не нашлось");
+  });
+
+  it("fills Claude → GPT → Grok reserves of the same class and skips missing families", () => {
+    const grokWriter = catalogReserves({ providerId: "acp-cursor", model: "grok-4.6" }, mixed);
+    expect(grokWriter.map((row) => row.model)).toEqual(["claude-sonnet-5", "gpt-5.6-sol"]);
+
+    expect(catalogReserves({ providerId: "acp-cursor", model: "grok-4.6" }, claude)).toEqual([]);
+    expect(catalogReserves({ providerId: "claude-code", model: "claude-sonnet-5" }, claude)).toEqual([]);
+
+    const claudeAndGpt: CatalogModel[] = [
+      ...claude,
+      { providerId: "codex", model: "gpt-5.6-sol", isDefault: true },
+      { providerId: "codex", model: "gpt-5.6-luna", isDefault: false },
+    ];
+    // Grok is not connected: the writer is installed on Sonnet, so the reserve is GPT, not another Claude.
+    expect(catalogReserves({ providerId: "acp-cursor", model: "grok-4.6" }, claudeAndGpt).map((row) => `${row.providerId}:${row.model}`)).toEqual([
+      "codex:gpt-5.6-sol",
+    ]);
+  });
+
+  it("keeps owner-set reserves that still exist and fills an empty list", () => {
+    const owned = mergedReserves(
+      { providerId: "claude-code", model: "claude-sonnet-5" },
+      [{ providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "high" }],
+      mixed,
+    );
+    expect(owned).toEqual([{ providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "high" }]);
+    expect(mergedReserves({ providerId: "claude-code", model: "claude-sonnet-5" }, [], mixed).map((row) => row.model)).toEqual([
+      "gpt-5.6-sol",
+      "grok-4.6",
+    ]);
   });
 });

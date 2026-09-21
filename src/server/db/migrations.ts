@@ -29,7 +29,7 @@ import { DECISION_SETTINGS_MIGRATION } from "../decisions/settings.js";
 import { SKILL_GRANT_MIGRATION, SKILL_POOL_MIGRATION } from "../organization/skill-pool.js";
 import { PASSPORT_MIGRATION, PASSPORT_VERSION_MIGRATION } from "../projects/passport.js";
 import { PASSPORT_SETTINGS_MIGRATION } from "../projects/passport-settings.js";
-import { SESSION_POLICY_MIGRATION } from "../delegation/session-policy.js";
+import { SESSION_PENDING_MIGRATION, SESSION_POLICY_MIGRATION } from "../delegation/session-policy.js";
 import { CLIENT_BOUNCE_MIGRATION } from "../runtime/client-bounce/service.js";
 import { AGENT_FALLBACK_LIST_MIGRATION, AGENT_FALLBACK_MIGRATION } from "../runtime/agent-fallback.js";
 import { DECISION_LOG_MIGRATION } from "../decisions/log.js";
@@ -707,6 +707,28 @@ ALTER TABLE agency_knowledge_next RENAME TO agency_knowledge;`,
   DECISION_LOG_MIGRATION,
   IDEAS_MIGRATION,
   IDEA_CLOSE_MIGRATION,
+  SESSION_PENDING_MIGRATION,
+  `CREATE TABLE agency_stale_nudge (
+    nudge_id TEXT PRIMARY KEY,
+    batch_id TEXT,
+    job_id TEXT NOT NULL,
+    origin_thread_id TEXT NOT NULL,
+    state_since TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    send_state TEXT NOT NULL CHECK(send_state IN (
+      'pending', 'queued', 'confirmed', 'unknown', 'rejected', 'skipped'
+    )),
+    dispatch_claimed INTEGER NOT NULL DEFAULT 0,
+    queued_message_id TEXT,
+    revision_at_send INTEGER,
+    next_check_at TEXT,
+    decision TEXT,
+    reason_code TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES agency_job(id)
+  );
+CREATE INDEX agency_stale_nudge_job_idx ON agency_stale_nudge(job_id);
+CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
 ];
 
 function statementHash(sql: string): string {

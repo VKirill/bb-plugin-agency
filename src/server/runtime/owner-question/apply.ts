@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { sha256Hex } from "../context-snapshot/canonical.js";
+import { uuidV5 } from "../launch/operation-ids.js";
 import { answerNeedsInput } from "../needs-input/answer.js";
 import { readNeedsInputRecord } from "../needs-input/report.js";
 import type { IsolatedSendPort } from "../isolated-sdk/send-port.js";
@@ -72,7 +72,7 @@ export async function applyOwnerQuestionAnswers(
       },
       access.value.ctx,
       {
-        requestId: randomUUID(),
+        requestId: uuidV5(waitId, "agency.ownerQuestion.answer"),
         expectedRevision: job.revision,
         jobId,
         expectedAttemptRevision: record.attemptRevision,

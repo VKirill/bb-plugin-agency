@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveAlias } from "../src/server/cli/aliases";
 import { AWAITING_REVIEW_MIGRATION_ID, migrations, openMigratedDatabase } from "../src/server/db";
 import { sha256Hex } from "../src/server/runtime/context-snapshot/canonical";
-import { answerNeedsInput, continuationToken } from "../src/server/runtime/needs-input/answer";
+import { answerNeedsInput, continuationToken, flushUnconfirmedAnswers } from "../src/server/runtime/needs-input/answer";
 import { readNeedsInputRecord, reportNeedsInput } from "../src/server/runtime/needs-input/report";
 import type { IsolatedSendPort } from "../src/server/runtime/isolated-sdk/send-port";
 import { toJson } from "../src/server/db/sql";
@@ -215,13 +215,13 @@ describe("answerNeedsInput", () => {
     expect(sends).toBe(1);
   });
 
-  it("does not resend after dispatch when timeline reports absent or unknown", async () => {
-    const { opened, live, deps, reported } = await seedWaiting();
+  it("resends after an unknown dispatch when the timeline reports absent", async () => {
+    const { live, deps, reported } = await seedWaiting();
     let sends = 0;
     const send: IsolatedSendPort = {
       async send() {
         sends += 1;
-        return { kind: "unknown", code: "send_transport", message: "timeout" };
+        return sends === 1 ? { kind: "unknown", code: "send_transport", message: "timeout" } : { kind: "confirmed", delivery: "sent" };
       },
       async recoverContinuation() {
         return "absent";
@@ -232,14 +232,95 @@ describe("answerNeedsInput", () => {
     expect(first.ok && first.value.sendState).toBe("unknown");
     expect(sends).toBe(1);
     const replay = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, input);
+    expect(replay.ok && replay.value.sendState).toBe("confirmed");
+    expect(sends).toBe(2);
+  });
+
+  it("does not resend when recover cannot see the timeline", async () => {
+    const { live, deps, reported } = await seedWaiting();
+    let sends = 0;
+    const send: IsolatedSendPort = {
+      async send() {
+        sends += 1;
+        return { kind: "unknown", code: "send_transport", message: "timeout" };
+      },
+      async recoverContinuation() {
+        return "unknown";
+      },
+    };
+    const input = answerCommand(live, reported);
+    const first = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, input);
+    expect(first.ok && first.value.sendState).toBe("unknown");
+    expect(sends).toBe(1);
+    const replay = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, input);
     expect(replay.ok && replay.value.sendState).toBe("needs_reconciliation");
     expect(sends).toBe(1);
-    opened.db
-      .prepare(`UPDATE agency_job_needs_input_answer SET send_state = 'pending' WHERE job_id = ?`)
-      .run(live.seeded.job.id);
-    const crashReplay = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, input);
-    expect(crashReplay.ok && crashReplay.value.sendState).toBe("needs_reconciliation");
+  });
+
+  it("supersedes an unconfirmed wait claim from another requestId", async () => {
+    const { live, deps, reported } = await seedWaiting();
+    let sends = 0;
+    const send: IsolatedSendPort = {
+      async send() {
+        sends += 1;
+        return sends === 1 ? { kind: "unknown", code: "send_transport", message: "timeout" } : { kind: "confirmed", delivery: "sent" };
+      },
+      async recoverContinuation() {
+        return "absent";
+      },
+    };
+    const first = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, answerCommand(live, reported));
+    expect(first.ok && first.value.sendState).toBe("unknown");
     expect(sends).toBe(1);
+    const second = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, answerCommand(live, reported));
+    expect(second.ok && second.value.sendState).toBe("confirmed");
+    expect(sends).toBe(2);
+  });
+
+  it("flushes an unknown owner answer into the worker thread", async () => {
+    const { live, deps, reported } = await seedWaiting();
+    let sends = 0;
+    const send: IsolatedSendPort = {
+      async send() {
+        sends += 1;
+        return sends === 1
+          ? { kind: "unknown", code: "send_transport", message: "timeout" }
+          : { kind: "confirmed", delivery: "sent" };
+      },
+      async recoverContinuation() {
+        return "absent";
+      },
+    };
+    const first = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, answerCommand(live, reported));
+    expect(first.ok && first.value.sendState).toBe("unknown");
+    await flushUnconfirmedAnswers({ ...deps, send }, live.seeded.ctx);
+    expect(sends).toBe(2);
+    expect(live.seeded.store.getJob(live.seeded.job.id)?.state).toBe("running");
+  });
+
+  it("resends a queued continuation after the BB queue dropped it", async () => {
+    const { live, deps, reported } = await seedWaiting();
+    let sends = 0;
+    let presence: "queued" | "absent" = "queued";
+    const send: IsolatedSendPort = {
+      async send() {
+        sends += 1;
+        return sends === 1
+          ? { kind: "confirmed", delivery: "queued", queuedMessageId: "qmsg_lost01" }
+          : { kind: "confirmed", delivery: "sent" };
+      },
+      async recoverContinuation() {
+        return presence;
+      },
+    };
+    const input = answerCommand(live, reported);
+    const queued = await answerNeedsInput({ ...deps, send }, live.seeded.ctx, input);
+    expect(queued.ok && queued.value.sendState).toBe("queued");
+    expect(sends).toBe(1);
+    presence = "absent";
+    await flushUnconfirmedAnswers({ ...deps, send }, live.seeded.ctx);
+    expect(sends).toBe(2);
+    expect(live.seeded.store.getJob(live.seeded.job.id)?.state).toBe("running");
   });
 
   it("keeps queued as queue, not worker running, and stores rejected separately", async () => {

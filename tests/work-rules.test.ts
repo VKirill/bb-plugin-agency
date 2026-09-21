@@ -116,4 +116,24 @@ describe("work rules", () => {
     if (!refused.ok) expect(refused.error.code).toBe("rule_not_in_scope");
     db.close();
   });
+
+  it("fills stale nudge thresholds from defaults when stored rules omit them", () => {
+    const db = open();
+    const s = seed(db);
+    const saved = s.store.saveWorkRules(s.bootstrap, {
+      requestId: randomUUID(),
+      scope: "agency",
+      expectedRevision: 0,
+      rules: { watchStallMinutes: 45 },
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(saved.value.stored.staleHoursBlocked).toBeUndefined();
+    expect(saved.value.effective.staleHoursBlocked).toBe(DEFAULT_WORK_RULES.staleHoursBlocked);
+    expect(saved.value.effective.staleHoursRunning).toBe(1);
+    expect(saved.value.effective.staleRepeatHours).toBe(24);
+    expect(saved.value.effective.staleMaxAttempts).toBe(3);
+    expect(saved.value.sources.staleHoursBlocked).toBe("default");
+    db.close();
+  });
 });

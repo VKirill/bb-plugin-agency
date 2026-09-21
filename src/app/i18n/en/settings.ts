@@ -109,6 +109,16 @@ export const EN_SETTINGS: Record<string, string> = {
   "Сколько терпеть ошибку треда: у повторов провайдера и лимитов подписки есть время восстановиться.": "How long to tolerate a thread error: provider retries and subscription limits need time to recover.",
   "Потолок одной попытки": "Ceiling for one attempt",
   "Непрерывная работа дольше этого срока — задача останавливается на решение: возможно, сотрудник зациклился или работу надо делить.": "Continuous work past this time stops the job for a decision: the employee may be stuck in a loop, or the work needs splitting.",
+  "Зависшие задачи": "Stuck jobs",
+  "Если задача стоит без движения, Агентство пишет в чат, откуда её ставили, и спрашивает агента этого чата — не владельца. 0 выключает порог или весь обходчик.": "If a job sits without movement, the Agency writes to the chat that commissioned it and asks that chat's agent — not the owner. 0 turns the threshold or the whole sweeper off.",
+  "Напомнить о blocked через": "Nudge a blocked job after",
+  "Сколько часов задача может висеть в «Ожидает решения» без движения, прежде чем обходчик спросит чат постановки. 0 — не спрашивать.": "How many hours a job may sit in “Needs decision” without movement before the sweeper asks the commissioning chat. 0 — don't ask.",
+  "Напомнить о running без попытки через": "Nudge a running job without an attempt after",
+  "Сколько часов задача может оставаться running без живой попытки. Живую попытку ведёт наблюдение за запуском. 0 — не спрашивать.": "How many hours a job may stay running without a live attempt. A live attempt is watched by launch monitoring. 0 — don't ask.",
+  "Повтор напоминания через": "Repeat the nudge after",
+  "Интервал между сообщениями в один чат по одному эпизоду зависания, если агент не ответил. После keep берётся nextCheckHours. 0 — не повторять.": "Interval between messages to one chat for the same hang episode if the agent did not answer. After keep, nextCheckHours is used. 0 — don't repeat.",
+  "Напоминаний до эскалации": "Nudges before escalation",
+  "Сколько раз спросить чат постановки. После этого — одно сообщение во «Входящие», задача не закрывается. 0 — обходчик выключен.": "How many times to ask the commissioning chat. After that — one Inbox message; the job is not closed. 0 — sweeper off.",
   "Сдача и сроки": "Delivery and deadlines",
   "Напоминаний о несданной работе": "Reminders about undelivered work",
   "Сотрудник закончил ход без опубликованной версии — Агентство напоминает, как сдать работу. После этого числа напоминаний задача уходит руководителю.": "The employee ended a turn without a published version — the Agency reminds them how to deliver work. After this many reminders, the job goes to the lead.",
@@ -126,7 +136,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "Одновременных запусков": "Concurrent launches",
   "Сколько попыток может работать одновременно. Пусто — без ограничения. Запуск сверх лимита откладывается с объяснением.": "How many attempts can run at the same time. Empty — no limit. A launch past the limit is deferred with an explanation.",
   "Новые сотрудники по умолчанию": "New employee defaults",
-  "CLI, модель, уровень рассуждения и быстрый режим, которые подставляются в форму «Создать сотрудника» и в стартовые отделы для каждого типа роли. Подходит любой CLI, подключённый в BB. В форме всё можно поменять.": "The CLI, model, reasoning level and fast mode pre-filled in the “Create employee” form and in starter departments for each role type. Any CLI connected in BB fits. Everything can be changed in the form.",
+  "CLI, модель, уровень рассуждения и быстрый режим, которые подставляются в форму «Создать сотрудника» и в стартовые отделы для каждого типа роли. Подходит любой CLI, подключённый в BB. В форме всё можно поменять. Нет модели — подставляется ближайшая из Claude, GPT или Grok; запасные модели по лимиту подписки заполняются из тех семейств, которые здесь есть.":
+    "The CLI, model, reasoning level and fast mode pre-filled in the “Create employee” form and in starter departments for each role type. Any CLI connected in BB fits. Everything can be changed in the form. A missing model is replaced by the closest Claude, GPT or Grok; usage-limit reserves are filled from the families this BB has.",
   "быстрый режим": "fast mode",
   "Проверка работы сотрудника": "Review of this employee's work",
   "По умолчанию действует правило отдела. Выключите, если этот сотрудник собирает материал для коллеги: проверять там нечего, а проверка отдела стоит денег.": "The department rule applies by default. Switch it off when this employee collects material for a colleague: there is nothing to review, and a department review costs money.",
@@ -135,7 +146,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "Руководитель": "Lead",
   "Руководитель планирует, раздаёт работу и принимает решения: сильная модель и высокий уровень рассуждения окупаются.": "The lead plans, hands out work and makes decisions: a strong model and a high reasoning level pay off.",
   "Исполнитель": "Executor",
-  "Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения.": "Routine work is fine with a faster, cheaper model and a medium reasoning level.",
+  "Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения. Оценщик перед запуском может выбрать low, medium или high только для этой попытки.":
+    "Routine work is fine with a faster, cheaper model and a medium reasoning level. Before a launch the decision model may pick low, medium or high for that attempt only.",
   "Проверяющий": "Reviewer",
   "Поиск дефектов требует внимательности: сильная модель и высокий уровень рассуждения.": "Finding defects takes attention to detail: a strong model and a high reasoning level.",
 
@@ -449,14 +461,15 @@ export const EN_SETTINGS: Record<string, string> = {
     "There is no variable with that name: pick another one or paste the key below.",
   "Укажите, в какой переменной лежит ключ.":
     "Say which variable holds the key.",
+  "Ключ не найден.": "Key not found.",
   "Привратник памяти":
     "Memory gatekeeper",
   "Перед записью урока в память отдела: хранить ли, какой это вид, нет ли в тексте секрета или временного статуса, не повтор ли это. Отказ и находка секрета останавливают запись, вид и важность приходят предложением.":
     "Before a lesson enters the department memory: whether to keep it, what kind it is, whether the text holds a secret or a status of the day, whether it repeats an existing record. A refusal or a found secret stops the write; kind and importance arrive as a suggestion.",
   "Подсказка к запуску":
     "Launch briefing",
-  "Перед запуском: какие методические навыки сотрудника поднять, что открыть из библиотеки отдела и какие записи памяти отнести к делу. Молчание и пустой список пишутся в журнал. Бриф и регламент выше подсказки.":
-    "Before a launch: which of the employee's method skills to raise, what to open from the department library, and which memory records belong to the job. Silence and an empty list are written to the log. The brief and the charter stay above the hint.",
+  "Перед запуском: какие методические навыки сотрудника поднять, что открыть из библиотеки отдела, какие записи памяти отнести к делу, и какой уровень рассуждения (low / medium / high) дать исполнителю или помощнику на эту попытку. Молчание и пустой список пишутся в журнал. Бриф и регламент выше подсказки. Профиль сотрудника не переписывается.":
+    "Before a launch: which of the employee's method skills to raise, what to open from the department library, which memory records belong to the job, and which reasoning effort (low / medium / high) the executor or assistant should use on this attempt. Silence and an empty list are written to the log. The brief and the charter stay above the hint. The employee profile is not rewritten.",
   "Привратник паспорта":
     "Passport gatekeeper",
   "Перед тем как новая редакция паспорта проекта заменит прежнюю: нет ли в ней секрета, не состояние ли это дня и отличается ли она от прежней по существу. Секрет и состояние дня отменяют замену, совпадение с прежней — просто пропускает её.":

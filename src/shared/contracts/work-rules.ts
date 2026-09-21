@@ -51,6 +51,14 @@ export const workRulesSchema = z
     watchStartMinutes: z.number().int().min(1).max(120),
     watchErrorMinutes: z.number().int().min(1).max(120),
     watchCeilingHours: z.number().min(0.5).max(24),
+    /** Hours a blocked job may sit before a stale nudge; 0 turns the trigger off. */
+    staleHoursBlocked: z.number().int().min(0).max(720),
+    /** Hours a running job without a live attempt may sit before a stale nudge; 0 turns it off. */
+    staleHoursRunning: z.number().int().min(0).max(720),
+    /** Hours before the next nudge of the same episode; 0 turns repeats off. */
+    staleRepeatHours: z.number().int().min(0).max(720),
+    /** Nudges per episode before escalate; 0 turns the sweeper off. */
+    staleMaxAttempts: z.number().int().min(0).max(10),
     completionReminders: z.number().int().min(0).max(5),
     dueReminderHours: z.number().int().min(0).max(336),
     /** A main job waiting for a decision this long is escalated to the parent department; 0 turns it off. */
@@ -109,6 +117,10 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   watchStartMinutes: 10,
   watchErrorMinutes: 5,
   watchCeilingHours: 2,
+  staleHoursBlocked: 1,
+  staleHoursRunning: 1,
+  staleRepeatHours: 24,
+  staleMaxAttempts: 3,
   completionReminders: 2,
   dueReminderHours: 24,
   escalateAfterHours: 24,
@@ -156,6 +168,10 @@ export const INHERITED_RULE_KEYS = [
   "watchStartMinutes",
   "watchErrorMinutes",
   "watchCeilingHours",
+  "staleHoursBlocked",
+  "staleHoursRunning",
+  "staleRepeatHours",
+  "staleMaxAttempts",
   "completionReminders",
   "dueReminderHours",
   "escalateAfterHours",

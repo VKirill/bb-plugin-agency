@@ -10,7 +10,7 @@ job description, a role, a department, a permission policy and a work history. A
 job has a life of its own: it is assigned, launched, comes back with a question,
 publishes a file version and goes through review.
 
-> **Status:** `0.1.0-alpha.16`, a working alpha. Durable data, managed launches,
+> **Status:** `0.1.0-alpha.17`, a working alpha. Durable data, managed launches,
 > work rules, limits and budgets, the launch queue, schedules and webhooks,
 > knowledge, goals and backups work. An employee runs on any CLI connected in BB:
 > Claude Code, Codex, Cursor, OpenCode and Antigravity are verified end to end;
@@ -68,6 +68,31 @@ it may grant is in
 
 A launch grants **at most two** skills from that department's library. Money, the
 ad cabinet and publishing in the company's name stay with the owner.
+
+## Language
+
+The marketplace listing and this README are English. Screens, buttons, settings
+and empty states have an English dictionary. **Settings → Agency language**
+switches jobs, comments and owner questions between English and Russian. A new
+install follows the BB interface language on first paint (`en` unless the BB UI
+is Russian).
+
+Worker skills under `skills/agency/` are still written in Russian: they are the
+dispatcher skill for this workspace. Agent prompts stay English, with one
+language line from the Agency setting. Full English skill files are not in this
+release.
+
+## Models on a smaller subscription
+
+Starter employees prefer Claude, then GPT, then Grok. If this BB has only Claude,
+a Grok writer is installed on Sonnet (same class). If it has Claude and GPT, those
+two are used and Grok is not named. Usage-limit reserves on a new profile are
+filled from the other connected families of the same class. An existing team:
+Settings → Machines → Employee models → Move to available models.
+
+The launch briefing can pick **low / medium / high** reasoning for an executor or
+assistant on that attempt only. The stored profile stays as the owner set it
+(writers default to medium).
 
 ## Architecture
 

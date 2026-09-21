@@ -188,6 +188,7 @@ export function bindOfficialThreads(threads: BbPluginApi["sdk"]["threads"]): Iso
       };
     },
     async hasContinuation(threadId: string, token: string, queuedMessageId?: string | null) {
+      let queueChecked = false;
       try {
         const queuedArea = Reflect.get(threads, "queuedMessages");
         const listQueued = queuedArea && typeof queuedArea === "object" ? Reflect.get(queuedArea, "list") : undefined;
@@ -197,16 +198,17 @@ export function bindOfficialThreads(threads: BbPluginApi["sdk"]["threads"]): Iso
           if (queued.some((row) => queuedMessageHoldsToken(row, token, queuedMessageId))) {
             return "queued";
           }
+          queueChecked = true;
         }
       } catch {
         /* timeline may still prove dispatch */
       }
-      if (typeof threads.timeline !== "function") return "unknown";
+      if (typeof threads.timeline !== "function") return queueChecked ? "absent" : "unknown";
       try {
         const timeline = await threads.timeline({ threadId });
         const rows = listObjects(timeline);
         if (rows.some((row) => isDispatchedUserRow(row, token))) return "present";
-        return "unknown";
+        return queueChecked ? "absent" : "unknown";
       } catch {
         return "unknown";
       }

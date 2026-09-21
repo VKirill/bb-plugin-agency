@@ -202,6 +202,23 @@ export {
   type ReportNeedsInputCommand,
 } from "./needs-input";
 export {
+  STALE_ANSWER_REFUSAL_CODES,
+  STALE_OUTCOME_CODE,
+  batchId,
+  nudgeId,
+  staleAnswerDecisionSchema,
+  staleAnswerRefusalCodeSchema,
+  staleAnswerRpcSchema,
+  staleAnswerSchema,
+  staleBatchToken,
+  staleNudgeSendStateSchema,
+  staleNudgeToken,
+  type StaleAnswerCommand,
+  type StaleAnswerDecision,
+  type StaleAnswerRefusalCode,
+  type StaleNudgeSendState,
+} from "./stale-nudge";
+export {
   OWNER_QUESTION_RENDERER_ID,
   ownerAskOverlayQuestionSchema,
   ownerAskToolInputSchema,

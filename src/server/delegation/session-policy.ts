@@ -16,6 +16,15 @@ export const SESSION_POLICY_MIGRATION = `CREATE TABLE agency_session_policy (
     PRIMARY KEY(scope, scope_id)
   )`;
 
+/** One-shot draft for the next new chat in a BB project (composer before first send). */
+export const SESSION_PENDING_MIGRATION = `CREATE TABLE agency_session_pending (
+    bb_project_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL CHECK(mode IN ('ordinary', 'suggest', 'pm')),
+    updated_at TEXT NOT NULL
+  )`;
+
+const PENDING_TTL_MS = 30 * 60 * 1000;
+
 const STORED = new Set<Exclude<SessionPolicyMode, "inherit">>(["ordinary", "suggest", "pm"]);
 
 export function agencyFallbackMode(global: DelegationMode): SessionEffectiveMode {
@@ -36,6 +45,29 @@ function storedMode(db: SqlDatabase, scope: SessionPolicyScope, scopeId: string)
 
 function hasTable(db: SqlDatabase): boolean {
   return Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agency_session_policy'`).get());
+}
+
+function hasPendingTable(db: SqlDatabase): boolean {
+  return Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agency_session_pending'`).get());
+}
+
+function readPendingMode(db: SqlDatabase, bbProjectId: string, now: string): SessionPolicyMode {
+  if (!hasPendingTable(db)) return "inherit";
+  const row = db
+    .prepare(`SELECT mode, updated_at FROM agency_session_pending WHERE bb_project_id = ?`)
+    .get(bbProjectId) as { mode: string; updated_at: string } | undefined;
+  if (!row || !STORED.has(row.mode as Exclude<SessionPolicyMode, "inherit">)) return "inherit";
+  const age = Date.parse(now) - Date.parse(row.updated_at);
+  if (!Number.isFinite(age) || age > PENDING_TTL_MS) {
+    db.prepare(`DELETE FROM agency_session_pending WHERE bb_project_id = ?`).run(bbProjectId);
+    return "inherit";
+  }
+  return row.mode as Exclude<SessionPolicyMode, "inherit">;
+}
+
+function clearPendingMode(db: SqlDatabase, bbProjectId: string): void {
+  if (!hasPendingTable(db)) return;
+  db.prepare(`DELETE FROM agency_session_pending WHERE bb_project_id = ?`).run(bbProjectId);
 }
 
 export function liveBindingForProject(db: SqlDatabase, bbProjectId: string): { id: string } | null {
@@ -90,10 +122,12 @@ export function resolveSessionPolicy(
     pick(layers.thread, "thread") ??
     pick(layers.binding, "binding") ??
     pick(layers.project, "project") ?? { effective: agency, source: "agency" as const };
+  const now = new Date().toISOString();
   return {
     effective: resolved.effective,
     source: resolved.source,
     layers,
+    pending: bbProjectId ? readPendingMode(db, bbProjectId, now) : "inherit",
     bbProjectId,
     bindingId,
     threadId,
@@ -109,8 +143,20 @@ export function saveSessionPolicy(
   if (input.scope === "binding" && !projectIdOfBinding(db, input.scopeId)) {
     return fail("not_found", `project binding ${input.scopeId} not found`);
   }
-  if (input.scope === "project" && !projectIsConnected(db, input.scopeId)) {
+  if ((input.scope === "project" || input.scope === "pending") && !projectIsConnected(db, input.scopeId)) {
     return fail("not_found", `project ${input.scopeId} is not connected to the Agency`);
+  }
+  if (input.scope === "pending") {
+    if (input.mode === "inherit") {
+      clearPendingMode(db, input.scopeId);
+      return ok({ scope: input.scope, scopeId: input.scopeId, mode: "inherit" });
+    }
+    db.prepare(
+      `INSERT INTO agency_session_pending (bb_project_id, mode, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(bb_project_id) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at`,
+    ).run(input.scopeId, input.mode, now);
+    return ok({ scope: input.scope, scopeId: input.scopeId, mode: input.mode });
   }
   if (input.mode === "inherit") {
     if (hasTable(db)) db.prepare(`DELETE FROM agency_session_policy WHERE scope = ? AND scope_id = ?`).run(input.scope, input.scopeId);
@@ -122,4 +168,20 @@ export function saveSessionPolicy(
      ON CONFLICT(scope, scope_id) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at`,
   ).run(input.scope, input.scopeId, input.mode, now);
   return ok({ scope: input.scope, scopeId: input.scopeId, mode: input.mode });
+}
+
+/**
+ * Pin a new-chat draft onto this thread the first time ordinary-chat instructions
+ * are built. Isolated Agency runs never call this (worker threads exit earlier).
+ */
+export function applyPendingSessionPolicy(
+  db: SqlDatabase,
+  input: { bbProjectId: string; threadId: string },
+  now: string,
+): void {
+  const pending = readPendingMode(db, input.bbProjectId, now);
+  if (pending === "inherit") return;
+  if (storedMode(db, "thread", input.threadId) !== "inherit") return;
+  saveSessionPolicy(db, { scope: "thread", scopeId: input.threadId, mode: pending }, now);
+  clearPendingMode(db, input.bbProjectId);
 }

@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-agency",
-  "version": "0.1.0-alpha.16",
+  "version": "0.1.0-alpha.17",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || ^24.0.0 || ^26.0.0",
@@ -8,8 +8,8 @@
     "bbPluginSdk": ">=0.4.87 <0.5"
   },
   "bb": {
-    "name": "Агентство",
-    "description": "Команда, отделы, задачи и версии результатов. Запуск сотрудника — скрытый тред BB через координатор.",
+    "name": "Agency",
+    "description": "Team, departments, jobs and result versions. An employee launch is a hidden BB thread through the coordinator.",
     "branding": {
       "icon": "Workflow"
     },

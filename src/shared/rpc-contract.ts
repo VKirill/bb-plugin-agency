@@ -77,7 +77,10 @@ import {
   unlinkDepartmentCommandSchema,
   getSessionPolicyInputSchema,
   saveSessionPolicyInputSchema,
+  sessionPolicyModeSchema,
+  sessionPolicyScopeSchema,
   sessionPolicyViewSchema,
+  staleAnswerRpcSchema,
   knowledgeScopeKindSchema,
   ideaItemSchema,
   listIdeasInputSchema,
@@ -88,6 +91,8 @@ import {
 } from "./contracts";
 
 export { knowledgeScopeKindSchema, ideaItemSchema, listIdeasInputSchema, saveIdeaInputSchema, setIdeaStatusInputSchema, spawnIdeaThreadInputSchema, spawnedIdeaThreadSchema };
+
+export { staleAnswerRpcSchema };
 
 export {
   answerNeedsInputRpcSchema,
@@ -117,6 +122,24 @@ export function domainResultSchema<T extends z.ZodType>(value: T) {
     z.object({ ok: z.literal(false), error: domainErrorSchema }).strict(),
   ]);
 }
+
+export const staleAnswerResultSchema = z
+  .object({
+    jobId: z.string().min(1),
+    jobKey: z.string().min(1),
+    nudgeId: z.string().min(1),
+    decision: z.enum(["close", "cancel", "keep", "escalate"]),
+    jobState: z.string().min(1),
+    revision: z.number().int(),
+    outcomeCode: z.literal("closed_by_origin_agent").optional(),
+    nextCheckAt: z.string().optional(),
+  })
+  .strict();
+
+export const staleAnswerRpc = {
+  input: staleAnswerRpcSchema,
+  output: domainResultSchema(staleAnswerResultSchema),
+} as const;
 
 export const catalogIsolationSchema = z
   .object({
@@ -1491,6 +1514,7 @@ export const rpcContract = defineRpcContract({
   attachJobInput: { input: attachJobInputRpcSchema, output: domainResultSchema(attachedJobInputSchema) },
   reportNeedsInput: { input: reportNeedsInputRpcSchema, output: domainResultSchema(needsInputRecordSchema) },
   answerNeedsInput: { input: answerNeedsInputRpcSchema, output: domainResultSchema(answerNeedsInputRecordSchema) },
+  staleAnswer: staleAnswerRpc,
   acceptArtifactVersion: { input: acceptArtifactRpcSchema, output: domainResultSchema(artifactVersionSchema) },
   openArtifact: { input: openArtifactRpcSchema, output: domainResultSchema(openArtifactOutputSchema) },
   resolveArtifactPreview: {
@@ -1557,7 +1581,7 @@ export const rpcContract = defineRpcContract({
   saveSessionPolicy: {
     input: saveSessionPolicyInputSchema,
     output: domainResultSchema(
-      z.object({ scope: z.enum(["project", "binding", "thread"]), scopeId: z.string(), mode: z.enum(["inherit", "ordinary", "suggest", "pm"]) }).strict(),
+      z.object({ scope: sessionPolicyScopeSchema, scopeId: z.string(), mode: sessionPolicyModeSchema }).strict(),
     ),
   },
 });

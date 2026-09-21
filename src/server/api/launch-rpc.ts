@@ -169,7 +169,7 @@ export function createIsolatedLaunchRpc(deps: {
     job: { key: string; title: string; brief: string; acceptance: string; departmentId: string; assignedAgentId: string };
     skills: readonly { id: string; name: string; description?: string }[];
     catalog: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[] } | null>;
+  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[]; reasoningEffort?: "low" | "medium" | "high" } | null>;
   /** Installed BB plugins: tools of the plugins an employee profile selects. */
   plugins?: PluginDirectory;
   /** Job history line: a launch that went to a reserve says which model did not start. */

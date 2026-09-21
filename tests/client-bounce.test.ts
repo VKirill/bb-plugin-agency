@@ -94,7 +94,7 @@ function bounceRows(db: SqlDatabase) {
 }
 
 describe("client bounce of waiting_input questions", () => {
-  it("sends the questions to the commissioning chat, not the worker thread", async () => {
+  it("does not send waiting_input questions as a chat turn", async () => {
     const opened = openFileDb();
     const live = await seedRunningAttempt(opened.db);
     opened.db.prepare(`UPDATE agency_job SET origin_thread_id = ? WHERE id = ?`).run(ORIGIN, live.seeded.job.id);
@@ -108,14 +108,8 @@ describe("client bounce of waiting_input questions", () => {
     expect(bounceRows(opened.db)).toMatchObject([{ origin_thread_id: ORIGIN, send_state: "pending" }]);
     const send = recordingSend();
     await flushClientBounces({ db: opened.db, send, now: NOW });
-    expect(send.calls).toHaveLength(1);
-    expect(send.calls[0]?.threadId).toBe(ORIGIN);
-    expect(send.calls[0]?.threadId).not.toBe(live.receipt.threadId);
-    expect(send.calls[0]?.text).toContain("Agency factory pause");
-    expect(send.calls[0]?.text).toContain("native choice card");
-    expect(send.calls[0]?.text).toContain(reported.value.waitId);
-    expect(send.calls[0]?.text).toContain("Какой секрет подставить?");
-    expect(bounceRows(opened.db)[0]?.send_state).toBe("confirmed");
+    expect(send.calls).toHaveLength(0);
+    expect(bounceRows(opened.db)[0]?.send_state).toBe("skipped");
   });
 
   it("skips enqueue when origin is missing or is the worker thread", async () => {
@@ -163,7 +157,8 @@ describe("client bounce of waiting_input questions", () => {
     expect(recoverClientBouncesFromOpenWaits(opened.db, NOW)).toBe(0);
     const pending = formatPendingClientQuestions(opened.db, ORIGIN, "en");
     expect(pending).toContain("## Agency is waiting on this chat");
-    expect(pending).toContain("Какой секрет подставить?");
+    expect(pending).toContain("native choice card");
+    expect(pending).not.toContain("Какой секрет подставить?");
     expect(buildAgencyInstructions(opened.db, { threadId: ORIGIN, projectId: "proj_unbound" }, "off")).toContain(
       "Агентство ждёт ответ в этом чате",
     );

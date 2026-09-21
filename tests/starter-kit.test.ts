@@ -120,13 +120,40 @@ describe("starter kit", () => {
     expect(installed.ok).toBe(true);
     const coder = t.db
       .prepare(
-        `SELECT v.provider_id AS providerId, v.model AS model, v.service_tier AS serviceTier
+        `SELECT v.provider_id AS providerId, v.model AS model, v.service_tier AS serviceTier, v.fallback_models_json AS fallbacks
          FROM agency_agent a JOIN agency_agent_version v ON v.id = a.current_version_id WHERE a.name = ?`,
       )
-      .get("Кодер") as { providerId: string; model: string; serviceTier: string | null };
+      .get("Кодер") as { providerId: string; model: string; serviceTier: string | null; fallbacks: string | null };
     // Grok is not here: the coder gets a model of the same class, and fast mode does not travel to another CLI.
     expect(coder).toMatchObject({ providerId: "claude-code", model: "claude-sonnet-5", serviceTier: null });
+    expect(coder.fallbacks === null || coder.fallbacks === "[]" || JSON.parse(coder.fallbacks ?? "[]").length === 0).toBe(true);
     expect(installed.ok && installed.value.installed[0]?.note).toContain("grok-4.6 → claude-sonnet-5");
+  });
+
+  it("names Claude and GPT as reserves when Grok is the primary and both are connected", () => {
+    const t = setup();
+    const catalog = [
+      { providerId: "claude-code", model: "claude-opus-5", isDefault: true },
+      { providerId: "claude-code", model: "claude-sonnet-5", isDefault: false },
+      { providerId: "codex", model: "gpt-5.6-sol", isDefault: true },
+      { providerId: "codex", model: "gpt-5.6-luna", isDefault: false },
+      { providerId: "acp-cursor", model: "grok-4.6", isDefault: true },
+    ];
+    const installed = installStarterKit(
+      { ...t.ports, resolveModel: (wish) => resolveModelChoice(wish, catalog), listCatalog: catalog },
+      { keys: ["dev-conveyor"], language: "ru" },
+      false,
+    );
+    expect(installed.ok).toBe(true);
+    const coder = t.db
+      .prepare(
+        `SELECT v.model AS model, v.fallback_models_json AS fallbacks
+         FROM agency_agent a JOIN agency_agent_version v ON v.id = a.current_version_id WHERE a.name = ?`,
+      )
+      .get("Кодер") as { model: string; fallbacks: string };
+    expect(coder.model).toBe("grok-4.6");
+    const reserves = JSON.parse(coder.fallbacks) as { model: string }[];
+    expect(reserves.map((row) => row.model)).toEqual(["claude-sonnet-5", "gpt-5.6-sol"]);
   });
 
   it("installs only the chosen departments, with default models, and never twice", () => {

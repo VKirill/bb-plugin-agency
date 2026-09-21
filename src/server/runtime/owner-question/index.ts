@@ -2,6 +2,8 @@ export { applyOwnerQuestionAnswers } from "./apply.js";
 export {
   buildOwnerQuestionPayload,
   listOpenOriginWaits,
+  listOpenOriginWaitsNeedingCard,
+  listOriginsNeedingOwnerCard,
   optionAnswerText,
   splitQuestionChoices,
   type OpenOriginWait,

@@ -2,7 +2,8 @@ import { fail, ok, type DomainResult } from "../../domain";
 import { STARTER_KIT, kitDepartment, type KitAgent, type KitDepartment, type KitLanguage } from "../../shared/starter-kit";
 import type { SqlDatabase } from "../db/sql";
 import type { ReasoningEffort, ServiceTier } from "../../shared/contracts/versions";
-import type { ModelChoice } from "../runtime/model-fallback.js";
+import { optionalFallbackModels } from "../../shared/contracts/versions.js";
+import { catalogReserves, type CatalogModel, type ModelChoice } from "../runtime/model-fallback.js";
 
 /**
  * Starter departments and employees. Installed records are remembered with their
@@ -210,7 +211,9 @@ export type StarterKitPorts = {
    * to the role default from the work rules.
    */
   resolveModel?: (wish: { providerId: string; model: string }) => ModelChoice;
-  provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string } }) => DomainResult<{ agent: { id: string } }>;
+  /** Connected models of this BB: used to fill Claude → GPT → Grok usage-limit reserves. */
+  listCatalog?: readonly CatalogModel[];
+  provisionAgent: (input: { requestId: string; name: string; state: "active"; version: { version: 1; role: string; instructions: string; providerId: string; model: string; reasoningEffort: ReasoningEffort; serviceTier?: ServiceTier; skillIds: string[]; mcpIds: string[]; policyVersionId: string; fallbackModels?: { providerId: string; model: string; reasoningEffort?: ReasoningEffort; serviceTier?: ServiceTier }[] } }) => DomainResult<{ agent: { id: string } }>;
   provisionDepartment: (input: { requestId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<{ department: { id: string } }>;
   addMembership: (input: { requestId: string; departmentId: string; agentId: string; role: "executor" | "reviewer" | "assistant"; helpsAgentId?: string }) => DomainResult<unknown>;
   saveAgentProfile: (input: { requestId: string; expectedRevision: number; agentId: string; name: string; state: string; version: AgentState["version"] }) => DomainResult<unknown>;
@@ -290,6 +293,7 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
           skillIds: [],
           mcpIds: [],
           policyVersionId: policy.value,
+          ...optionalFallbackModels(ports.listCatalog?.length ? catalogReserves({ providerId: defaults.providerId, model: defaults.model }, ports.listCatalog) : []),
         },
       });
       if (!created.ok) {

@@ -20,7 +20,14 @@ function connectedIds(scope: ReturnType<typeof useComposerView>["scope"]): { bbP
   if (scope.kind === "side-chat") {
     return { bbProjectId: scope.projectId, threadId: scope.childThreadId ?? scope.parentThreadId };
   }
+  // new-thread has no chat id yet — never borrow bb.threadId of a previous chat.
   return { bbProjectId: scope.projectId ?? undefined };
+}
+
+function chosenMode(policy: SessionPolicyView | null, isNewThread: boolean): SessionEffectiveMode | SessionPolicyMode {
+  if (isNewThread && policy && policy.pending !== "inherit") return policy.pending;
+  if (policy && policy.layers.thread !== "inherit") return policy.layers.thread;
+  return policy?.effective ?? "pm";
 }
 
 /** Keep the follow-up composer expanded: skip keyboard blur / compact hide of plugin actions. */
@@ -38,9 +45,12 @@ export function ComposerSessionBanner() {
   const view = useComposerView();
   const bb = useBbContext();
   const scoped = connectedIds(view.scope);
+  const isNewThread = view.scope.kind === "new-thread";
   const ids = {
     bbProjectId: scoped.bbProjectId ?? bb.projectId ?? undefined,
-    threadId: scoped.threadId ?? (view.scope.kind === "thread" ? view.scope.threadId : undefined) ?? bb.threadId ?? undefined,
+    threadId: isNewThread
+      ? undefined
+      : scoped.threadId ?? (view.scope.kind === "thread" ? view.scope.threadId : undefined) ?? bb.threadId ?? undefined,
   };
   const [policy, setPolicy] = useState<SessionPolicyView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +61,10 @@ export function ComposerSessionBanner() {
       return;
     }
     void rpc
-      .call("getSessionPolicy", { bbProjectId: ids.bbProjectId, threadId: ids.threadId })
+      .call("getSessionPolicy", {
+        ...(ids.bbProjectId ? { bbProjectId: ids.bbProjectId } : {}),
+        ...(ids.threadId ? { threadId: ids.threadId } : {}),
+      })
       .then((result) => {
         if (result.ok) setPolicy(result.value);
       })
@@ -61,34 +74,36 @@ export function ComposerSessionBanner() {
     load();
   }, [load]);
   useRealtime("domain-changed", load);
-  const canOverride =
-    (Boolean(ids.threadId) && view.scope.kind !== "new-thread") ||
-    (view.scope.kind === "new-thread" && Boolean(ids.bbProjectId));
+  const canOverride = Boolean(ids.threadId) || (isNewThread && Boolean(ids.bbProjectId));
   const setMode = async (mode: SessionPolicyMode) => {
-    const current = userSessionChoice(policy && policy.layers.thread !== "inherit" ? policy.layers.thread : (policy?.effective ?? "pm"));
+    const current = userSessionChoice(chosenMode(policy, isNewThread));
     if (mode === current) return;
     setBusy(true);
+    const previous = policy;
+    if (isNewThread && previous) setPolicy({ ...previous, pending: mode });
     try {
-      if (ids.threadId && view.scope.kind !== "new-thread") {
-        await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "thread", scopeId: ids.threadId, mode });
-      } else if (ids.bbProjectId) {
-        await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "project", scopeId: ids.bbProjectId, mode });
+      const result = isNewThread && ids.bbProjectId
+        ? await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "pending", scopeId: ids.bbProjectId, mode })
+        : ids.threadId
+          ? await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "thread", scopeId: ids.threadId, mode })
+          : null;
+      if (result && !result.ok) {
+        setPolicy(previous);
+        return;
       }
       load();
+    } catch {
+      setPolicy(previous);
     } finally {
       setBusy(false);
     }
   };
   const effective = (policy?.effective ?? "pm") as SessionEffectiveMode;
-  const selected = userSessionChoice(effective);
-  const shortLabel = tr(composerModeLabel(effective));
-  const fullLabel = `${tr("Агентство")}: ${tr(effectiveModeLabel(effective))}`;
-  const hint =
-    view.scope.kind === "new-thread"
-      ? fullLabel
-      : canOverride
-        ? fullLabel
-        : tr("После отправки этот чат можно сменить на один раз.");
+  const selected = userSessionChoice(chosenMode(policy, isNewThread));
+  const shown = (isNewThread && policy && policy.pending !== "inherit" ? policy.pending : effective) as SessionEffectiveMode;
+  const shortLabel = tr(composerModeLabel(shown));
+  const fullLabel = `${tr("Агентство")}: ${tr(effectiveModeLabel(shown))}`;
+  const hint = canOverride ? fullLabel : tr("После отправки этот чат можно сменить на один раз.");
   const sheetTitle = tr("Режим чата Агентства");
   const openMenu = (event: MouseEvent) => {
     holdComposer(event);

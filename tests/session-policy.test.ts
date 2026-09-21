@@ -82,6 +82,27 @@ describe("session policy for ordinary chats", () => {
     db.close();
   });
 
+  it("keeps a new-chat draft off the project default and pins it on first send", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    seedProject(db);
+    const now = new Date().toISOString();
+    expect(saveSessionPolicy(db, { scope: "project", scopeId: "proj_bound", mode: "pm" }, now).ok).toBe(true);
+    expect(saveSessionPolicy(db, { scope: "pending", scopeId: "proj_bound", mode: "ordinary" }, now).ok).toBe(true);
+    expect(resolveSessionPolicy(db, { bbProjectId: "proj_bound" }, "delegate")).toMatchObject({
+      effective: "pm",
+      source: "project",
+      pending: "ordinary",
+    });
+    expect(buildAgencyInstructions(db, { threadId: "thr_new", projectId: "proj_bound" }, "delegate")).toBeNull();
+    expect(resolveSessionPolicy(db, { bbProjectId: "proj_bound", threadId: "thr_new" }, "delegate")).toMatchObject({
+      effective: "ordinary",
+      source: "thread",
+      pending: "inherit",
+    });
+    expect(buildAgencyInstructions(db, { threadId: "thr_other", projectId: "proj_bound" }, "delegate")).toContain("you are the project manager");
+    db.close();
+  });
+
   it("applies a folder override only when that folder is the only live connection", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const seeded = seedProject(db);

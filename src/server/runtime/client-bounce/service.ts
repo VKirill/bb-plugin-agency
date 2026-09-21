@@ -1,7 +1,6 @@
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { createRepositories } from "../../db/repositories.js";
 import type { SqlDatabase } from "../../db/sql";
-import { parseJson } from "../../db/sql";
 import type { Job, NeedsInputQuestion } from "../../../shared/contracts";
 import { latestHandedInVersion, productReadyMessage } from "../conveyor/station.js";
 import type { IsolatedSendOutcome, IsolatedSendPort } from "../isolated-sdk/send-port.js";
@@ -86,20 +85,24 @@ export function formatPendingClientQuestions(db: SqlDatabase, originThreadId: st
   if (!hasBounceTable(db) || !isOriginThreadId(originThreadId)) return null;
   const rows = db
     .prepare(
-      `SELECT w.wait_id, w.questions_json, j.id, j.key, j.title
+      `SELECT j.key
        FROM agency_job_needs_input_wait w
        JOIN agency_job j ON j.id = w.job_id
        WHERE j.origin_thread_id = ? AND w.closed_at IS NULL AND j.state = 'waiting_input'
        ORDER BY w.created_at`,
     )
-    .all(originThreadId) as Array<{ wait_id: string; questions_json: string; id: string; key: string; title: string }>;
+    .all(originThreadId) as Array<{ key: string }>;
   if (rows.length === 0) return null;
-  const blocks = rows.map((row) => {
-    const questions = parseJson(row.questions_json) as NeedsInputQuestion[];
-    return formatClientBounceText({ key: row.key, title: row.title, id: row.id }, questions, row.wait_id, lang);
-  });
-  const heading = lang === "en" ? "## Agency is waiting on this chat" : "## Агентство ждёт ответ в этом чате";
-  return [heading, ...blocks].join("\n\n");
+  const keys = [...new Set(rows.map((row) => row.key))];
+  return lang === "en"
+    ? [
+        "## Agency is waiting on this chat",
+        `${keys.join(", ")}: a native choice card will open. Do not answer in the thread. If the card is missing, call agency_ask_owner.`,
+      ].join("\n")
+    : [
+        "## Агентство ждёт ответ в этом чате",
+        `${keys.join(", ")}: откроется штатная карточка выбора. Не отвечайте текстом сообщения. Если карточки нет — agency_ask_owner.`,
+      ].join("\n");
 }
 
 function hasBounceTable(db: SqlDatabase): boolean {
@@ -311,31 +314,21 @@ export async function flushClientBounces(deps: {
         markSkipped(deps.db, row, deps.now, "wait_closed", "job missing");
         return { ok: false as const };
       }
-      if (isProductBounce(row.wait_id)) {
-        const version = latestHandedInVersion(deps.db, job.id);
-        if (!version) {
-          markSkipped(deps.db, row, deps.now, "wait_closed", "accepted version missing");
-          return { ok: false as const };
-        }
-        const message = productReadyMessage(deps.db, job, version);
-        return {
-          ok: true as const,
-          row,
-          text: `${message.text}\n${productReadyToken(job.id, version.hash)}`,
-          token: productReadyToken(job.id, version.hash),
-        };
-      }
-      const wait = readOpenWait(deps.db, row.job_id);
-      if (!wait) {
-        markSkipped(deps.db, row, deps.now, "wait_closed", "job or wait missing");
+      if (!isProductBounce(row.wait_id)) {
+        markSkipped(deps.db, row, deps.now, "card_only", "native choice card, not a chat turn");
         return { ok: false as const };
       }
-      const questions = parseJson(wait.questions_json) as NeedsInputQuestion[];
+      const version = latestHandedInVersion(deps.db, job.id);
+      if (!version) {
+        markSkipped(deps.db, row, deps.now, "wait_closed", "accepted version missing");
+        return { ok: false as const };
+      }
+      const message = productReadyMessage(deps.db, job, version);
       return {
         ok: true as const,
         row,
-        text: formatClientBounceText(job, questions, row.wait_id, "en"),
-        token: clientBounceToken(row.wait_id),
+        text: `${message.text}\n${productReadyToken(job.id, version.hash)}`,
+        token: productReadyToken(job.id, version.hash),
       };
     })();
     if (!live.ok) continue;

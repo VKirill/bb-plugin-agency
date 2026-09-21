@@ -97,7 +97,8 @@ import {
 import { createInternalRunStoreReads, createRunStore } from "./runtime/run-store";
 import { flushParentWakes, recoverParentWakesFromActivities } from "./runtime/parent-wake";
 import { enqueueProductReady, flushClientBounces, recoverClientBouncesFromOpenWaits } from "./runtime/client-bounce";
-import { presentOwnerQuestions, presentOwnerQuestionsForCli, registerOwnerQuestionTool } from "./runtime/owner-question";
+import { presentOwnerQuestions, presentOwnerQuestionsForCli, registerOwnerQuestionTool, listOriginsNeedingOwnerCard } from "./runtime/owner-question";
+import { flushUnconfirmedAnswers } from "./runtime/needs-input/answer";
 import { returnJobForRework } from "./runtime/rework/service";
 import { bindJobCommentHandler, readCliThreadId } from "./comments/register-glue";
 import { CLI_COMMAND_SPECS, runAgencyCli, type CliOperation } from "./cli";
@@ -125,11 +126,13 @@ import { PASSPORT_GATE_POINT } from "./decisions/passport-gate.js";
 import { getPassportSettings, savePassportSettings, type SavePassportSettingsInput } from "./projects/passport-settings.js";
 import { buildPassport, collectPassportMaterial, projectsDueForPassport, type ProjectRulesRead } from "./projects/passport-build.js";
 import { PASSPORT_DELIVERIES, passportText, type PassportSectionKey } from "../shared/passport.js";
-import { modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
+import { mergedReserves, modelChoiceNote, resolveModelChoice, type CatalogModel } from "./runtime/model-fallback";
 import { fallbackSwitchText, markModelExhausted, nextFreshCandidate } from "./runtime/agent-fallback";
 import { lastProgressFromDatabase, superviseRun, type RunWatchPorts } from "./runtime/run-watch/service";
-import { fallbackModelKey, optionalFallbackModels } from "../shared/contracts";
+import { fallbackModelKey, optionalFallbackModels, sameFallbackModels } from "../shared/contracts";
 import { DUE_SWEEP_INTERVAL_MS, sweepDueReminders } from "./runtime/due-reminder/service";
+import { STALE_SWEEP_INTERVAL_MS, sweepStaleNudges } from "./runtime/stale-sweeper";
+import { applyStaleAnswer } from "./runtime/stale-answer";
 import { DEFAULT_BOARD_POLICY, type BoardPolicy } from "../shared/contracts";
 import { buildAgencyInstructions, DELEGATION_MODES, parseDelegationMode, type DelegationMode } from "./delegation/instructions";
 import { resolveSessionPolicy, saveSessionPolicy } from "./delegation/session-policy";
@@ -158,7 +161,14 @@ export function registerAgency(bb: BbPluginApi) {
       fileGateway: plugins.runningCached(FILE_GATEWAY_PLUGIN_ID),
     }),
   });
-  const onChanged = () => bb.realtime.publish("domain-changed", null);
+  const onChanged = () => {
+    try {
+      bb.realtime.publish("domain-changed", null);
+    } catch (error) {
+      if (error instanceof Error && error.name === "PluginContextStaleError") return;
+      throw error;
+    }
+  };
   const officialThreads = bindOfficialThreads(bb.sdk.threads);
   const send = createIsolatedSendPort(officialThreads);
   const workSettings = bb.settings.define({
@@ -195,10 +205,10 @@ export function registerAgency(bb: BbPluginApi) {
     language: {
       type: "select",
       label: "Язык Агентства / Agency language",
-      description:
-        "На каком языке сотрудники пишут задачи, отчёты, комментарии и вопросы владельцу, и на каком Агентство пишет системные комментарии. Инструкции агентам всегда на английском, язык задаётся в них одной строкой. ru — русский, en — English.",
+        description:
+        "Language of jobs, reports, comments and owner questions. Agent instructions stay English, with one language line. ru — Russian, en — English. The screens follow this setting; on first open they follow the BB interface language until you pick one here. Existing installs that already saved ru keep Russian.",
       options: ["ru", "en"],
-      default: "ru",
+      default: "en",
     },
     modelPricesJson: {
       type: "string",
@@ -281,6 +291,13 @@ export function registerAgency(bb: BbPluginApi) {
     send,
   };
   const ownerQuestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const flushStuckOwnerAnswers = async () => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return;
+    await flushUnconfirmedAnswers(ownerQuestion, access.value.ctx).catch((error) => {
+      bb.log.warn(`Agency owner-answer flush: ${String(error)}`);
+    });
+  };
   const scheduleOwnerQuestion = (originThreadId: string) => {
     const previous = ownerQuestionTimers.get(originThreadId);
     if (previous) clearTimeout(previous);
@@ -288,11 +305,24 @@ export function registerAgency(bb: BbPluginApi) {
       originThreadId,
       setTimeout(() => {
         ownerQuestionTimers.delete(originThreadId);
-        void presentOwnerQuestions(ownerQuestion, { threadId: originThreadId }).catch((error) => {
-          bb.log.warn(`Agency owner question card for ${originThreadId}: ${String(error)}`);
-        });
+        void (async () => {
+          await flushStuckOwnerAnswers();
+          const result = await presentOwnerQuestions(ownerQuestion, { threadId: originThreadId }).catch((error) => {
+            bb.log.warn(`Agency owner question card for ${originThreadId}: ${String(error)}`);
+            return { ok: false as const, error: String(error) };
+          });
+          await flushStuckOwnerAnswers();
+          if (result.ok && !result.cancelled && result.remaining && result.applied.length > 0) {
+            scheduleOwnerQuestion(originThreadId);
+          }
+        })();
       }, 500),
     );
+  };
+  const recoverOwnerQuestionCards = () => {
+    for (const originThreadId of listOriginsNeedingOwnerCard(db)) {
+      scheduleOwnerQuestion(originThreadId);
+    }
   };
   bb.onDispose(() => {
     for (const timer of ownerQuestionTimers.values()) clearTimeout(timer);
@@ -489,11 +519,14 @@ export function registerAgency(bb: BbPluginApi) {
     checkLimits: checkLaunchGate,
     comment: (job, text) => void systemComment(job, text),
     // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу, а из
-    // библиотеки отдела открывает недостающее — на один запуск и с записью в журнал.
+    // библиотеки отдела открывает недостающее — на один запуск и с записью в журнал. У писателя
+    // и помощника тот же вызов выбирает low/medium/high только для этой попытки.
     briefing: async ({ job, skills, catalog }) => {
       const settings = getDecisionSettings(db);
       const access = resolveRpcAccess(db);
       const stored = store.getJobByKey(job.key);
+      const memberRole = store.memberRole(job.departmentId, job.assignedAgentId);
+      const askEffort = memberRole === "executor" || memberRole === "assistant";
       const intake = stored && access.ok
         ? recordLeadIntake({
             settings,
@@ -514,6 +547,7 @@ export function registerAgency(bb: BbPluginApi) {
         skills,
         pool,
         lessons: listKnowledge(db, { scopeKind: "department", scopeId: job.departmentId, status: "accepted" }).sort(knowledgeOrder),
+        askEffort,
       });
       await intake;
       const grantNames = asked.briefing?.granted.map((row) => row.skill.name).join("|") ?? "";
@@ -525,7 +559,7 @@ export function registerAgency(bb: BbPluginApi) {
             point: BRIEFING_POINT,
             jobKey: job.key,
             outcome: asked.reason,
-            detail: `method=${asked.candidates.skills} pool=${asked.candidates.pool} lessons=${asked.candidates.lessons}${pickNames ? ` picked=${pickNames}` : ""}${grantNames ? ` granted=${grantNames}` : ""}`,
+            detail: `method=${asked.candidates.skills} pool=${asked.candidates.pool} lessons=${asked.candidates.lessons}${pickNames ? ` picked=${pickNames}` : ""}${grantNames ? ` granted=${grantNames}` : ""}${asked.effort ? ` effort=${asked.effort}` : ""}`,
             answers: asked.answers,
             ms: asked.ms,
           },
@@ -534,8 +568,11 @@ export function registerAgency(bb: BbPluginApi) {
         if (briefRow) bb.log.info(decisionLogLine(briefRow));
       }
       const result = asked.briefing;
-      if (!result) return null;
-      if (result.granted.length) {
+      const effortLine = asked.effort
+        ? `Reasoning effort for this launch: ${asked.effort}. The stored employee profile is not changed.`
+        : "";
+      if (!result && !asked.effort) return null;
+      if (result?.granted.length) {
         logSkillGrants(
           db,
           result.granted.map((row) => ({
@@ -553,9 +590,10 @@ export function registerAgency(bb: BbPluginApi) {
         onChanged();
       }
       return {
-        text: result.text,
-        addSkillIds: result.granted.map((row) => row.skill.id),
-        lessonIds: result.lessons.map((lesson) => lesson.id),
+        text: [result?.text, effortLine].filter(Boolean).join("\n\n"),
+        addSkillIds: result?.granted.map((row) => row.skill.id),
+        lessonIds: result?.lessons.map((lesson) => lesson.id),
+        ...(asked.effort ? { reasoningEffort: asked.effort } : {}),
       };
     },
     loadCatalogRoles: async () => {
@@ -674,8 +712,15 @@ export function registerAgency(bb: BbPluginApi) {
     } catch (error) {
       setTelegramState(db, id, `failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    onChanged();
-    return { ok: true as const, value: { message: readOwnerMessage(db, id)!, duplicate: false } };
+    try {
+      onChanged();
+      return { ok: true as const, value: { message: readOwnerMessage(db, id) ?? recorded.value.message, duplicate: false } };
+    } catch (error) {
+      if (error instanceof Error && (error.name === "PluginContextStaleError" || /not open/.test(error.message))) {
+        return { ok: true as const, value: { message: recorded.value.message, duplicate: false } };
+      }
+      throw error;
+    }
   };
   /** Starter departments act as the owner: the same store commands as the forms. */
   const starterKitPorts = (ctx: ServiceContext): StarterKitPorts => ({
@@ -754,21 +799,35 @@ export function registerAgency(bb: BbPluginApi) {
         continue;
       }
       const choice = resolveModelChoice({ providerId: version.providerId, model: version.model }, catalog);
-      if (choice.status === "exact") {
-        rows.push({ ...base, status: "exact" as const, suggestedProviderId: null, suggestedModel: null, note: null });
-        continue;
-      }
       if (choice.status === "missing") {
         rows.push({ ...base, status: "missing" as const, suggestedProviderId: null, suggestedModel: null, note: modelChoiceNote(choice, en) });
+        continue;
+      }
+      const nextPrimary = choice.status === "exact"
+        ? { providerId: version.providerId, model: version.model }
+        : { providerId: choice.providerId, model: choice.model };
+      const nextReserves = mergedReserves(
+        nextPrimary,
+        version.fallbackModels?.filter((pick) => fallbackModelKey(pick) !== fallbackModelKey(nextPrimary)),
+        catalog,
+      );
+      const primaryMoves = choice.status === "substituted";
+      const reservesMove = !sameFallbackModels(version.fallbackModels, nextReserves);
+      if (!primaryMoves && !reservesMove) {
+        rows.push({ ...base, status: "exact" as const, suggestedProviderId: null, suggestedModel: null, note: null });
         continue;
       }
       if (!apply) {
         rows.push({
           ...base,
-          status: "substituted" as const,
-          suggestedProviderId: choice.providerId,
-          suggestedModel: choice.model,
-          note: modelChoiceNote(choice, en),
+          status: primaryMoves ? ("substituted" as const) : ("exact" as const),
+          suggestedProviderId: primaryMoves ? choice.providerId : null,
+          suggestedModel: primaryMoves ? choice.model : null,
+          note: primaryMoves
+            ? modelChoiceNote(choice, en)
+            : en
+              ? "Usage-limit reserves will be filled from the connected Claude / GPT / Grok models."
+              : "Запасные модели по лимиту подписки заполнятся из подключённых Claude / GPT / Grok.",
         });
         continue;
       }
@@ -782,24 +841,27 @@ export function registerAgency(bb: BbPluginApi) {
           version: version.version + 1,
           role: version.role,
           instructions: version.instructions,
-          providerId: choice.providerId,
-          model: choice.model,
+          providerId: nextPrimary.providerId,
+          model: nextPrimary.model,
           ...(version.reasoningEffort ? { reasoningEffort: version.reasoningEffort } : {}),
           // Fast mode belongs to the CLI it was set for; a new CLI may not have it.
-          ...(version.serviceTier && choice.providerId === version.providerId ? { serviceTier: version.serviceTier } : {}),
+          ...(version.serviceTier && nextPrimary.providerId === version.providerId ? { serviceTier: version.serviceTier } : {}),
           skillIds: version.skillIds,
           mcpIds: version.mcpIds,
           policyVersionId: version.policyVersionId,
-          // A reserve that became the primary leaves the list: the profile never names one pair twice.
-          ...optionalFallbackModels(version.fallbackModels?.filter((pick) => fallbackModelKey(pick) !== fallbackModelKey(choice))),
+          ...optionalFallbackModels(nextReserves),
         },
       });
       rows.push({
         ...base,
         status: saved.ok ? ("repaired" as const) : ("blocked" as const),
-        suggestedProviderId: choice.providerId,
-        suggestedModel: choice.model,
-        note: saved.ok ? modelChoiceNote(choice, en) : saved.error.message,
+        suggestedProviderId: nextPrimary.providerId,
+        suggestedModel: nextPrimary.model,
+        note: saved.ok
+          ? [primaryMoves ? modelChoiceNote(choice, en) : null, reservesMove ? (en ? "Reserves filled from connected families." : "Запасные модели заполнены из подключённых семейств.") : null]
+              .filter(Boolean)
+              .join(" ")
+          : saved.error.message,
       });
     }
     if (apply && rows.some((row) => row.status === "repaired")) onChanged();
@@ -1143,7 +1205,7 @@ export function registerAgency(bb: BbPluginApi) {
       }
       return { ok: true as const, value: resolveSessionPolicy(db, { ...input, bbProjectId }, delegationMode) };
     },
-    saveSessionPolicy: async (input: { requestId: string; scope: "project" | "binding" | "thread"; scopeId: string; mode: "inherit" | "ordinary" | "suggest" | "pm" }) => {
+    saveSessionPolicy: async (input: { requestId: string; scope: "project" | "binding" | "thread" | "pending"; scopeId: string; mode: "inherit" | "ordinary" | "suggest" | "pm" }) => {
       const access = ownerOnly();
       if (!access.ok) return access;
       const saved = saveSessionPolicy(db, input, new Date().toISOString());
@@ -1224,7 +1286,12 @@ export function registerAgency(bb: BbPluginApi) {
       const result = installStarterKit(
         {
           ...starterKitPorts(access.value.ctx),
-          ...(catalog.length ? { resolveModel: (wish: { providerId: string; model: string }) => resolveModelChoice(wish, catalog) } : {}),
+          ...(catalog.length
+            ? {
+                resolveModel: (wish: { providerId: string; model: string }) => resolveModelChoice(wish, catalog),
+                listCatalog: catalog,
+              }
+            : {}),
         },
         { keys: input.keys, language: kitLanguage(input.language) },
         agencyLanguage() === "en",
@@ -1636,6 +1703,13 @@ export function registerAgency(bb: BbPluginApi) {
       if (access.value.ctx.caller) return { ok: false as const, error: { code: "forbidden", message: "Закреплять версии навыков может только владелец." } };
       return pinCurrentSkills(skillPinDeps);
     },
+    staleAnswer: async (input: unknown) => {
+      const access = resolveRpcAccess(db);
+      if (!access.ok) return access;
+      const result = applyStaleAnswer({ db, store, now: () => new Date() }, access.value.ctx, input);
+      if (result.ok) onChanged();
+      return result;
+    },
   };
   const handlers = {
     ...domain,
@@ -1771,6 +1845,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "attachJobInput"
     | "reportNeedsInput"
     | "answerNeedsInput"
+    | "staleAnswer"
     | "acceptArtifactVersion"
     | "openArtifact"
     | "resolveArtifactPreview"
@@ -2038,6 +2113,7 @@ export function registerAgency(bb: BbPluginApi) {
         if (closed > 0) onChanged();
       }
       await flushClientBounces({ db, send, now: new Date().toISOString() });
+      await flushStuckOwnerAnswers();
     } catch (error) {
       bb.log.warn(`Launch queue: ${String(error)}`);
     } finally {
@@ -2410,6 +2486,37 @@ export function registerAgency(bb: BbPluginApi) {
     );
   }, DUE_SWEEP_INTERVAL_MS);
   bb.onDispose(() => clearInterval(dueSweep));
+  const runStaleSweep = () =>
+    sweepStaleNudges({
+      db,
+      getJob: (jobId) => store.getJob(jobId),
+      rulesFor: (departmentId) => store.rulesForDepartment(departmentId),
+      comment: systemComment,
+      send,
+      now: () => new Date(),
+      observeThread: async (threadId) => {
+        try {
+          const view = await officialThreads.get({ threadId });
+          return view.status ?? null;
+        } catch {
+          return null;
+        }
+      },
+    }).then(
+      (stats) => {
+        if (stats.inserted || stats.sent || stats.commented || stats.escalated) {
+          try {
+            onChanged();
+          } catch {
+            /* plugin reloaded while the sweep was in flight */
+          }
+        }
+      },
+      (error) => bb.log.warn(`Stale nudge: ${String(error)}`),
+    );
+  const staleSweep = setInterval(() => void runStaleSweep(), STALE_SWEEP_INTERVAL_MS);
+  bb.onDispose(() => clearInterval(staleSweep));
+  void runStaleSweep();
   const readingChanged = createReadingChangeGate();
   const completionWatch = createCompletionWatch({
     threads: officialThreads,
@@ -2610,6 +2717,7 @@ export function registerAgency(bb: BbPluginApi) {
   recoverClientBouncesFromOpenWaits(db, recoveredAt);
   void flushParentWakes({ db, send, now: recoveredAt }).catch(() => undefined);
   void flushClientBounces({ db, send, now: recoveredAt }).catch(() => undefined);
+  void flushStuckOwnerAnswers().then(() => recoverOwnerQuestionCards());
   bb.rpc.register(rpcContract, rpcHandlers);
   bb.cli.register({
     name: "agency",

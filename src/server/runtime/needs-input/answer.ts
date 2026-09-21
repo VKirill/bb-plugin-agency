@@ -16,7 +16,7 @@ import type { DomainStore } from "../../services";
 import { payloadWithoutRequestId, sameActor, sameCanonical } from "../../services/request-identity.js";
 import { uuidV5 } from "../launch/operation-ids.js";
 import type { IsolatedSendOutcome, IsolatedSendPort } from "../isolated-sdk/send-port.js";
-import { readOpenWait } from "./report.js";
+import { readNeedsInputRecord, readOpenWait } from "./report.js";
 import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
 
 export type AnswerNeedsInputDeps = {
@@ -251,6 +251,23 @@ function upsertAnswerRow(db: SqlDatabase, row: AnswerRow): void {
 
 function readAnswerByWait(db: SqlDatabase, waitId: string): AnswerRow | undefined {
   return db.prepare(`SELECT * FROM agency_job_needs_input_answer WHERE wait_id = ?`).get(waitId) as AnswerRow | undefined;
+}
+
+function answerClaimIsInFlight(row: AnswerRow): boolean {
+  return (row.send_state === "pending" && row.dispatch_claimed === 1) || row.send_state === "queued";
+}
+
+function answerClaimCanSupersede(row: AnswerRow): boolean {
+  return row.send_state === "unknown" || row.send_state === "needs_reconciliation" || row.send_state === "rejected" || (row.send_state === "pending" && row.dispatch_claimed === 0);
+}
+
+function dropUnconfirmedAnswerClaim(db: SqlDatabase, waitId: string): void {
+  const existing = readAnswerByWait(db, waitId);
+  db.prepare(`DELETE FROM agency_job_needs_input_amendment WHERE wait_id = ?`).run(waitId);
+  db.prepare(`DELETE FROM agency_job_needs_input_answer WHERE wait_id = ?`).run(waitId);
+  if (existing) {
+    db.prepare(`DELETE FROM agency_request WHERE request_id = ? AND kind = 'answerNeedsInput'`).run(existing.request_id);
+  }
 }
 
 function closeWait(db: SqlDatabase, waitId: string, at: string): void {
@@ -574,14 +591,29 @@ function validateIntent(
   }
   const existingByWait = readAnswerByWait(deps.db, input.waitId);
   if (existingByWait && existingByWait.request_id !== input.requestId) {
-    return fail("request_conflict", "this wait already has a dispatch claim from another requestId");
+    if (existingByWait.send_state === "confirmed" || answerClaimIsInFlight(existingByWait)) {
+      return fail("request_conflict", "this wait already has a dispatch claim from another requestId");
+    }
+    if (!answerClaimCanSupersede(existingByWait)) {
+      return fail("request_conflict", "this wait already has a dispatch claim from another requestId");
+    }
+    dropUnconfirmedAnswerClaim(deps.db, input.waitId);
   }
-  const existing = existingByRequest ?? existingByWait;
+  const existingByRequestAfterDrop = readAnswerRow(deps.db, input.requestId);
+  const existingByWaitAfterDrop = readAnswerByWait(deps.db, input.waitId);
+  const existing = existingByRequestAfterDrop ?? existingByWaitAfterDrop;
   if (existing && existing.body_hash !== bodyHash) {
-    return fail("request_conflict", "answerNeedsInput already recorded with a different body");
+    if (existing.send_state === "confirmed" || answerClaimIsInFlight(existing)) {
+      return fail("request_conflict", "answerNeedsInput already recorded with a different body");
+    }
+    if (!answerClaimCanSupersede(existing)) {
+      return fail("request_conflict", "answerNeedsInput already recorded with a different body");
+    }
+    dropUnconfirmedAnswerClaim(deps.db, existing.wait_id);
   }
+  const kept = readAnswerRow(deps.db, input.requestId) ?? readAnswerByWait(deps.db, input.waitId);
   const now = nowUtc(ctx);
-  const row: AnswerRow = existing ?? {
+  const row: AnswerRow = kept ?? {
     request_id: input.requestId,
     wait_id: input.waitId,
     job_id: input.jobId,
@@ -602,7 +634,7 @@ function validateIntent(
     created_at: now,
     updated_at: now,
   };
-  if (!existing) upsertAnswerRow(deps.db, row);
+  if (!kept) upsertAnswerRow(deps.db, row);
   const amendment: AmendmentRow = readAmendmentRow(deps.db, input.requestId) ?? {
     request_id: input.requestId,
     wait_id: input.waitId,
@@ -686,8 +718,16 @@ export async function answerNeedsInput(
       continuationToken(input.requestId),
       row.queued_message_id,
     );
-    outcome =
-      presence === "present" ? { kind: "recovered" } : presence === "queued" ? { kind: "still_queued" } : { kind: "reconcile" };
+    if (presence === "present") outcome = { kind: "recovered" };
+    else if (presence === "queued") outcome = { kind: "still_queued" };
+    else if (presence === "absent") {
+      outcome = await deps.send.send({
+        threadId: input.threadId,
+        text: formatContinuationText(questions, input.answers, amendment, input.requestId),
+      });
+    } else {
+      outcome = { kind: "reconcile" };
+    }
   }
 
   return deps.db.transaction(() =>
@@ -762,4 +802,52 @@ export async function answerNeedsInput(
       return applyResume(deps, ctx, input, { ...row, dispatch_claimed: 1 }, amendment);
     }),
   ).immediate();
+}
+
+function listUnconfirmedAnswerRows(db: SqlDatabase): AnswerRow[] {
+  return db
+    .prepare(
+      `SELECT a.*
+       FROM agency_job_needs_input_answer a
+       JOIN agency_job_needs_input_wait w ON w.wait_id = a.wait_id
+       JOIN agency_job j ON j.id = a.job_id
+       WHERE w.closed_at IS NULL AND j.state = 'waiting_input'
+         AND a.send_state IN ('pending', 'queued', 'unknown', 'needs_reconciliation')
+       ORDER BY a.created_at`,
+    )
+    .all() as AnswerRow[];
+}
+
+/** Retry owner answers that never reached the worker thread. */
+export async function flushUnconfirmedAnswers(deps: AnswerNeedsInputDeps, ctx: ServiceContext): Promise<void> {
+  const rows = listUnconfirmedAnswerRows(deps.db);
+  for (const row of rows) {
+    const record = readNeedsInputRecord(deps.db, row.job_id);
+    if (!record || record.waitId !== row.wait_id) continue;
+    const job = deps.store.getJob(row.job_id);
+    const department = job ? deps.store.getDepartment(job.departmentId) : undefined;
+    const process = department ? deps.store.getProcessVersion(department.processVersionId) : undefined;
+    if (!job || !department || !process) continue;
+    const answers = parseJson(row.answers_json) as NeedsInputAnswer[];
+    const result = await answerNeedsInput(deps, ctx, {
+      requestId: row.request_id,
+      expectedRevision: job.revision,
+      jobId: row.job_id,
+      expectedAttemptRevision: record.attemptRevision,
+      attemptId: record.attemptId,
+      launchId: record.launchId,
+      threadId: record.threadId,
+      waitId: row.wait_id,
+      answers,
+      expectedProcessVersionId: process.id,
+      expectedSnapshotDigest: row.expected_snapshot_digest,
+      expectedProcessInstructionsHash: sha256Hex(process.instructions),
+      expectedProcessAcceptanceHash: sha256Hex(process.acceptance),
+      expectedJobBriefHash: sha256Hex(job.brief),
+      expectedJobAcceptanceHash: sha256Hex(job.acceptance),
+    });
+    if (!result.ok && result.error.code === "versions_changed") {
+      deps.db.transaction(() => dropUnconfirmedAnswerClaim(deps.db, row.wait_id)).immediate();
+    }
+  }
 }

@@ -367,6 +367,38 @@ describe("the launch briefing", () => {
     expect((await askBriefingDetailed(ready, { job, skills: [], lessons: [] }, { key: "k", fetch: fetchMock as unknown as typeof fetch })).reason).toBe("empty");
   });
 
+  it("picks writer effort even when there are no skills to raise", async () => {
+    const asked = await askBriefingDetailed(
+      ready,
+      { job, skills: [], lessons: [], askEffort: true },
+      {
+        key: "k",
+        fetch: (async () => chatReply({ effort: { value: "high", confidence: 0.88 } })) as unknown as typeof fetch,
+      },
+    );
+    expect(asked.reason).toBe("silent");
+    expect(asked.briefing).toBeNull();
+    expect(asked.effort).toBe("high");
+    expect(asked.answers).toContain("effort=high");
+  });
+
+  it("leaves the stored effort when the model is unsure", async () => {
+    const asked = await askBriefingDetailed(
+      ready,
+      { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [], askEffort: true },
+      {
+        key: "k",
+        fetch: (async () =>
+          chatReply({
+            s0: { value: false, confidence: 0.99 },
+            effort: { value: "low", confidence: 0.2 },
+          })) as unknown as typeof fetch,
+      },
+    );
+    expect(asked.effort).toBeNull();
+    expect(asked.reason).toBe("silent");
+  });
+
   it("records silence with answers when the model picks nothing", async () => {
     const silent = await askBriefingDetailed(ready, { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [] }, {
       key: "k",

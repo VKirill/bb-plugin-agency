@@ -137,6 +137,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "next-step") return "setJobNextStep";
     if (rest[0] === "report-needs-input") return "reportNeedsInput";
     if (rest[0] === "answer-needs-input") return "answerNeedsInput";
+    if (rest[0] === "stale-answer") return "staleAnswer";
     if (rest[0] === "attempts") return "listJobAttempts";
     if (rest[0] === "comment") return "createJobComment";
     if (rest[0] === "usage") return "listDashboardUsage";

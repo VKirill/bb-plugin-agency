@@ -113,6 +113,16 @@ export const AGENCY_RULE_GROUPS: RuleGroup[] = [
       { key: "watchCeilingHours", label: "Потолок одной попытки", unit: "ч", kind: "number", min: 0.5, max: 24, step: 0.5, hint: <p><Tr text={"Непрерывная работа дольше этого срока — задача останавливается на решение: возможно, сотрудник зациклился или работу надо делить."}/></p> },
     ],
   },
+  {
+    title: "Зависшие задачи",
+    hint: <p><Tr text={"Если задача стоит без движения, Агентство пишет в чат, откуда её ставили, и спрашивает агента этого чата — не владельца. 0 выключает порог или весь обходчик."}/></p>,
+    fields: [
+      { key: "staleHoursBlocked", label: "Напомнить о blocked через", unit: "ч", kind: "int", min: 0, max: 720, hint: <p><Tr text={"Сколько часов задача может висеть в «Ожидает решения» без движения, прежде чем обходчик спросит чат постановки. 0 — не спрашивать."}/></p> },
+      { key: "staleHoursRunning", label: "Напомнить о running без попытки через", unit: "ч", kind: "int", min: 0, max: 720, hint: <p><Tr text={"Сколько часов задача может оставаться running без живой попытки. Живую попытку ведёт наблюдение за запуском. 0 — не спрашивать."}/></p> },
+      { key: "staleRepeatHours", label: "Повтор напоминания через", unit: "ч", kind: "int", min: 0, max: 720, hint: <p><Tr text={"Интервал между сообщениями в один чат по одному эпизоду зависания, если агент не ответил. После keep берётся nextCheckHours. 0 — не повторять."}/></p> },
+      { key: "staleMaxAttempts", label: "Напоминаний до эскалации", kind: "int", min: 0, max: 10, hint: <p><Tr text={"Сколько раз спросить чат постановки. После этого — одно сообщение во «Входящие», задача не закрывается. 0 — обходчик выключен."}/></p> },
+    ],
+  },
   PASSPORT_GROUP,
   {
     title: "Песочница",
@@ -175,10 +185,10 @@ export const LIMIT_RULE_GROUP = (scopeLabel: string, withWarn = true): RuleGroup
 
 export const DEFAULTS_RULE_GROUP: RuleGroup = {
   title: "Новые сотрудники по умолчанию",
-  hint: <p><Tr text={"CLI, модель, уровень рассуждения и быстрый режим, которые подставляются в форму «Создать сотрудника» и в стартовые отделы для каждого типа роли. Подходит любой CLI, подключённый в BB. В форме всё можно поменять."}/></p>,
+  hint: <p><Tr text={"CLI, модель, уровень рассуждения и быстрый режим, которые подставляются в форму «Создать сотрудника» и в стартовые отделы для каждого типа роли. Подходит любой CLI, подключённый в BB. В форме всё можно поменять. Нет модели — подставляется ближайшая из Claude, GPT или Grok; запасные модели по лимиту подписки заполняются из тех семейств, которые здесь есть."}/></p>,
   fields: [
     { key: "defaultModelLead", providerKey: "defaultProviderLead", reasoningKey: "defaultReasoningLead", serviceTierKey: "defaultServiceTierLead", label: "Руководитель", kind: "model", hint: <p><Tr text={"Руководитель планирует, раздаёт работу и принимает решения: сильная модель и высокий уровень рассуждения окупаются."}/></p> },
-    { key: "defaultModelExecutor", providerKey: "defaultProviderExecutor", reasoningKey: "defaultReasoningExecutor", serviceTierKey: "defaultServiceTierExecutor", label: "Исполнитель", kind: "model", hint: <p><Tr text={"Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения."}/></p> },
+    { key: "defaultModelExecutor", providerKey: "defaultProviderExecutor", reasoningKey: "defaultReasoningExecutor", serviceTierKey: "defaultServiceTierExecutor", label: "Исполнитель", kind: "model", hint: <p><Tr text={"Для типовой работы хватает более быстрой и дешёвой модели и среднего уровня рассуждения. Оценщик перед запуском может выбрать low, medium или high только для этой попытки."}/></p> },
     { key: "defaultModelReviewer", providerKey: "defaultProviderReviewer", reasoningKey: "defaultReasoningReviewer", serviceTierKey: "defaultServiceTierReviewer", label: "Проверяющий", kind: "model", hint: <p><Tr text={"Поиск дефектов требует внимательности: сильная модель и высокий уровень рассуждения."}/></p> },
   ],
 };

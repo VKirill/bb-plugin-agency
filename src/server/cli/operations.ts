@@ -33,6 +33,7 @@ import {
   listJobAttemptsRpcSchema,
   prepareLaunchRpcSchema,
   answerNeedsInputRpcSchema,
+  staleAnswerRpcSchema,
   approveActionIntentCommandSchema,
   claimActionIntentCommandSchema,
   completeActionIntentCommandSchema,
@@ -67,7 +68,7 @@ const emptyObjectSchema = z.object({}).strict();
 
 export const CLI_OPERATIONS = {
   getSessionPolicy: { input: getSessionPolicyInputSchema, summary: "Режим обычных чатов: проект, папка, этот тред" },
-  saveSessionPolicy: { input: saveSessionPolicyInputSchema, summary: "Задать режим чатов проекта, папки или этого треда" },
+  saveSessionPolicy: { input: saveSessionPolicyInputSchema, summary: "Задать режим чатов проекта, папки, этого треда или черновика нового чата" },
   listWorkspace: { input: listWorkspaceInputSchema, summary: "Снимок workspace, включая полный PolicyVersion" },
   listBbCatalog: { input: emptyObjectSchema, summary: "Каталог BB-проектов и окружений; label политики не есть права" },
   listCapabilityCatalog: { input: capabilityCatalogInputSchema, summary: "Read-only навыки/MCP из SDK" },
@@ -182,6 +183,10 @@ export const CLI_OPERATIONS = {
   answerNeedsInput: {
     input: answerNeedsInputRpcSchema,
     summary: "Ответ на needsInput: waitId текущего цикла, тот же thread/attempt, official send, без spawn и accept",
+  },
+  staleAnswer: {
+    input: staleAnswerRpcSchema,
+    summary: "Ответ агента origin-чата на зависшую задачу: close|cancel|keep|escalate; expectedJobRevision обязателен",
   },
   acceptArtifactVersion: { input: acceptArtifactRpcSchema, summary: "Принять текущую версию и закрыть станцию" },
   openArtifact: { input: openArtifactRpcSchema, summary: "Открыть версию; bytes в CLI не печатаются" },

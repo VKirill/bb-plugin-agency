@@ -115,6 +115,36 @@ export function listOpenOriginWaits(db: SqlDatabase, originThreadId: string): Op
     }));
 }
 
+function answerBlocksOwnerCard(sendState: string | undefined): boolean {
+  return Boolean(sendState && sendState !== "rejected");
+}
+
+export function listOpenOriginWaitsNeedingCard(db: SqlDatabase, originThreadId: string): OpenOriginWait[] {
+  return listOpenOriginWaits(db, originThreadId).filter((wait) => {
+    const row = db
+      .prepare(`SELECT send_state FROM agency_job_needs_input_answer WHERE wait_id = ?`)
+      .get(wait.waitId) as { send_state: string } | undefined;
+    return !answerBlocksOwnerCard(row?.send_state);
+  });
+}
+
+export function listOriginsNeedingOwnerCard(db: SqlDatabase): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT j.origin_thread_id AS origin
+       FROM agency_job_needs_input_wait w
+       JOIN agency_job j ON j.id = w.job_id
+       LEFT JOIN agency_job_needs_input_answer a ON a.wait_id = w.wait_id
+       WHERE w.closed_at IS NULL AND j.state = 'waiting_input'
+         AND j.origin_thread_id IS NOT NULL AND trim(j.origin_thread_id) != ''
+         AND w.thread_id != j.origin_thread_id
+         AND (a.wait_id IS NULL OR a.send_state = 'rejected')
+       ORDER BY j.origin_thread_id`,
+    )
+    .all() as Array<{ origin: string }>;
+  return [...new Set(rows.map((row) => row.origin).filter((origin) => isOriginThreadId(origin)))];
+}
+
 /**
  * Same wording across jobs becomes one click row. Overlay options (dispatcher A/B/C)
  * attach by index when every wait has that many questions.

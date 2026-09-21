@@ -58,13 +58,18 @@ export function rememberUiLanguage(language: UiLanguage): void {
   try {
     if (typeof window !== "undefined") window.localStorage?.setItem(STORED_LANGUAGE_KEY, language);
   } catch {
-    // Storage may be unavailable (private mode, tests): the title falls back to Russian.
+    // Storage may be unavailable (private mode, tests): the title follows the BB language, then Russian.
   }
 }
 
 export function storedUiLanguage(): UiLanguage {
   try {
-    return typeof window !== "undefined" && window.localStorage?.getItem(STORED_LANGUAGE_KEY) === "en" ? "en" : "ru";
+    if (typeof window === "undefined") return "ru";
+    const stored = window.localStorage?.getItem(STORED_LANGUAGE_KEY);
+    if (stored === "en" || stored === "ru") return stored;
+    const lang = (typeof document !== "undefined" ? document.documentElement.lang : "").toLowerCase();
+    if (lang.startsWith("en")) return "en";
+    return "ru";
   } catch {
     return "ru";
   }

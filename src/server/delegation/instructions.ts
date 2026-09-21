@@ -3,7 +3,7 @@ import { agencyLanguage, type AgencyLanguage } from "../i18n/language";
 import { rulesForDepartment } from "../rules/work-rules";
 import type { MembershipRole } from "../../shared/contracts/membership";
 import type { SessionEffectiveMode } from "../../shared/contracts/session-policy";
-import { resolveSessionPolicy } from "./session-policy";
+import { applyPendingSessionPolicy, resolveSessionPolicy } from "./session-policy";
 import { formatPendingClientQuestions } from "../runtime/client-bounce";
 
 /**
@@ -493,6 +493,7 @@ export function buildAgencyInstructions(
   hostName?: (hostId: string) => string | undefined,
 ): string | null {
   if (readWorkerContext(db, ctx.threadId)) return null;
+  applyPendingSessionPolicy(db, { bbProjectId: ctx.projectId, threadId: ctx.threadId }, new Date().toISOString());
   const pending = formatPendingClientQuestions(db, ctx.threadId);
   const route = resolveSessionPolicy(db, { bbProjectId: ctx.projectId, threadId: ctx.threadId }, mode);
   const session = route.effective === "ordinary" ? null : buildSessionInstructions({

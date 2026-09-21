@@ -199,5 +199,10 @@ describe("bindOfficialThreads typed pin", () => {
       ],
     });
     expect(await bound.hasContinuation!("thr_bound01", token)).toBe("present");
+    threads.timeline = async () => ({
+      summary: "no token",
+      rows: [{ kind: "turn", text: "other", role: "assistant" }],
+    });
+    expect(await bound.hasContinuation!("thr_bound01", token)).toBe("absent");
   });
 });

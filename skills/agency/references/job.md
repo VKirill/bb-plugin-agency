@@ -13,7 +13,7 @@ backlog → queued → running → review → done
 | backlog | Создано, не передано в работу | Руководитель или владелец: назначить и запустить |
 | queued | Готово к запуску: есть исполнитель, привязка, бриф, критерий | Запуск (`launch prepare`) |
 | running | Идёт попытка в треде | Watcher: `idle` + hash-проверенная версия → review. `idle` без такой версии оставляет running |
-| waiting_input | Исполнитель задал вопрос через `report-needs-input` | Вопросы уходят в чат заказчика (`originThreadId`); ответ `answer-needs-input` будит рабочий тред |
+| waiting_input | Исполнитель задал вопрос через `report-needs-input` | В чате заказчика (`originThreadId`) открывается штатная карточка выбора; ответ `answer-needs-input` будит рабочий тред |
 | blocked | Работа стоит: возврат, блокер, остановленная попытка | Руководитель или владелец |
 | review | Опубликована версия, ждёт ОТК или автозакрытия | Конвейер принимает текущую версию → done; `Вердикт: доработать` → running с комментарием. Владелец не штампует станцию. |
 | done | Текущая версия принята | Корень: «Продукт готов» уходит в чат заказчика (`originThreadId`). Можно вернуть продукт целиком (`job return`, рекламация) → running в том же треде. Закрытую подзадачу по одной не возвращают. |
@@ -176,9 +176,36 @@ bb agency job return --input-json '{"requestId":"<uuid>","jobId":"<id>","expecte
 
 ## Вопрос владельцу
 
-`bb agency job report-needs-input` с `jobId`, `attemptId`, `launchId`, `threadId`, `expectedRevision`, `expectedAttemptRevision` и вопросами, у каждого `sourceRefs`. По желанию у вопроса `choices` (2–4 варианта) — тогда в чате заказчика открываются кнопки. Задача и попытка переходят в waiting_input. Вопросы и готовый продукт корня уходят в чат, откуда ставили задачу (`originThreadId`), а не остаются только на карточке. После успеха заверши ход сообщением с `waitId`. Продолжение придёт отдельным сообщением в этот же рабочий тред. Не вызывай AskUserQuestion и не держи ход открытым. В чате заказчика карточка выбора открывается сама; если нет — `agency_ask_owner` или `bb agency job ask-owner`.
+`bb agency job report-needs-input` с `jobId`, `attemptId`, `launchId`, `threadId`, `expectedRevision`, `expectedAttemptRevision` и вопросами, у каждого `sourceRefs`. По желанию у вопроса `choices` (2–4 варианта) — тогда в чате заказчика открываются кнопки. Задача и попытка переходят в waiting_input. Вопросы открывают штатную карточку выбора в чате, откуда ставили задачу (`originThreadId`); не дублируй опрос текстом сообщения. Готовый продукт корня по-прежнему уходит сообщением в тот же чат. После успеха заверши ход сообщением с `waitId`. Продолжение придёт отдельным сообщением в этот же рабочий тред. Не вызывай AskUserQuestion и не держи ход открытым. Если карточки нет — `agency_ask_owner` или `bb agency job ask-owner`.
 
 Новый вопрос после ответа — новый `report-needs-input` с новым `waitId`.
+
+## Зависшая задача (origin-чат)
+
+Если задача `blocked` или `running` без живой попытки висит дольше порога (по умолчанию 1 ч), Агентство пишет в чат постановки (`originThreadId`) и спрашивает **агента этого чата**, не владельца. `waiting_input`, очередь запуска и открытые зависимости не трогает. Без origin — только системный комментарий.
+
+Ответ — `bb agency job stale-answer` с обязательными `nudgeId`, `expectedJobRevision`, `decision` (`close|cancel|keep|escalate`) и `reason`. `close` и `cancel` без опубликованной версии переводят задачу в `canceled` с кодом `closed_by_origin_agent`. `close` при опубликованной версии — отказ `needs_acceptance`. `keep` требует `nextCheckHours` 1–168. Владельца не спрашивать и `agency_ask_owner` не вызывать; `escalate` пишет только во «Входящие».
+
+## Обходчик зависших задач
+
+Тот же механизм, что в [runtime.md](runtime.md#обходчик-зависших-задач). Порог по умолчанию — **1 час** для `blocked` и для `running` без попытки под наблюдателем, включая leftover `running` с тредом `idle` (правила `staleHoursBlocked` / `staleHoursRunning`; `0` = выкл). Повтор 24 ч, максимум 3 попытки. Тихих часов нет.
+
+В origin-чат приходит текст с ключом, состоянием, комментариями, `nudgeId` и командой. Решай сам по чату и карточке.
+
+```
+bb agency job stale-answer --input-json '{
+  "requestId":"<uuid>","jobId":"<ключ>","nudgeId":"<из сообщения>",
+  "expectedJobRevision": <ревизия из сообщения>,
+  "decision":"close|cancel|keep|escalate",
+  "reason":"…"
+}'
+```
+
+- `close` / `cancel` без опубликованной версии → `canceled`, код **только** `closed_by_origin_agent`.
+- `keep` — задача остаётся, нужен `nextCheckHours` 1–168.
+- `escalate` — одно сообщение во Входящие, не в Telegram.
+- Отказы: `needs_acceptance`, `revision_conflict`, `foreign_thread`, `duplicate`.
+- Не спрашивать владельца. Не вызывать `agency_ask_owner`. `done` не ставить.
 
 ## Два критерия приёмки
 

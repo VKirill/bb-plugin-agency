@@ -207,6 +207,15 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     expectedJobBriefHash: "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
     expectedJobAcceptanceHash: "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
   },
+  staleAnswer: {
+    requestId: REQUEST_ID,
+    jobId: "job_aaaaaaaaaaaa",
+    nudgeId: "stale:job_aaaaaaaaaaaa:2026-09-21T00:00:00.000Z:1",
+    expectedJobRevision: 12,
+    decision: "keep",
+    reason: "В чате ещё ждут ответ владельца по доступу.",
+    nextCheckHours: 24,
+  },
   attachJobInput: {
     requestId: REQUEST_ID,
     expectedRevision: 1,

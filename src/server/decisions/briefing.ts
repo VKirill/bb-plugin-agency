@@ -46,6 +46,10 @@ export const BRIEFING_TEXT_LIMIT = 1_400;
 
 export type BriefingSkill = { id: string; name: string; description?: string };
 
+export const LAUNCH_EFFORTS = ["low", "medium", "high"] as const;
+export type LaunchEffort = (typeof LAUNCH_EFFORTS)[number];
+const EFFORT_ID = "effort";
+
 export type BriefingInput = {
   job: { key: string; title: string; brief: string; acceptance: string };
   /** Навыки сотрудника: они уедут в запуск в любом случае. */
@@ -53,6 +57,8 @@ export type BriefingInput = {
   /** Библиотека отдела за вычетом профиля: это можно открыть под задание. */
   pool?: readonly BriefingSkill[];
   lessons: readonly KnowledgeItem[];
+  /** Writer/assistant launches: pick low/medium/high for this attempt only. */
+  askEffort?: boolean;
 };
 
 export type Briefing = {
@@ -90,7 +96,12 @@ function state(input: BriefingInput, skills: readonly BriefingSkill[], pool: rea
   return lines.join("\n");
 }
 
-function questions(skills: readonly BriefingSkill[], pool: readonly BriefingSkill[], lessons: readonly KnowledgeItem[]): DecisionQuestion[] {
+function questions(
+  skills: readonly BriefingSkill[],
+  pool: readonly BriefingSkill[],
+  lessons: readonly KnowledgeItem[],
+  askEffort: boolean,
+): DecisionQuestion[] {
   return [
     ...skills.map((skill, index) => ({ id: `s${index}`, kind: "bool" as const, prompt: `Нужен ли навык «${skill.name}» для этой работы?` })),
     // Открытие навыка — расход прав: не «пригодится ли», а «без него хуже / с ним качественнее».
@@ -100,6 +111,22 @@ function questions(skills: readonly BriefingSkill[], pool: readonly BriefingSkil
       prompt: `Поможет ли навык «${skill.name}» сделать эту работу качественнее — так, что без него результат заметно хуже?`,
     })),
     ...lessons.map((lesson, index) => ({ id: `k${index}`, kind: "bool" as const, prompt: `Поможет ли в этой работе запись «${lesson.title}»?` })),
+    ...(askEffort
+      ? [
+          {
+            id: EFFORT_ID,
+            kind: "choice" as const,
+            prompt:
+              "Какой уровень рассуждения нужен исполнителю на этой сдаче? Не меняй профиль: только этот запуск. low — короткая правка или шаблон. medium — обычный текст или типичная работа. high — спорный, длинный или рискованный результат.",
+            choices: LAUNCH_EFFORTS,
+            descriptions: {
+              low: "Short edit, template, mechanical collect. Fast and cheap.",
+              medium: "Typical writing or implementation of a clear brief.",
+              high: "Long, contested, or high-stakes work that needs careful reasoning.",
+            },
+          },
+        ]
+      : []),
   ];
 }
 
@@ -121,6 +148,7 @@ function text(skills: readonly BriefingSkill[], granted: readonly BriefingSkill[
 
 export type BriefingAskResult = {
   briefing: Briefing | null;
+  effort: LaunchEffort | null;
   reason: "hint" | "disabled" | "empty" | "failed" | "silent";
   answers: string;
   ms: number;
@@ -129,15 +157,29 @@ export type BriefingAskResult = {
 
 function trace(
   reason: BriefingAskResult["reason"],
-  extra: { briefing?: Briefing | null; answers?: string; ms?: number; candidates?: BriefingAskResult["candidates"] } = {},
+  extra: {
+    briefing?: Briefing | null;
+    effort?: LaunchEffort | null;
+    answers?: string;
+    ms?: number;
+    candidates?: BriefingAskResult["candidates"];
+  } = {},
 ): BriefingAskResult {
   return {
     briefing: extra.briefing ?? null,
+    effort: extra.effort ?? null,
     reason,
     answers: extra.answers ?? "",
     ms: extra.ms ?? 0,
     candidates: extra.candidates ?? { skills: 0, pool: 0, lessons: 0 },
   };
+}
+
+function readEffort(answers: Parameters<typeof confident>[0], threshold: number): LaunchEffort | null {
+  const answer = confident(answers, EFFORT_ID, threshold);
+  return typeof answer?.value === "string" && (LAUNCH_EFFORTS as readonly string[]).includes(answer.value)
+    ? (answer.value as LaunchEffort)
+    : null;
 }
 
 /**
@@ -153,14 +195,15 @@ export async function askBriefingDetailed(
   const pool = (input.pool ?? []).slice(0, POOL_LIMIT);
   const lessons = input.lessons.slice(0, LESSON_LIMIT);
   const candidates = { skills: skills.length, pool: pool.length, lessons: lessons.length };
+  const askEffort = Boolean(input.askEffort);
   if (!settings.enabled || !settings.points.includes(BRIEFING_POINT)) return trace("disabled", { candidates });
   const point = decisionPoint(BRIEFING_POINT);
   if (!point) return trace("disabled", { candidates });
-  if (!skills.length && !pool.length && !lessons.length) return trace("empty", { candidates });
+  if (!skills.length && !pool.length && !lessons.length && !askEffort) return trace("empty", { candidates });
 
   const outcome = await askDecisions(
     settings,
-    { state: state(input, skills, pool, lessons), questions: questions(skills, pool, lessons) },
+    { state: state(input, skills, pool, lessons), questions: questions(skills, pool, lessons, askEffort) },
     deps,
   );
   if (!outcome.ok) {
@@ -169,6 +212,7 @@ export async function askBriefingDetailed(
   }
 
   const answers = formatDecisionAnswers(outcome.answers);
+  const effort = askEffort ? readEffort(outcome.answers, point.threshold) : null;
   const signal = <T>(all: readonly T[], picked: readonly T[]): T[] => {
     if (!picked.length) return [];
     if (all.length >= NOISE_MIN && picked.length > all.length * NOISE_RATIO) return [];
@@ -182,7 +226,7 @@ export async function askBriefingDetailed(
     .slice(0, GRANT_LIMIT)
     .map((row) => ({ skill: row.skill, confidence: row.answer?.confidence ?? GRANT_THRESHOLD }));
   if (!pickedSkills.length && !pickedLessons.length && !granted.length) {
-    return trace("silent", { answers, ms: outcome.ms, candidates });
+    return trace("silent", { answers, ms: outcome.ms, candidates, effort });
   }
   const briefing: Briefing = {
     text: text(pickedSkills, granted.map((row) => row.skill), pickedLessons),
@@ -191,7 +235,7 @@ export async function askBriefingDetailed(
     lessons: pickedLessons,
     ms: outcome.ms,
   };
-  return trace("hint", { briefing, answers, ms: outcome.ms, candidates });
+  return trace("hint", { briefing, answers, ms: outcome.ms, candidates, effort });
 }
 
 /**

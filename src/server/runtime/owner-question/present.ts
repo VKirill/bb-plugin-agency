@@ -12,7 +12,7 @@ import {
   type OwnerAskOverlayQuestion,
 } from "../../../shared/contracts/owner-question";
 import { applyOwnerQuestionAnswers } from "./apply.js";
-import { buildOwnerQuestionPayload, listOpenOriginWaits } from "./payload.js";
+import { buildOwnerQuestionPayload, listOpenOriginWaitsNeedingCard } from "./payload.js";
 
 export type PresentOwnerQuestionDeps = {
   bb: BbPluginApi;
@@ -30,6 +30,7 @@ export type PresentOwnerQuestionResult =
       applied: string[];
       errors: string[];
       answers: Record<string, string>;
+      remaining: boolean;
     }
   | { ok: false; error: string };
 
@@ -49,7 +50,7 @@ export async function presentOwnerQuestions(
     return { ok: false, error: "agency_ask_owner is for the commissioning chat. Hidden workers use report-needs-input." };
   }
   const overlay = overlayFromUnknown(input.overlay);
-  const waits = listOpenOriginWaits(deps.db, input.threadId);
+  const waits = listOpenOriginWaitsNeedingCard(deps.db, input.threadId);
   const payload = buildOwnerQuestionPayload(waits, overlay);
   if (!payload) return { ok: false, error: "No Agency questions are waiting in this chat." };
   const parsedPayload = ownerQuestionPayloadSchema.safeParse(payload);
@@ -76,7 +77,7 @@ export async function presentOwnerQuestions(
     };
   }
   if (result.outcome === "cancelled") {
-    return { ok: true, cancelled: true, applied: [], errors: [], answers: {} };
+    return { ok: true, cancelled: true, applied: [], errors: [], answers: {}, remaining: true };
   }
   const answers = ownerQuestionResponseSchema.safeParse(result.value);
   if (!answers.success) return { ok: false, error: "The choice card returned an invalid answer." };
@@ -86,5 +87,6 @@ export async function presentOwnerQuestions(
     applied: applied.applied,
     errors: applied.errors,
     answers: answers.data.answers,
+    remaining: listOpenOriginWaitsNeedingCard(deps.db, input.threadId).length > 0,
   };
 }
