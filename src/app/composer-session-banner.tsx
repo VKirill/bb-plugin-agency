@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useBbContext, useComposerView, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../shared/rpc-contract";
 import type { SessionEffectiveMode, SessionPolicyMode, SessionPolicyView } from "../shared/contracts/session-policy";
 import { tr } from "./i18n";
-import { composerModeLabel, effectiveModeLabel, SESSION_MODE_OPTIONS, userSessionChoice } from "./session-mode-copy";
+import {
+  composerModeLabel,
+  consumePendingSticky,
+  displayedComposerChoice,
+  effectiveModeLabel,
+  readComposerSticky,
+  SESSION_MODE_OPTIONS,
+  writeComposerSticky,
+  type UserSessionChoice,
+} from "./session-mode-copy";
 import { Button } from "../../components/ui/button";
 import { Icon } from "../../components/ui/icon";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
@@ -13,21 +22,43 @@ function newRequestId(): string {
   return crypto.randomUUID();
 }
 
-function connectedIds(scope: ReturnType<typeof useComposerView>["scope"]): { bbProjectId?: string; threadId?: string } {
+function connectedIds(
+  scope: ReturnType<typeof useComposerView>["scope"],
+  projectId: string | null,
+): { bbProjectId?: string; threadId?: string } {
   if (scope.kind === "thread" || scope.kind === "queued-message") {
-    return { threadId: scope.threadId };
+    return { threadId: scope.threadId, ...(projectId ? { bbProjectId: projectId } : {}) };
   }
   if (scope.kind === "side-chat") {
     return { bbProjectId: scope.projectId, threadId: scope.childThreadId ?? scope.parentThreadId };
   }
   // new-thread has no chat id yet — never borrow bb.threadId of a previous chat.
-  return { bbProjectId: scope.projectId ?? undefined };
+  return { bbProjectId: scope.projectId ?? projectId ?? undefined };
 }
 
-function chosenMode(policy: SessionPolicyView | null, isNewThread: boolean): SessionEffectiveMode | SessionPolicyMode {
-  if (isNewThread && policy && policy.pending !== "inherit") return policy.pending;
-  if (policy && policy.layers.thread !== "inherit") return policy.layers.thread;
-  return policy?.effective ?? "pm";
+function optimisticPolicy(
+  previous: SessionPolicyView | null,
+  mode: Exclude<SessionPolicyMode, "inherit">,
+  isNewThread: boolean,
+  ids: { bbProjectId?: string; threadId?: string },
+): SessionPolicyView {
+  const base: SessionPolicyView = previous ?? {
+    effective: "pm",
+    source: "agency",
+    layers: { agency: "pm", project: "inherit", binding: "inherit", thread: "inherit" },
+    pending: "inherit",
+    bbProjectId: ids.bbProjectId ?? null,
+    bindingId: null,
+    threadId: ids.threadId ?? null,
+    connected: true,
+  };
+  if (isNewThread) return { ...base, pending: mode };
+  return {
+    ...base,
+    effective: mode,
+    source: "thread",
+    layers: { ...base.layers, thread: mode },
+  };
 }
 
 /** Keep the follow-up composer expanded: skip keyboard blur / compact hide of plugin actions. */
@@ -44,7 +75,7 @@ export function ComposerSessionBanner() {
   const rpc = useRpc<typeof rpcContract>();
   const view = useComposerView();
   const bb = useBbContext();
-  const scoped = connectedIds(view.scope);
+  const scoped = connectedIds(view.scope, bb.projectId);
   const isNewThread = view.scope.kind === "new-thread";
   const ids = {
     bbProjectId: scoped.bbProjectId ?? bb.projectId ?? undefined,
@@ -55,17 +86,21 @@ export function ComposerSessionBanner() {
   const [policy, setPolicy] = useState<SessionPolicyView | null>(null);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const loadGen = useRef(0);
   const load = useCallback(() => {
     if (!ids.bbProjectId && !ids.threadId) {
+      loadGen.current += 1;
       setPolicy(null);
       return;
     }
+    const gen = ++loadGen.current;
     void rpc
       .call("getSessionPolicy", {
         ...(ids.bbProjectId ? { bbProjectId: ids.bbProjectId } : {}),
         ...(ids.threadId ? { threadId: ids.threadId } : {}),
       })
       .then((result) => {
+        if (gen !== loadGen.current) return;
         if (result.ok) setPolicy(result.value);
       })
       .catch(() => undefined);
@@ -74,33 +109,55 @@ export function ComposerSessionBanner() {
     load();
   }, [load]);
   useRealtime("domain-changed", load);
+  useEffect(() => {
+    if (isNewThread || !ids.threadId) return;
+    const pinned = consumePendingSticky(ids.bbProjectId, ids.threadId);
+    if (!pinned) return;
+    loadGen.current += 1;
+    setPolicy((prev) => optimisticPolicy(prev, pinned, false, ids));
+    void rpc
+      .call("saveSessionPolicy", {
+        requestId: newRequestId(),
+        scope: "thread",
+        scopeId: ids.threadId,
+        mode: pinned,
+      })
+      .then((result) => {
+        if (result.ok) load();
+      })
+      .catch(() => undefined);
+  }, [isNewThread, ids.bbProjectId, ids.threadId, rpc, load]);
   const canOverride = Boolean(ids.threadId) || (isNewThread && Boolean(ids.bbProjectId));
-  const setMode = async (mode: SessionPolicyMode) => {
-    const current = userSessionChoice(chosenMode(policy, isNewThread));
+  const setMode = async (mode: UserSessionChoice) => {
+    const sticky = readComposerSticky({ projectId: ids.bbProjectId, threadId: ids.threadId, isNewThread });
+    const current = displayedComposerChoice(policy, isNewThread, sticky);
     if (mode === current) return;
     setBusy(true);
     const previous = policy;
-    if (isNewThread && previous) setPolicy({ ...previous, pending: mode });
+    loadGen.current += 1;
+    writeComposerSticky({ projectId: ids.bbProjectId, threadId: ids.threadId, isNewThread, mode });
+    setPolicy(optimisticPolicy(previous, mode, isNewThread, ids));
     try {
       const result = isNewThread && ids.bbProjectId
         ? await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "pending", scopeId: ids.bbProjectId, mode })
         : ids.threadId
           ? await rpc.call("saveSessionPolicy", { requestId: newRequestId(), scope: "thread", scopeId: ids.threadId, mode })
           : null;
-      if (result && !result.ok) {
-        setPolicy(previous);
-        return;
-      }
+      if (result && !result.ok) return;
       load();
     } catch {
-      setPolicy(previous);
+      // Keep the chip on the click; a later GET/retry still has the sticky.
     } finally {
       setBusy(false);
     }
   };
-  const effective = (policy?.effective ?? "pm") as SessionEffectiveMode;
-  const selected = userSessionChoice(chosenMode(policy, isNewThread));
-  const shown = (isNewThread && policy && policy.pending !== "inherit" ? policy.pending : effective) as SessionEffectiveMode;
+  const pickMode = (mode: UserSessionChoice) => {
+    setMenuOpen(false);
+    void setMode(mode);
+  };
+  const sticky = readComposerSticky({ projectId: ids.bbProjectId, threadId: ids.threadId, isNewThread });
+  const selected = displayedComposerChoice(policy, isNewThread, sticky);
+  const shown = selected as SessionEffectiveMode;
   const shortLabel = tr(composerModeLabel(shown));
   const fullLabel = `${tr("Агентство")}: ${tr(effectiveModeLabel(shown))}`;
   const hint = canOverride ? fullLabel : tr("После отправки этот чат можно сменить на один раз.");
@@ -164,10 +221,13 @@ export function ComposerSessionBanner() {
                     "relative flex w-full cursor-default select-none items-center justify-between gap-3 rounded-sm px-2 py-2 text-xs outline-none hover:bg-state-hover hover:text-foreground",
                     active && "bg-state-active",
                   )}
-                  onMouseDown={holdComposer}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void setMode(choice.value);
+                  onMouseDown={(event) => {
+                    holdComposer(event);
+                    pickMode(choice.value);
+                  }}
+                  onClick={(event) => {
+                    holdComposer(event);
+                    pickMode(choice.value);
                   }}
                 >
                   <span className="truncate">{tr(choice.label)}</span>

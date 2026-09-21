@@ -104,6 +104,7 @@ describe("composer session mode control", () => {
     harness.policy = basePolicy();
     harness.saves = [];
     harness.gets = [];
+    sessionStorage.clear();
   });
 
   it("opens a model-picker sheet from the Agency chip so the phone composer stays expanded", async () => {
@@ -160,6 +161,62 @@ describe("composer session mode control", () => {
       await Promise.resolve();
     });
     expect(harness.saves).toEqual([expect.objectContaining({ scope: "pending", scopeId: "proj_1", mode: "ordinary" })]);
+    expect(trigger.textContent).toContain("Сам сделает");
+  });
+
+  it("does not snap the chip back to Агентство when the new chat already has a thread id", async () => {
+    harness.scope = { kind: "thread", threadId: "thr_new", projectId: "proj_1" };
+    harness.bb = { projectId: "proj_1", threadId: "thr_new" };
+    harness.policy = {
+      ...basePolicy(),
+      effective: "pm",
+      source: "agency",
+      pending: "ordinary",
+      threadId: "thr_new",
+      layers: { agency: "pm", project: "inherit", binding: "inherit", thread: "inherit" },
+    };
+    const container = await mountBanner();
+    const trigger = await vi.waitFor(() => {
+      const node = container.querySelector("[data-testid='agency-session-banner']");
+      if (!node) throw new Error("missing banner");
+      return node as HTMLButtonElement;
+    });
+    expect(trigger.textContent).toContain("Сам сделает");
+    expect(trigger.textContent).not.toContain("Агентство");
+  });
+
+  it("keeps Сам сделает when GET still reports the project Agency default", async () => {
+    sessionStorage.setItem(
+      "agency.session.pending:proj_1",
+      JSON.stringify({ mode: "ordinary", at: Date.now() }),
+    );
+    harness.scope = { kind: "new-thread", threadId: "thr_1", projectId: "proj_1" };
+    harness.bb = { projectId: "proj_1", threadId: "thr_stale" };
+    harness.policy = { ...basePolicy(), threadId: null, pending: "inherit", effective: "pm", source: "project" };
+    const container = await mountBanner();
+    const trigger = await vi.waitFor(() => {
+      const node = container.querySelector("[data-testid='agency-session-banner']");
+      if (!node) throw new Error("missing banner");
+      return node as HTMLButtonElement;
+    });
+    expect(trigger.textContent).toContain("Сам сделает");
+  });
+
+  it("pins the new-chat draft onto the thread when BB allocates an id", async () => {
+    sessionStorage.setItem(
+      "agency.session.pending:proj_1",
+      JSON.stringify({ mode: "ordinary", at: Date.now() }),
+    );
+    harness.scope = { kind: "thread", threadId: "thr_new", projectId: "proj_1" };
+    harness.bb = { projectId: "proj_1", threadId: "thr_new" };
+    harness.policy = { ...basePolicy(), threadId: "thr_new", pending: "inherit" };
+    const container = await mountBanner();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(harness.saves.some((row) => row.scope === "thread" && row.scopeId === "thr_new" && row.mode === "ordinary")).toBe(true);
+    const trigger = container.querySelector("[data-testid='agency-session-banner']") as HTMLButtonElement;
     expect(trigger.textContent).toContain("Сам сделает");
   });
 });

@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { openMigratedDatabase, type SqlDatabase } from "../src/server/db";
 import { createDomainStore, type ServiceContext } from "../src/server/services";
 import { buildAgencyInstructions } from "../src/server/delegation/instructions";
-import { resolveSessionPolicy, saveSessionPolicy } from "../src/server/delegation/session-policy";
+import { applyPendingSessionPolicy, resolveSessionPolicy, saveSessionPolicy } from "../src/server/delegation/session-policy";
 import { resolveAlias } from "../src/server/cli/aliases";
-import { userSessionChoice, userSessionLabel } from "../src/app/session-mode-copy";
+import { composerChosenMode, userSessionChoice, userSessionLabel } from "../src/app/session-mode-copy";
 
 function seedProject(db: SqlDatabase) {
   const store = createDomainStore(db);
@@ -103,6 +103,27 @@ describe("session policy for ordinary chats", () => {
     db.close();
   });
 
+  it("pins the new-chat draft when that thread is first read, before send", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    seedProject(db);
+    const now = new Date().toISOString();
+    expect(saveSessionPolicy(db, { scope: "project", scopeId: "proj_bound", mode: "pm" }, now).ok).toBe(true);
+    expect(saveSessionPolicy(db, { scope: "pending", scopeId: "proj_bound", mode: "ordinary" }, now).ok).toBe(true);
+    expect(resolveSessionPolicy(db, { bbProjectId: "proj_bound", threadId: "thr_new" }, "delegate")).toMatchObject({
+      effective: "pm",
+      source: "project",
+      pending: "ordinary",
+      layers: { thread: "inherit" },
+    });
+    applyPendingSessionPolicy(db, { bbProjectId: "proj_bound", threadId: "thr_new" }, now);
+    expect(resolveSessionPolicy(db, { bbProjectId: "proj_bound", threadId: "thr_new" }, "delegate")).toMatchObject({
+      effective: "ordinary",
+      source: "thread",
+      pending: "inherit",
+    });
+    db.close();
+  });
+
   it("applies a folder override only when that folder is the only live connection", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const seeded = seedProject(db);
@@ -158,6 +179,34 @@ describe("session policy for ordinary chats", () => {
     expect(userSessionLabel("delegate")).toBe("Агентство");
     expect(userSessionLabel("suggest")).toBe("По запросу");
     expect(userSessionLabel("ordinary")).toBe("Сам сделает");
+  });
+
+  it("keeps Сам сделает on the chip after BB gives the new chat a thread id", () => {
+    const policy = {
+      effective: "pm" as const,
+      source: "agency" as const,
+      layers: { agency: "pm" as const, project: "inherit" as const, binding: "inherit" as const, thread: "inherit" as const },
+      pending: "ordinary" as const,
+      bbProjectId: "proj_bound",
+      bindingId: null,
+      threadId: "thr_new",
+      connected: true,
+    };
+    expect(userSessionChoice(composerChosenMode(policy, true))).toBe("ordinary");
+    expect(userSessionChoice(composerChosenMode(policy, false))).toBe("ordinary");
+    expect(userSessionChoice(composerChosenMode({ ...policy, pending: "inherit" }, false))).toBe("pm");
+  });
+
+  it("stores a new-chat draft even when the BB project is not an Agency workplace", () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const now = new Date().toISOString();
+    expect(saveSessionPolicy(db, { scope: "pending", scopeId: "proj_unbound", mode: "ordinary" }, now).ok).toBe(true);
+    expect(resolveSessionPolicy(db, { bbProjectId: "proj_unbound" }, "delegate")).toMatchObject({
+      effective: "pm",
+      pending: "ordinary",
+      connected: false,
+    });
+    db.close();
   });
 
   it("routes CLI aliases for session get and save", () => {

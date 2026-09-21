@@ -135,7 +135,7 @@ import { STALE_SWEEP_INTERVAL_MS, sweepStaleNudges } from "./runtime/stale-sweep
 import { applyStaleAnswer } from "./runtime/stale-answer";
 import { DEFAULT_BOARD_POLICY, type BoardPolicy } from "../shared/contracts";
 import { buildAgencyInstructions, DELEGATION_MODES, parseDelegationMode, type DelegationMode } from "./delegation/instructions";
-import { resolveSessionPolicy, saveSessionPolicy } from "./delegation/session-policy";
+import { applyPendingSessionPolicy, resolveSessionPolicy, saveSessionPolicy } from "./delegation/session-policy";
 
 export function registerAgency(bb: BbPluginApi) {
   const documents = bb.hosts.experimental_client({ contract: documentHostContract });
@@ -1202,6 +1202,9 @@ export function registerAgency(bb: BbPluginApi) {
         } catch {
           // Thread-only resolution still returns the Agency fallback.
         }
+      }
+      if (bbProjectId && input.threadId) {
+        applyPendingSessionPolicy(db, { bbProjectId, threadId: input.threadId }, new Date().toISOString());
       }
       return { ok: true as const, value: resolveSessionPolicy(db, { ...input, bbProjectId }, delegationMode) };
     },

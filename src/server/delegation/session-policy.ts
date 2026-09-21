@@ -143,7 +143,7 @@ export function saveSessionPolicy(
   if (input.scope === "binding" && !projectIdOfBinding(db, input.scopeId)) {
     return fail("not_found", `project binding ${input.scopeId} not found`);
   }
-  if ((input.scope === "project" || input.scope === "pending") && !projectIsConnected(db, input.scopeId)) {
+  if (input.scope === "project" && !projectIsConnected(db, input.scopeId)) {
     return fail("not_found", `project ${input.scopeId} is not connected to the Agency`);
   }
   if (input.scope === "pending") {

@@ -10,7 +10,7 @@ job description, a role, a department, a permission policy and a work history. A
 job has a life of its own: it is assigned, launched, comes back with a question,
 publishes a file version and goes through review.
 
-> **Status:** `0.1.0-alpha.17`, a working alpha. Durable data, managed launches,
+> **Status:** `0.1.0-alpha.18`, a working alpha. Durable data, managed launches,
 > work rules, limits and budgets, the launch queue, schedules and webhooks,
 > knowledge, goals and backups work. An employee runs on any CLI connected in BB:
 > Claude Code, Codex, Cursor, OpenCode and Antigravity are verified end to end;
