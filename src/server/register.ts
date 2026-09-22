@@ -1,3 +1,7 @@
+import { ensureLaunchIssue, readLaunchIssue } from "./runtime/launch-queue/issues";
+import { traceHandlers } from "./runtime/trace/handlers";
+import { configureTrace, listTrace, recordTrace } from "./runtime/trace/store";
+import type { TraceQuery } from "../shared/contracts/trace";
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
 import { getKnowledge, KNOWLEDGE_KINDS, knowledgeOrder, listKnowledge, markKnowledgeRead, saveKnowledge, setKnowledgeStatus, type SaveKnowledgeInput } from "./knowledge/store";
@@ -96,7 +100,7 @@ import {
   resolveIsolatedCatalogRolesPath,
 } from "./runtime/isolated-sdk";
 import { createInternalRunStoreReads, createRunStore } from "./runtime/run-store";
-import { flushParentWakes, recoverParentWakesFromActivities } from "./runtime/parent-wake";
+import { enqueueParentWake, flushParentWakes, recoverParentWakesFromActivities } from "./runtime/parent-wake";
 import { enqueueProductReady, flushClientBounces, recoverClientBouncesFromOpenWaits } from "./runtime/client-bounce";
 import { presentOwnerQuestions, presentOwnerQuestionsForCli, registerOwnerQuestionTool, listOriginsNeedingOwnerCard } from "./runtime/owner-question";
 import { flushUnconfirmedAnswers } from "./runtime/needs-input/answer";
@@ -152,6 +156,8 @@ export function registerAgency(bb: BbPluginApi) {
   const telegram=telegramAdapter(bb);
   const machines=machineDirectory(bb);
   const db = openDatabase(bb);
+  configureTrace(db, () => bb.log.warn("Agency trace write failed; execution continues. Inspect trace.health and database storage."));
+  recordTrace(db, { step: "runtime", outcome: "succeeded", reason: "loaded" });
   const inbox = createInbox(db);
   const plugins = createPluginDirectory({ listPlugins: () => bb.sdk.plugins.list(), addsInstructions: createInstructionDetector() });
   // Rules ask synchronously; the cache is filled at start and refreshed by the dispatcher loop.
@@ -332,7 +338,7 @@ export function registerAgency(bb: BbPluginApi) {
   if (typeof bb.agents.registerTool === "function") {
     registerOwnerQuestionTool(bb, ownerQuestion);
   }
-  const domain = createDomainRpc({
+  const domain = traceHandlers(db, createDomainRpc({
     bb,
     store,
     db,
@@ -392,7 +398,7 @@ export function registerAgency(bb: BbPluginApi) {
         onChanged();
       })();
     },
-  });
+  }));
   const catalogRolesSettings = bb.settings.define({
     isolatedCatalogRolesJson: {
       type: "string",
@@ -507,7 +513,7 @@ export function registerAgency(bb: BbPluginApi) {
     return fail("model_unavailable", `${note}${action}`);
   };
 
-  const launch = createIsolatedLaunchRpc({
+  const launch = traceHandlers(db, createIsolatedLaunchRpc({
     bb,
     plugins,
     store,
@@ -602,7 +608,7 @@ export function registerAgency(bb: BbPluginApi) {
       if (!resolved.ok) return resolved;
       return { ok: true, value: resolved.value?.config };
     },
-  });
+  }));
   /** Backlog → queued, then into the launch queue; the sweep launches it through every launch check. */
   const queueJobForLaunch = (job: Job, requestId: string) => {
     const access = resolveRpcAccess(db);
@@ -971,6 +977,11 @@ export function registerAgency(bb: BbPluginApi) {
           ? { ok: true as const, ms: outcome.ms, answers: outcome.answers }
           : { ok: false as const, ms: outcome.ms, reason: outcome.reason, detail: outcome.detail ?? null },
       };
+    },
+    listTrace: async (input: TraceQuery) => {
+      const access = ownerOnly();
+      if (!access.ok) return access;
+      return { ok: true as const, value: listTrace(db, input) };
     },
     listDecisionLog: async (input: { limit?: number }) => {
       const access = ownerOnly();
@@ -1434,8 +1445,9 @@ export function registerAgency(bb: BbPluginApi) {
       if (input.scopeKind === "section" && input.parentBindingId && !store.getBinding(input.parentBindingId)) {
         return fail("not_found", `Привязка проекта-родителя ${input.parentBindingId} не найдена.`);
       }
-      // An employee's material is a proposal until the owner accepts it.
+      // Employees propose; the department lead can accept knowledge within their own department.
       const saved = saveKnowledge(db, input, { proposedBy: access.value.ctx.caller?.agentId ?? null }, new Date().toISOString());
+      recordTrace(db, { jobId: access.value.ctx.caller?.jobId, step: "knowledge.save", outcome: saved.ok ? "succeeded" : "failed", reason: saved.ok ? "saved" : saved.error.code });
       if (saved.ok) onChanged();
       return saved;
     },
@@ -1445,6 +1457,7 @@ export function registerAgency(bb: BbPluginApi) {
       const allowed = mayDecideKnowledge(access.value.ctx.caller?.agentId ?? null, input.id);
       if (!allowed.ok) return allowed;
       const saved = setKnowledgeStatus(db, input, new Date().toISOString());
+      recordTrace(db, { jobId: access.value.ctx.caller?.jobId, step: "knowledge.status", outcome: saved.ok ? "succeeded" : "failed", reason: saved.ok ? input.status : saved.error.code });
       if (saved.ok) onChanged();
       return saved;
     },
@@ -1763,6 +1776,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "getDecisionSettings"
     | "saveDecisionSettings"
     | "testDecisionModel"
+    | "listTrace"
     | "listDecisionLog"
     | "probeDecisionPoints"
     | "listBudgets"
@@ -1901,6 +1915,27 @@ export function registerAgency(bb: BbPluginApi) {
       references: [],
       comment,
     }).ok;
+  };
+  const notifyQueueLead = (job: Job, code: string) => {
+    const access = resolveRpcAccess(db);
+    if (!access.ok) return;
+    const now = new Date().toISOString();
+    const activity = ensureLaunchIssue(db, job, code, now, (comment) => store.createActivity(access.value.ctx, {
+      requestId: randomUUID(), jobId: job.id, actor: { kind: "system" }, kind: "comment", causationId: null,
+      references: [{ type: "launch_issue", id: code }, { type: "job_state", id: job.state }], comment,
+    }), agencyLanguage() === "en");
+    if (!activity) return;
+    enqueueParentWake(db, job, activity, now);
+    void flushParentWakes({ db, send, now }).catch(() => {
+      recordTrace(db, { jobId: job.id, step: "lead.delivery", outcome: "failed", reason: "flush_exception", collapse: true });
+    });
+    const delivered = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? AND send_state IN ('confirmed', 'queued') LIMIT 1").get(activity.id);
+    const issue = readLaunchIssue(db, job.id);
+    if (!delivered && issue && Date.parse(now) - Date.parse(issue.created_at) >= 10 * 60_000) {
+      void sendOwnerMessage({ jobId: job.id, level: "warning", dedupeKey: `lead-unreachable:${activity.id}`,
+        text: agencyLanguage() === "en" ? `${job.key}: launch repair (${code}) has not reached the lead for 10 minutes. Restore the lead's execution; the job remains queued.`
+          : `${job.key}: поручение исправить запуск (${code}) не доставлено руководителю за 10 минут. Нужно восстановить работу руководителя; задача остаётся в очереди.` }, "launch-queue");
+    }
   };
   const conveyorPorts = (): ConveyorPorts | null => {
     const access = resolveRpcAccess(db);
@@ -2102,6 +2137,7 @@ export function registerAgency(bb: BbPluginApi) {
       }
       const result = await sweepLaunchQueue({
         db,
+        notifyLead: notifyQueueLead,
         getJob: (jobId) => store.getJob(jobId),
         checkLimits: checkLaunchGate,
         launch: async (job, requestedAt) => {
@@ -2127,6 +2163,7 @@ export function registerAgency(bb: BbPluginApi) {
       await flushClientBounces({ db, send, now: new Date().toISOString() });
       await flushStuckOwnerAnswers();
     } catch (error) {
+      recordTrace(db, { step: "queue.sweep", outcome: "failed", reason: "exception", collapse: true });
       bb.log.warn(`Launch queue: ${String(error)}`);
     } finally {
       queueBusy = false;

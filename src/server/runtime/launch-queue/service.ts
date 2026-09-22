@@ -1,3 +1,5 @@
+import { LEAD_ACTION_CODES, resolveLaunchIssue } from "./issues";
+import { recordTrace } from "../trace/store";
 import type { DomainResult } from "../../../domain";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -124,6 +126,7 @@ export function listLaunchQueue(db: SqlDatabase): QueueEntry[] {
 }
 
 export type LaunchQueuePorts = {
+  notifyLead?: (job: Job, code: string) => void;
   db: SqlDatabase;
   getJob: (jobId: string) => Job | undefined;
   /** `pendingJobIds`: jobs this sweep is launching right now — they hold their slots and files already. */
@@ -190,6 +193,8 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
   const inFlight: Promise<void>[] = [];
 
   const settle = async (job: Job, entry: QueueEntry): Promise<void> => {
+    const started = Date.now();
+    recordTrace(ports.db, { jobId: job.id, step: "queue.launch", outcome: "started", reason: "ready" });
     let result: DomainResult<unknown>;
     try {
       result = await ports.launch(job, entry.requestedAt);
@@ -198,12 +203,15 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     } finally {
       pending.delete(job.id);
     }
+    recordTrace(ports.db, { jobId: job.id, step: "queue.launch", outcome: result.ok ? "succeeded" : "failed", reason: result.ok ? "launched" : result.error.code, durationMs: Date.now() - started });
     if (result.ok) {
+      resolveLaunchIssue(ports.db, job.id);
       dequeueLaunch(ports.db, job.id);
       ports.comment(job, en ? "Launched from the queue: what it waited for is ready." : "Запущена из очереди: то, чего она ждала, готово.");
       launched += 1;
       return;
     }
+    if (LEAD_ACTION_CODES.has(result.error.code)) ports.notifyLead?.(job, result.error.code);
     if (WAIT_CODES.has(result.error.code)) {
       clearFailure(ports.db, job.id);
       setReason(ports.db, job.id, result.error.message, ports.now());
@@ -239,11 +247,15 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     const job = ports.getJob(entry.jobId);
     // Launched by hand, canceled or moved on: the queue has nothing to do.
     if (!job || (job.state !== "backlog" && job.state !== "queued")) {
+      resolveLaunchIssue(ports.db, entry.jobId);
       dequeueLaunch(ports.db, entry.jobId);
       removed += 1;
       continue;
     }
+    const checkedAt = Date.now();
     const limits = await ports.checkLimits(job, [...pending]);
+    recordTrace(ports.db, { jobId: job.id, step: "queue.gate", outcome: limits.ok ? "succeeded" : "waiting", reason: limits.ok ? "ready" : limits.error.code, durationMs: Date.now() - checkedAt, collapse: true });
+    if (!limits.ok && LEAD_ACTION_CODES.has(limits.error.code)) ports.notifyLead?.(job, limits.error.code);
     if (!limits.ok && WAIT_CODES.has(limits.error.code)) {
       setReason(ports.db, job.id, limits.error.message, ports.now());
       continue;

@@ -1,3 +1,4 @@
+import { traceQuerySchema, traceViewSchema } from "./contracts/trace";
 import { TEMPLATE_KEYS } from "./templates";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, workRulesViewSchema } from "./contracts/work-rules";
 import { listDashboardUsageInputSchema, listDashboardUsageOutputSchema } from "./contracts/dashboard-usage";
@@ -1381,6 +1382,7 @@ export const rpcContract = defineRpcContract({
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, output: domainResultSchema(decisionSettingsSchema) },
   saveDecisionKey: { input: z.object({ name: z.string().min(1).max(120), value: z.string().min(1).max(500) }).strict(), output: domainResultSchema(z.object({ name: z.string() }).strict()) },
   testDecisionModel: { input: z.null(), output: domainResultSchema(decisionTestSchema) },
+  listTrace: { input: traceQuerySchema, output: domainResultSchema(traceViewSchema) },
   listDecisionLog: { input: z.object({ limit: z.number().int().min(1).max(200).optional() }).strict(), output: domainResultSchema(z.array(decisionLogSchema)) },
   probeDecisionPoints: { input: z.null(), output: domainResultSchema(decisionProbeSchema) },
   repairAgentModels: { input: z.object({ agentIds: z.array(z.string()).max(200).optional() }).strict(), output: domainResultSchema(agentModelsViewSchema) },

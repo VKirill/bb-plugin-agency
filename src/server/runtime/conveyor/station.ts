@@ -1,3 +1,4 @@
+import { recordTrace } from "../trace/store";
 import { fail, ok, type DomainResult } from "../../../domain";
 import type { ArtifactVersion, Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -7,7 +8,7 @@ import type { AutoReviewOutcome, AutoReviewPorts, HandedInVersion } from "../aut
 import { startAutoReview } from "../auto-review/service.js";
 import { latestReviewText, parseReviewVerdict } from "./verdict.js";
 
-/** How long a queued QC station may sit before the conveyor closes the work. */
+/** How long a queued QC station may sit before the lead must repair its launch. */
 export const STALE_REVIEW_MS = 30 * 60 * 1000;
 
 const CLOSED = new Set(["done", "canceled"]);
@@ -138,20 +139,24 @@ function freshParentSummary(db: SqlDatabase, jobId: string): boolean {
 }
 
 function stationReadyForAcceptance(ports: ClosePorts, job: Job): boolean {
-  if (openWorkChildren(ports.db, job.id) > 0) return false;
+  const hold = (reason: string, relatedJobId?: string) => {
+    recordTrace(ports.db, { jobId: job.id, step: "acceptance.gate", outcome: "waiting", reason, relatedJobId, artifactHash: latestHandedInVersion(ports.db, job.id)?.hash, collapse: true });
+    return false;
+  };
+  if (openWorkChildren(ports.db, job.id) > 0) return hold("open_work_children");
   // Every automatic close, including sweep and parent cascade, shares the same gates.
   if (!isAutoReviewJob(ports.db, job.id)) {
-    if (latestReviewerHoldsParent(ports, job.id)) return false;
+    if (latestReviewerHoldsParent(ports, job.id)) return hold("manual_review_not_passed");
     const version = latestHandedInVersion(ports.db, job.id);
-    if (version && ports.db.prepare(`SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?`).get(job.id, version.hash)) return false;
+    if (version && ports.db.prepare(`SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?`).get(job.id, version.hash)) return hold("handin_rejected");
     const claim = version ? ports.db.prepare(`SELECT review_job_id FROM agency_auto_review WHERE job_id = ? AND hash = ?`)
       .get(job.id, version.hash) as { review_job_id: string | null } | undefined : undefined;
     if (claim) {
       const qc = claim.review_job_id ? ports.store.getJob(claim.review_job_id) : undefined;
-      if (!qc || qc.state !== "done" || parseReviewVerdict(latestReviewText(ports.db, qc.id)) !== "accept") return false;
+      if (!qc || qc.state !== "done" || parseReviewVerdict(latestReviewText(ports.db, qc.id)) !== "accept") return hold("qc_not_passed", qc?.id);
     }
     // An organisational report handed in before the work finished is not a final delivery.
-    if (!freshParentSummary(ports.db, job.id)) return false;
+    if (!freshParentSummary(ports.db, job.id)) return hold("final_summary_stale");
   }
   return true;
 }
@@ -183,6 +188,7 @@ export function closeStation(ports: ClosePorts, jobId: string, seed: string): Do
     version: version.version,
     hash: version.hash,
   });
+  recordTrace(ports.db, { jobId, step: "acceptance.close", outcome: accepted.ok ? "succeeded" : "failed", reason: accepted.ok ? seed : accepted.error.code, artifactHash: version.hash, facts: { version: version.version } });
   if (!accepted.ok) return accepted;
   discardOpenReviews(ports, jobId);
   const closed = ports.store.getJob(jobId) ?? job;
@@ -257,6 +263,7 @@ export async function applyReviewHandIn(
   const review = ports.store.getJob(reviewJobId);
   if (!work || !review) return "idle";
   const verdict = parseReviewVerdict(latestReviewText(ports.db, reviewJobId));
+  recordTrace(ports.db, { jobId: work.id, step: "review.verdict", outcome: verdict === "accept" ? "succeeded" : "blocked", reason: verdict, relatedJobId: reviewJobId, artifactHash: latestHandedInVersion(ports.db, reviewJobId)?.hash, collapse: true });
   const en = agencyLanguage() === "en";
   if (verdict === "inconclusive") {
     if (review.state === "review" && ports.returnForRework) {
@@ -432,6 +439,7 @@ export function sweepStaleReviewStations(ports: ConveyorPorts): number {
         const blocked = ports.store.transitionJob(systemCtx(ports.ctx, qc.bindingId), {
           requestId: ports.requestId(`conveyor-qc-stalled:${qc.id}:${qc.revision}`), expectedRevision: qc.revision, jobId: qc.id, to: "blocked",
         });
+        recordTrace(ports.db, { jobId: qc.id, step: "review.timeout", outcome: blocked.ok ? "blocked" : "failed", reason: blocked.ok ? "qc_not_started" : blocked.error.code, relatedJobId: job.id, facts: { ageMs: now - Date.parse(claim.created_at) } });
         if (blocked.ok) ports.comment(qc, agencyLanguage() === "en" ? "QC could not start within 30 minutes. The lead must restore its inputs or execution. The work remains unaccepted." : "Проверка не запустилась за 30 минут. Руководителю нужно восстановить входы или запуск. Результат работы не принят.");
       }
     }

@@ -530,3 +530,17 @@ describe("agency CLI → domain", () => {
     }
   });
 });
+
+
+describe("trace CLI and RPC", () => {
+  it("exposes bounded structured diagnostics through the public allowlist", async () => {
+    const { harness } = await load();
+    try {
+      const result = await requireCliOk<{ records: Array<{ step: string }>; health: { writeFailures: number } }>(harness, ["trace", "--input-json", "{\"limit\":5}", "--json"]);
+      expect(result.records.some(row => row.step === "runtime")).toBe(true);
+      expect(result.health.writeFailures).toBe(0);
+      const invalid = await cliJson(harness, ["trace", "--input-json", "{\"limit\":10000}", "--json"]);
+      expect(invalid.exitCode).not.toBe(0);
+    } finally { await harness.lifecycle.dispose(); }
+  });
+});

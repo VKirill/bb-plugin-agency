@@ -1,3 +1,4 @@
+import { recordTrace } from "../trace/store";
 import { randomBytes } from "node:crypto";
 import { sha256Hex } from "../context-snapshot/canonical.js";
 import type { SqlDatabase } from "../../db/sql";
@@ -83,6 +84,7 @@ export function insertLoopMark(
     input.createdAt,
     input.workJobId ?? null,
   );
+  recordTrace(db, { jobId: input.workJobId ?? input.rootJobId, step: "loop.mark", outcome: "blocked", reason: input.cause ?? "unclassified", attemptId: input.attemptId, artifactHash: input.fingerprint, facts: { relation: input.relation, cause: input.cause } });
 }
 
 export function latestAttemptId(db: SqlDatabase, jobId: string): string | null {

@@ -1,3 +1,4 @@
+import { recordTrace } from "../runtime/trace/store";
 import { randomUUID } from "node:crypto";
 import type { SqlDatabase } from "../db/sql";
 
@@ -87,6 +88,7 @@ export function appendDecisionLog(db: SqlDatabase, input: DecisionLogInput, now:
     const del = db.prepare(`DELETE FROM agency_decision_log WHERE id = ?`);
     for (const row of extra) del.run(row.id);
   }
+  recordTrace(db, { jobId: record.jobKey, step: `decision.${record.point}`, outcome: "succeeded", reason: record.outcome, durationMs: record.ms });
   return record;
 }
 

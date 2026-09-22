@@ -1,3 +1,6 @@
+import { ensureLaunchIssue, resolveLaunchIssue } from "../src/server/runtime/launch-queue/issues";
+import { enqueueParentWake } from "../src/server/runtime/parent-wake";
+import { listTrace } from "../src/server/runtime/trace/store";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -569,3 +572,31 @@ function insertCanceledHead(db: SqlDatabase, parentJobId: string, snapshotId: st
   ).run(attemptId, parentJobId, snapshotId, digest, now, now);
   return attemptId;
 }
+
+
+describe("launch issues reach the lead before a state transition", () => {
+  it("delivers one actionable issue for a queued auto-review, survives recovery and ignores it after resolution", async () => {
+    const db = openDb(); const family = await seedFamily(db); const store = family.live.seeded.store; const ctx = family.live.seeded.ctx;
+    const queued = store.transitionJob(ctx, { requestId: requestId(), jobId: family.child.id, expectedRevision: family.child.revision, to: "queued" });
+    if (!queued.ok) throw Error(queued.error.message);
+    db.prepare("INSERT INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at) VALUES (?, ?, ?, 'queued', ?)").run(family.parent.id, "a".repeat(64), queued.value.id, FROZEN_CLOCK);
+    let created = 0;
+    const issue = () => ensureLaunchIssue(db, queued.value, "spec_required", FROZEN_CLOCK, (comment) => {
+      created++;
+      return store.createActivity(ctx, { requestId: requestId(), jobId: queued.value.id, actor: {kind:"system"}, kind:"comment", causationId:null,
+        references:[{type:"launch_issue",id:"spec_required"},{type:"job_state",id:"queued"}], comment });
+    }, true)!;
+    const a=issue(); expect(issue().id).toBe(a.id); expect(created).toBe(1);
+    expect(enqueueParentWake(db, queued.value, a, FROZEN_CLOCK)).toBe(true);
+    expect(recoverParentWakesFromActivities(db,FROZEN_CLOCK)).toBe(0);
+    const send=recordingSend(); await flushParentWakes({db,send,now:FROZEN_CLOCK});
+    expect(send.calls).toHaveLength(1); expect(send.calls[0]!.text).toContain("Attach the exact normative artifact/version/hash");
+    expect(send.calls[0]!.threadId).toBe(family.live.attempt.threadId);
+    expect(listTrace(db,{jobId:queued.value.id}).records.some(r=>r.step==="lead.delivery"&&r.outcome==="succeeded")).toBe(true);
+    await flushParentWakes({db,send,now:FROZEN_CLOCK});expect(send.calls).toHaveLength(1);
+    resolveLaunchIssue(db,queued.value.id);expect(enqueueParentWake(db,queued.value,a,FROZEN_CLOCK)).toBe(false);
+    // A future recurrence is a new incident; resolving before dispatch prevents a stale instruction.
+    const b=issue();expect(b.id).not.toBe(a.id);enqueueParentWake(db,queued.value,b,FROZEN_CLOCK);resolveLaunchIssue(db,queued.value.id);
+    await flushParentWakes({db,send,now:FROZEN_CLOCK});expect(send.calls).toHaveLength(1); db.close();
+  });
+});

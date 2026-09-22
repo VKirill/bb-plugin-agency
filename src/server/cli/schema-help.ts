@@ -17,6 +17,7 @@ bb agency session get|save --input-json '<payload>'
 bb agency job create|get|update|assign|transition|attach-input|depend|undepend|next-step|report-needs-input|answer-needs-input|stale-answer|ask-owner|attempts|comment ...
 bb agency artifact create|publish|open|accept|versions ...
 bb agency launch prepare|get|reconcile|cancel|interpret-completion|readiness|attempts ...
+bb agency trace --input-json '{"jobId":"AG-177","limit":50}' [--json]
 bb agency status [--json]
 bb agency notify <project-id> <event-id> <topic> <reference> [--json]
 bb agency notify-owner --input-json '{"text":"…","jobId":"AG-12"}'
@@ -55,6 +56,7 @@ export const CLI_COMMAND_SPECS = [
   { name: "usage", summary: "Токены и оценка стоимости; rootJobId — задача с подзадачами", usage: "bb agency usage --input-json '{\"rootJobId\":\"<jobId>\"}'" },
   { name: "artifact", summary: "Версии файлов", usage: "bb agency artifact create|publish|open|accept|versions" },
   { name: "launch", summary: "prepare/get/reconcile/cancel; готовность — launch readiness этого instance", usage: "bb agency launch prepare|get|reconcile|cancel|readiness" },
+  { name: "trace", summary: "Причины решений, попытки и повторы по дереву задачи", usage: "bb agency trace --input-json '{\"jobId\":\"AG-177\"}' [--json]" },
   { name: "status", summary: "runtime + requires_readiness; не grant, смотри launch readiness с jobId", usage: "bb agency status [--json]" },
   { name: "notify", summary: "Сохранить уведомление без запуска", usage: "bb agency notify <project-id> <event-id> <topic> <reference> [--json]" },
   { name: "notify-owner", summary: "Сообщение владельцу во «Входящие» и Telegram", usage: "bb agency notify-owner --input-json '{\"text\":\"…\",\"level\":\"warning\",\"jobId\":\"AG-12\",\"dedupeKey\":\"…\"}'" },

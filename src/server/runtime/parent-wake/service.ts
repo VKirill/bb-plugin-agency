@@ -1,3 +1,5 @@
+import { readLaunchIssue } from "../launch-queue/issues";
+import { recordTrace } from "../trace/store";
 import { latestReviewText, parseReviewVerdict } from "../conveyor/verdict.js";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { createRepositories } from "../../db/repositories.js";
@@ -80,6 +82,8 @@ type WakeRow = {
 type ClaimedWake = { row: WakeRow; sendNow: boolean };
 
 function wakeStateFromActivity(row: Activity): string | null {
+  if (row.kind === "comment" && row.references.some(ref => ref.type === "launch_issue"))
+    return row.references.find(ref => ref.type === "job_state")?.id ?? null;
   if (row.kind !== "job_transitioned") return null;
   const ref = row.references.find((item) => item.type === "job_state");
   if (!ref || !PARENT_WAKE_STATES.has(ref.id)) return null;
@@ -129,6 +133,11 @@ function latestJobTransitioned(db: SqlDatabase, jobId: string): Activity | null 
 }
 
 function isCurrentTransitionCausation(db: SqlDatabase, jobId: string, activityId: string, causationId: string): boolean {
+  const issue = readLaunchIssue(db, jobId);
+  if (issue?.activity_id === activityId && causationId === activityId) {
+    const current = createRepositories(db).job.get(jobId);
+    return Boolean(current && current.revision === issue.revision && (current.state === "queued" || current.state === "backlog"));
+  }
   const latest = latestJobTransitioned(db, jobId);
   if (!latest) return false;
   return latest.id === activityId && causationId === latest.id;
@@ -200,7 +209,7 @@ export function enqueueParentWake(db: SqlDatabase, child: Job, activity: Activit
   // Automatic QC children are conveyor traffic. Pinging the lead on every
   // «done» burned a planning turn on a status the lead does not act on.
   if (isAutoReviewChild(db, child.id)) {
-    const needsLead = childState === "blocked" || childState === "waiting_input" ||
+    const needsLead = activity.references.some(ref => ref.type === "launch_issue") || childState === "blocked" || childState === "waiting_input" ||
       (childState === "done" && parseReviewVerdict(latestReviewText(db, child.id)) !== "accept");
     if (!needsLead) return false;
   }
@@ -243,6 +252,11 @@ export function recoverParentWakesFromActivities(db: SqlDatabase, now: string): 
     const latest = latestJobTransitioned(db, jobId);
     if (!latest) continue;
     if (enqueueParentWake(db, child, latest, now)) inserted += 1;
+  }
+  const issues = db.prepare("SELECT activity_json, job_id FROM agency_launch_issue").all() as Array<{ activity_json: string; job_id: string }>;
+  for (const issue of issues) {
+    const child = repos.job.get(issue.job_id);
+    if (child && enqueueParentWake(db, child, JSON.parse(issue.activity_json) as Activity, now)) inserted++;
   }
   return inserted;
 }
@@ -359,7 +373,9 @@ export async function flushParentWakes(deps: {
             { key: row.child_key, state: row.child_state },
             row.activity_id,
             "en",
-            loopWakeNote(latestLoopMark(deps.db, rootJobId(deps.db, row.parent_job_id)), "en"),
+            readLaunchIssue(deps.db, row.child_job_id)?.activity_id === row.activity_id
+              ? (JSON.parse(readLaunchIssue(deps.db, row.child_job_id)!.activity_json) as Activity).comment
+              : loopWakeNote(latestLoopMark(deps.db, rootJobId(deps.db, row.parent_job_id)), "en"),
           ),
         });
       } else {
@@ -379,5 +395,9 @@ export async function flushParentWakes(deps: {
       outcome = { kind: "unknown", code: "send_transport", message: item.sendNow ? "send failed" : "recover failed" };
     }
     deps.db.transaction(() => writeOutcome(deps.db, row, outcome, deps.now))();
+    recordTrace(deps.db, { jobId: row.child_job_id, relatedJobId: row.parent_job_id, step: "lead.delivery",
+      outcome: outcome.kind === "confirmed" || outcome.kind === "recovered" ? "succeeded" : "failed",
+      reason: outcome.kind, requestId: row.activity_id, attemptId: row.parent_attempt_id, launchId: row.parent_launch_id, threadId: row.parent_thread_id,
+      facts: { delivery: "delivery" in outcome ? outcome.delivery : outcome.kind }, collapse: true });
   }
 }

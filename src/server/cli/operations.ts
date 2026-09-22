@@ -1,3 +1,4 @@
+import { traceQuerySchema } from "../../shared/contracts/trace";
 import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../shared/rpc-contract";
 import { saveDecisionSettingsInputSchema, addJobDependencyRpcSchema, notifyOwnerInputSchema, ownerDigestInputSchema, removeJobDependencyRpcSchema, listKnowledgeInputSchema, saveKnowledgeInputSchema, listIdeasInputSchema, saveIdeaInputSchema, setIdeaStatusInputSchema, spawnIdeaThreadInputSchema, setJobNextStepRpcSchema } from "../../shared/rpc-contract";
 import { dequeueLaunchRpcSchema, enqueueLaunchRpcSchema } from "../../shared/rpc-contract";
@@ -109,6 +110,7 @@ export const CLI_OPERATIONS = {
   getDecisionSettings: { input: emptyObjectSchema, summary: "Оценщик: настройки, точки решения, журнал, состояние ключа и имена переменных Env Catalog" },
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, summary: "Включить оценщика, выбрать модель, имя ключа и точки решения; expectedRevision из getDecisionSettings" },
   testDecisionModel: { input: emptyObjectSchema, summary: "Задать оценщику один вопрос и показать ответ, уверенность и время" },
+  listTrace: { input: traceQuerySchema, summary: "Трассировка задачи и подзадач: решения, причины, попытки, длительность и повторы; только владелец" },
   listDecisionLog: { input: z.object({ limit: z.number().int().min(1).max(200).optional() }).strict(), summary: "Журнал оценщика: точка, задача, исход, ответы с уверенностью и время" },
   probeDecisionPoints: { input: emptyObjectSchema, summary: "Живая проверка оценки на входе, подсказки к запуску и привратника сдачи на учебных брифах без запуска сотрудника" },
   listGoals: { input: emptyObjectSchema, summary: "Цели над главными задачами с прогрессом" },

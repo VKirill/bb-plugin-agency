@@ -1,3 +1,5 @@
+import { LAUNCH_ISSUE_MIGRATION } from "../runtime/launch-queue/issues";
+import { TRACE_MIGRATION } from "../runtime/trace/store";
 import { SAVED_VIEWS_MIGRATION } from "../insights/archive";
 import { SANDBOX_ESCAPE_MIGRATION } from "../runtime/sandbox-escape/service";
 import { NEXT_STEP_MIGRATION } from "../flow/service";
@@ -737,6 +739,8 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   `ALTER TABLE agency_job ADD COLUMN rework_of_job_id TEXT REFERENCES agency_job(id)`,
   `ALTER TABLE agency_loop_mark ADD COLUMN work_job_id TEXT REFERENCES agency_job(id)`,
   `CREATE TABLE agency_handin_hold (job_id TEXT NOT NULL REFERENCES agency_job(id), hash TEXT NOT NULL, remark TEXT NOT NULL, PRIMARY KEY (job_id, hash))`,
+  TRACE_MIGRATION,
+  LAUNCH_ISSUE_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

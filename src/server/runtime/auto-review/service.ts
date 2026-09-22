@@ -1,3 +1,4 @@
+import { recordTrace } from "../trace/store";
 import type { DomainResult } from "../../../domain";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -70,6 +71,7 @@ export async function startAutoReview(ports: AutoReviewPorts, jobId: string): Pr
   const finish = (outcome: string, reviewJobId: string | null) =>
     ports.db.prepare(`UPDATE agency_auto_review SET outcome = ?, review_job_id = ? WHERE job_id = ? AND hash = ?`).run(outcome, reviewJobId, job.id, version.hash);
   const failWith = (reason: string): AutoReviewOutcome => {
+    recordTrace(ports.db, { jobId, step: "review.create", outcome: "failed", reason: "creation_or_input_failed", artifactHash: version.hash });
     finish("failed", null);
     ports.comment(
       job,
@@ -102,6 +104,7 @@ export async function startAutoReview(ports: AutoReviewPorts, jobId: string): Pr
   }
   const queued = ports.queue(ports.getJob(review.value.id) ?? review.value);
   finish(queued.ok ? "queued" : "created", review.value.id);
+  recordTrace(ports.db, { jobId, step: "review.create", outcome: queued.ok ? "succeeded" : "failed", reason: queued.ok ? "queued" : queued.error.code, relatedJobId: review.value.id, artifactHash: version.hash, facts: { count: inputs.length } });
   ports.comment(
     job,
     en
