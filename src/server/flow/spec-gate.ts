@@ -73,8 +73,21 @@ export function collectSpecGateInput(db: SqlDatabase, job: Pick<Job, "id" | "dep
   rootId: string;
   input: SpecGateInput;
 } {
-  const rootId = resolveRootJobId(db, job.id);
+  // A system-created QC job inherits launch admission only through its exact source version.
+  // This also repairs existing reviews created before normative inputs were copied.
+  const reviewed = db.prepare(`SELECT q.job_id FROM agency_auto_review q
+    JOIN agency_job_input_ref i ON i.target_job_id = q.review_job_id AND i.source_job_id = q.job_id AND i.hash = q.hash
+    WHERE q.review_job_id = ? LIMIT 1`).get(job.id) as { job_id: string } | undefined;
+  const gateJobId = reviewed?.job_id ?? job.id;
+  const rootId = resolveRootJobId(db, gateJobId);
   const root = readJobRow(db, rootId);
+  const work = db.prepare(`SELECT work_kind, contract_json, parent_job_id FROM agency_job WHERE id = ?`).get(gateJobId) as
+    { work_kind: string | null; contract_json: string | null; parent_job_id: string | null } | undefined;
+  let boundedInvestigation = false;
+  try {
+    const contract = JSON.parse(work?.contract_json ?? "null");
+    boundedInvestigation = Boolean(work?.parent_job_id && contract?.mayChange?.length && contract?.mustNotTouch?.length && contract?.checks?.length);
+  } catch { /* A malformed legacy contract grants no exemption. */ }
   const specDepartmentId = normalizeSpecDepartmentId(rules.specDepartmentId);
   const tree = listTreeRows(db, rootId);
   const specJobs = specDepartmentId
@@ -90,12 +103,14 @@ export function collectSpecGateInput(db: SqlDatabase, job: Pick<Job, "id" | "dep
     rootId,
     input: {
       rootWorkKind: root?.work_kind ?? null,
+      jobWorkKind: work?.work_kind ?? null,
+      boundedInvestigation,
       jobDepartmentId: job.departmentId,
       specDepartmentId,
       gatedDepartmentIds: normalizeGatedDepartmentIds(rules.specGatedDepartmentIds),
       specJobs,
-      inputs: listJobInputs(db, job.id),
-      waitsFor: dependencyLinks(db, job.id).waitsFor.map((link) => link.jobId),
+      inputs: listJobInputs(db, gateJobId),
+      waitsFor: dependencyLinks(db, gateJobId).waitsFor.map((link) => link.jobId),
     },
   };
 }

@@ -1,3 +1,4 @@
+import { reworkRoundCount } from "../runtime/rework/lineage.js";
 import { knowledgeBlock } from "../knowledge/store";
 import { getPassport } from "../projects/passport.js";
 import { passportDeliveryFor, passportText } from "../../shared/passport.js";
@@ -411,28 +412,18 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     return repos.membership.get(departmentId, agentId)?.role ?? null;
   }
 
-  /**
-   * Rework rounds under one main job: executor subtasks created after the first
-   * review subtask. Past the department limit the lead asks the owner instead of
-   * opening another round.
-   */
-  function assertReworkRoundAllowed(parentJobId: string, departmentId: string, assignedAgentId: string | null): DomainResult<true> {
-    if (memberRole(departmentId, assignedAgentId) !== "executor") return ok(true);
-    const siblings = db
-      .prepare(`SELECT department_id, assigned_agent_id FROM agency_job WHERE parent_job_id = ? ORDER BY rowid`)
-      .all(parentJobId) as Array<{ department_id: string; assigned_agent_id: string | null }>;
-    const firstReview = siblings.findIndex((row) => memberRole(row.department_id, row.assigned_agent_id) === "reviewer");
-    if (firstReview < 0) return ok(true);
-    const rounds = siblings.slice(firstReview + 1).filter((row) => memberRole(row.department_id, row.assigned_agent_id) === "executor").length;
-    const parent = repos.job.get(parentJobId);
-    const limit = rulesForDepartment(db, parent?.departmentId ?? departmentId).reworkLimit;
-    if (rounds >= limit) {
-      return fail(
-        "rework_limit_reached",
-        `${rounds} rework round(s) already under this job, the department limit is ${limit}. Pick the best of the versions already made, say in a comment why it is the best and what it lacks, and hand it to the owner with report-needs-input instead of another round.`,
-      );
+  /** Count explicitly linked rework of the same result, never unrelated siblings. */
+  function assertReworkRoundAllowed(sourceId: string | null | undefined, parentJobId: string | null, departmentId: string, bindingId: string): DomainResult<string | null> {
+    if (!sourceId) return ok(null);
+    const source = repos.job.get(sourceId);
+    if (!source || source.parentJobId !== parentJobId || source.departmentId !== departmentId || source.bindingId !== bindingId) {
+      return fail("invalid_rework_source", "reworkOfJobId must name work in the same department and under the same parent");
     }
-    return ok(true);
+    const lineId = source.reworkOfJobId ?? source.id;
+    const count = reworkRoundCount(db, lineId);
+    const limit = rulesForDepartment(db, departmentId).reworkLimit;
+    if (count >= limit) return fail("rework_limit_reached", `${count} rework round(s) already on this result, department limit ${limit}. Resolve the cause before another round.`);
+    return ok(lineId);
   }
 
   /** Attempt states with a thread that may still be working. */
@@ -1419,7 +1410,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           const placed = assertSubtaskPlacement(parent.value, parsed.data.bindingId, assignedAgentId);
           if (!placed.ok) return placed;
           const root = rootJobId(parent.value.id);
-          const mark = latestLoopMark(db, root);
+          const source = parsed.data.reworkOfJobId ? repos.job.get(parsed.data.reworkOfJobId) : null;
+          const mark = source ? latestLoopMark(db, root, source.reworkOfJobId ?? source.id) : null;
           if (loopEffect(mark) === "block") {
             announceLoopBlock(db, root);
             return fail(
@@ -1442,10 +1434,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (!helperWork.ok) return helperWork;
         const helperCaller = assertCallerMayDelegate(ctx);
         if (!helperCaller.ok) return helperCaller;
-        if (parsed.data.parentJobId) {
-          const round = assertReworkRoundAllowed(parsed.data.parentJobId, parsed.data.departmentId, assignedAgentId);
-          if (!round.ok) return round;
-        }
+        const round = assertReworkRoundAllowed(parsed.data.reworkOfJobId, parsed.data.parentJobId, parsed.data.departmentId, parsed.data.bindingId);
+        if (!round.ok) return round;
         if (parsed.data.originThreadId && !isOriginThreadId(parsed.data.originThreadId)) {
           return fail("invalid_command", "originThreadId must be a BB thread id");
         }
@@ -1481,6 +1471,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           ...(parsed.data.contract && !contractIsEmpty(parsed.data.contract) ? { contract: parsed.data.contract } : {}),
           ...(parsed.data.workProfileKey ? { workProfileKey: parsed.data.workProfileKey } : {}),
           ...(parsed.data.workKind ? { workKind: parsed.data.workKind } : {}),
+          ...(round.value ? { reworkOfJobId: round.value } : {}),
           ...(originThreadId ? { originThreadId } : {}),
           revision: 1,
           updatedAt: nowUtc(ctx),

@@ -121,6 +121,8 @@ export function verifyLiveLaunchIdentity(
     snapshot.job.title !== job.title ||
     snapshot.job.briefHash !== sha256Hex(job.brief) ||
     snapshot.job.acceptanceHash !== sha256Hex(job.acceptance) ||
+    (snapshot.job.workKind !== undefined && snapshot.job.workKind !== (job.workKind ?? null)) ||
+    (snapshot.job.reworkOfJobId !== undefined && snapshot.job.reworkOfJobId !== (job.reworkOfJobId ?? null)) ||
     (snapshot.job.contractHash ?? null) !== (contractText(job.contract) ? sha256Hex(contractText(job.contract)) : null)
   ) {
     return fail("live_job_mismatch", "snapshot job assignee/department/content does not match live record");

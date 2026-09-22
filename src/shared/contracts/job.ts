@@ -17,7 +17,7 @@ export const jobStateSchema = z.enum([
 
 export const jobPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 
-export const WORK_KINDS = ["new-program", "feature", "bugfix"] as const;
+export const WORK_KINDS = ["new-program", "feature", "bugfix", "discovery", "spike"] as const;
 export const workKindSchema = z.enum(WORK_KINDS);
 export type WorkKind = z.infer<typeof workKindSchema>;
 
@@ -82,6 +82,8 @@ export const jobSchema = revisionedRecordSchema
     sectionId: knowledgeSectionIdSchema.nullable().optional(),
     /** How the work is classified; absent on older jobs. */
     workKind: workKindSchema.nullable().optional(),
+    /** Explicit rework lineage; unrelated next-stage tasks do not consume rework rounds. */
+    reworkOfJobId: opaqueIdSchema.nullable().optional(),
     assignedAgentId: opaqueIdSchema.nullable(),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
@@ -150,6 +152,8 @@ export const createJobCommandSchema = createCommandSchema
     parentJobId: opaqueIdSchema.nullable().default(null),
     sectionId: knowledgeSectionIdSchema.nullable().optional(),
     workKind: workKindSchema.nullable().optional(),
+    /** Explicit rework lineage; unrelated next-stage tasks do not consume rework rounds. */
+    reworkOfJobId: opaqueIdSchema.nullable().optional(),
     assignedAgentId: opaqueIdSchema.nullable().default(null),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),

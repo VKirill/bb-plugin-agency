@@ -92,6 +92,39 @@ function setup() {
 }
 
 describe("spec gate at launch and create", () => {
+  it("admits a bounded technical spike before the spec, but not an unbounded or implementation job", () => {
+    const { db, job, enableRule, launchGate } = setup();
+    enableRule();
+    const root = job("Программа", { workKind: "new-program" });
+    const contract = { mayChange: ["fixtures/spike/**"], mustNotTouch: ["src/**"], checks: ["node fixtures/spike/check.js"] };
+    const spike = job("Проверить SDK", { parentJobId: root.id, workKind: "spike", contract });
+    expect(launchGate(spike).ok).toBe(true);
+    const discovery = job("Прочитать SDK", { parentJobId: root.id, workKind: "discovery", contract });
+    expect(launchGate(discovery).ok).toBe(true);
+    expect(launchGate(job("Без границ", { parentJobId: root.id, workKind: "spike" })).ok).toBe(false);
+    expect(launchGate(job("Реализация", { parentJobId: root.id, workKind: "feature", contract })).ok).toBe(false);
+    db.close();
+  });
+
+  it("admits an existing system QC only through its exact source version and the source's normative input", () => {
+    const { db, job, enableRule, launchGate, specDepartmentId, acceptSpec, attachInput } = setup();
+    enableRule();
+    const root = job("Программа", { workKind: "new-program" });
+    const spec = job("Спецификация", { parentJobId: root.id, departmentId: specDepartmentId });
+    const accepted = acceptSpec(spec);
+    const work = job("Код", { parentJobId: root.id });
+    attachInput(work, spec, accepted);
+    const qc = job("Проверка кода", { parentJobId: root.id });
+    const version = { artifactId: "art_workreview01", version: 1, hash: "cd".repeat(32) };
+    attachInput(qc, work, version);
+    expect(launchGate(qc).ok).toBe(false); // arbitrary input does not confer exemption
+    db.prepare(`INSERT INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at) VALUES (?, ?, ?, 'queued', '2026-09-22T00:00:00.000Z')`).run(work.id, version.hash, qc.id);
+    expect(launchGate(qc).ok).toBe(true);
+    db.prepare(`UPDATE agency_job_input_ref SET hash = ? WHERE target_job_id = ?`).run("ef".repeat(32), qc.id);
+    expect(launchGate(qc).ok).toBe(false);
+    db.close();
+  });
+
   it("(а) правило выключено при пустых настройках", () => {
     const { db, s, job, launchGate } = setup();
     const root = job("Программа", { workKind: "new-program" });
@@ -103,7 +136,7 @@ describe("spec gate at launch and create", () => {
     db.close();
   });
 
-  it("(б) корень new-program: подзадача отдела из списка без задачи спецификаций → spec_required, кода нет в WAIT_CODES", () => {
+  it("(б) корень new-program: подзадача отдела из списка без задачи спецификаций → spec_required, ожидает вход в очереди", () => {
     const { db, enableRule, job, launchGate } = setup();
     enableRule();
     const root = job("Программа", { workKind: "new-program" });
@@ -113,7 +146,7 @@ describe("spec gate at launch and create", () => {
     if (refused.ok) return;
     expect(refused.error.code).toBe("spec_required");
     expect(refused.error.message).toContain("no_spec_job");
-    expect(WAIT_CODES.has("spec_required")).toBe(false);
+    expect(WAIT_CODES.has("spec_required")).toBe(true);
     db.close();
   });
 

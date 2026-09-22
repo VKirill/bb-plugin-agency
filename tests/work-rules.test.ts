@@ -68,7 +68,7 @@ describe("work rules", () => {
     const s = seed(db);
     s.store.saveWorkRules(s.bootstrap, { requestId: randomUUID(), scope: `department:${s.departmentId}`, expectedRevision: 0, rules: { reworkLimit: 1 } });
     const main = s.job("Главная", s.lead);
-    const child = (title: string, agentId: string) =>
+    const child = (title: string, agentId: string, reworkOfJobId?: string) =>
       s.store.createJob(s.ctx, {
         requestId: randomUUID(),
         bindingId: main.bindingId,
@@ -78,13 +78,19 @@ describe("work rules", () => {
         acceptance: "Критерий.",
         parentJobId: main.id,
         assignedAgentId: agentId,
+        reworkOfJobId,
         priority: "normal",
         dueAt: null,
       });
-    expect(child("Реализация", s.developer).ok).toBe(true);
+    const work = child("Реализация", s.developer);
+    if (!work.ok) throw new Error(work.error.message);
     expect(child("Проверка", s.reviewer).ok).toBe(true);
-    expect(child("Доработка 1", s.developer).ok).toBe(true);
-    const second = child("Доработка 2", s.developer);
+    const first = child("Доработка 1", s.developer, work.value.id);
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error(first.error.message);
+    expect(s.store.getJob(first.value.id)?.reworkOfJobId).toBe(work.value.id);
+    expect(child("Другой компонент", s.developer).ok).toBe(true);
+    const second = child("Доработка 2", s.developer, first.value.id);
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.error.code).toBe("rework_limit_reached");
     db.close();

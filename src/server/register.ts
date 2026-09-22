@@ -646,6 +646,13 @@ export function registerAgency(bb: BbPluginApi) {
           title: text.title,
           brief: text.brief,
           acceptance: text.acceptance,
+          ...(job.contract ? { contract: {
+            readFirst: job.contract.readFirst,
+            interfaces: job.contract.interfaces,
+            checks: job.contract.checks,
+            mayChange: [".agency/jobs/<own-key>/**"],
+            mustNotTouch: ["Reviewed source files and user configuration. Report defects; do not repair them."],
+          } } : {}),
           parentJobId: job.parentJobId ?? job.id,
           assignedAgentId: null,
           assignment: "reviewer",
@@ -656,7 +663,7 @@ export function registerAgency(bb: BbPluginApi) {
     },
     attachInput: async (review, job, version) =>
       (await domain.attachJobInput({
-        requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review-input:${review.id}:${version.hash}`),
+        requestId: uuidV5(LAUNCH_QUEUE_NAMESPACE, `auto-review-input:${review.id}:${job.id}:${version.artifactId}:${version.version}:${version.hash}`),
         expectedRevision: review.revision,
         targetJobId: review.id,
         sourceJobId: job.id,
@@ -1915,7 +1922,7 @@ export function registerAgency(bb: BbPluginApi) {
       },
       autoReview: autoReviewPorts(),
       handInGate: async (job) => {
-        if (store.memberRole(job.departmentId, job.assignedAgentId) !== "executor") {
+        if (!["executor", "lead"].includes(store.memberRole(job.departmentId, job.assignedAgentId) ?? "")) {
           const row = appendDecisionLog(
             db,
             { point: "hand-in-gate", jobKey: job.key, outcome: "skipped", detail: "not_executor" },

@@ -8,6 +8,8 @@ export interface SpecGateVersionRef {
 
 export interface SpecGateInput {
   rootWorkKind: string | null;
+  jobWorkKind?: string | null;
+  boundedInvestigation?: boolean;
   jobDepartmentId: string;
   specDepartmentId: string | null;
   gatedDepartmentIds: readonly string[];
@@ -31,6 +33,7 @@ function isAcceptedSpecJob(job: { state: string; accepted: readonly SpecGateVers
 
 export function evaluateSpecGate(input: SpecGateInput): SpecGateResult {
   if (
+    ((input.jobWorkKind === "discovery" || input.jobWorkKind === "spike") && input.boundedInvestigation === true) ||
     input.rootWorkKind !== "new-program" ||
     input.specDepartmentId === null ||
     !input.gatedDepartmentIds.includes(input.jobDepartmentId) ||

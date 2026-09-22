@@ -83,7 +83,7 @@ const COPY = {
     cli: "CLI этой роли",
     cliIntro: "Все команды принимают `--input-json '<payload>'`; поля: `bb agency schema <operation>`. `requestId` — новый UUID на каждую команду.",
     cliSpare: "`bb agency job get` и `bb agency knowledge get` — запасной канал, когда пакета не хватило; задание уже здесь.",
-    verdict: "Первая строка отчёта: `Вердикт: принять` или `Вердикт: доработать`.",
+    verdict: "Первая строка отчёта И итогового комментария задачи: `Вердикт: принять` или `Вердикт: доработать`.",
   },
   en: {
     role: { lead: "lead", executor: "executor", reviewer: "reviewer", assistant: "assistant" } as Record<string, string>,
@@ -122,7 +122,7 @@ const COPY = {
     cli: "CLI for this role",
     cliIntro: "Every command takes `--input-json '<payload>'`; fields: `bb agency schema <operation>`. `requestId` is a fresh UUID per command.",
     cliSpare: "`bb agency job get` and `bb agency knowledge get` are the spare channel for when the pack falls short; the assignment is already here.",
-    verdict: "First line of the report: `Verdict: accept` or `Verdict: rework`.",
+    verdict: "First line of the report AND of the closing job comment: `Verdict: accept` or `Verdict: rework`.",
   },
 } as const;
 

@@ -196,6 +196,8 @@ export type ContextSnapshot = {
     passportHash?: string;
     /** Present when the job has an execution contract. */
     contractHash?: string;
+    workKind?: string | null;
+    reworkOfJobId?: string | null;
   };
   agentVersion: {
     id: string;

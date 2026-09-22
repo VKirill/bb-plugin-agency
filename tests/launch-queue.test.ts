@@ -165,7 +165,7 @@ describe("launch queue", () => {
     expect(listLaunchQueue(db)[0]?.waitingReason).toBe("skill hash stale");
   });
 
-  it("puts a dropped assigned job with no attempt back in line", () => {
+  it("does not retry a permanent refusal until its job revision changes", () => {
     const { db, s, job } = setup();
     const item = job("Сняли из-за навыка");
     const moved = s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: item.id, expectedRevision: item.revision, to: "queued" });
@@ -173,7 +173,10 @@ describe("launch queue", () => {
     enqueueLaunch(db, item.id, "2026-09-17T10:00:00.000Z");
     dropFromQueue(db, item.id, "skill hash stale", "2026-09-17T10:01:00.000Z");
     expect(listLaunchQueue(db)).toEqual([]);
-    expect(reopenDroppedAssignedJobs(db, "2026-09-17T10:02:00.000Z")).toEqual([item.id]);
+    expect(reopenDroppedAssignedJobs(db, "2026-09-17T10:02:00.000Z")).toEqual([]);
+    const updated = s.store.updateJob(s.ctx, { requestId: randomUUID(), jobId: item.id, expectedRevision: s.store.getJob(item.id)!.revision, brief: "Вход исправлен." });
+    expect(updated.ok).toBe(true);
+    expect(reopenDroppedAssignedJobs(db, "2026-09-17T10:03:00.000Z")).toEqual([item.id]);
     expect(listLaunchQueue(db).map((row) => row.jobId)).toEqual([item.id]);
   });
 

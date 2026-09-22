@@ -24,6 +24,7 @@ export const WAIT_CODES = new Set([
   "concurrency_limit_reached",
   "budget_exhausted",
   "dependencies_open",
+  "spec_required",
   "owns_overlap",
   "catalog_skill_hash_mismatch",
 ]);
@@ -61,6 +62,7 @@ export function reopenDroppedAssignedJobs(db: SqlDatabase, now: string): string[
          WHERE q.dropped_at IS NOT NULL
            AND j.state IN ('backlog', 'queued')
            AND j.assigned_agent_id IS NOT NULL
+           AND (j.revision > q.dropped_revision OR (q.dropped_revision IS NULL AND q.waiting_reason LIKE 'spec_required%'))
            AND NOT EXISTS (SELECT 1 FROM agency_run_attempt a WHERE a.job_id = j.id)`,
       )
       .all() as { id: string }[]
@@ -102,7 +104,7 @@ export function enqueueLaunch(db: SqlDatabase, jobId: string, now: string): void
  * loop, the reason stays visible, and the owner decides. A new `enqueueLaunch` starts it over.
  */
 export function dropFromQueue(db: SqlDatabase, jobId: string, reason: string, now: string): void {
-  db.prepare(`UPDATE agency_launch_queue SET dropped_at = ?, waiting_reason = ?, updated_at = ? WHERE job_id = ?`).run(now, reason, now, jobId);
+  db.prepare(`UPDATE agency_launch_queue SET dropped_at = ?, waiting_reason = ?, updated_at = ?, dropped_revision = (SELECT revision FROM agency_job WHERE id = agency_launch_queue.job_id) WHERE job_id = ?`).run(now, reason, now, jobId);
 }
 
 export function dequeueLaunch(db: SqlDatabase, jobId: string): boolean {

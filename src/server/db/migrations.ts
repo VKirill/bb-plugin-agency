@@ -733,6 +733,10 @@ CREATE INDEX agency_stale_nudge_job_idx ON agency_stale_nudge(job_id);
 CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   REVIEWER_THREAD_MIGRATION,
   LOOP_MARK_MIGRATION,
+  `ALTER TABLE agency_launch_queue ADD COLUMN dropped_revision INTEGER`,
+  `ALTER TABLE agency_job ADD COLUMN rework_of_job_id TEXT REFERENCES agency_job(id)`,
+  `ALTER TABLE agency_loop_mark ADD COLUMN work_job_id TEXT REFERENCES agency_job(id)`,
+  `CREATE TABLE agency_handin_hold (job_id TEXT NOT NULL REFERENCES agency_job(id), hash TEXT NOT NULL, remark TEXT NOT NULL, PRIMARY KEY (job_id, hash))`,
 ];
 
 function statementHash(sql: string): string {

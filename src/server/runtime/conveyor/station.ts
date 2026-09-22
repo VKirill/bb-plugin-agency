@@ -5,7 +5,7 @@ import { agencyLanguage } from "../../i18n/language.js";
 import type { ServiceContext } from "../../services/context.js";
 import type { AutoReviewOutcome, AutoReviewPorts, HandedInVersion } from "../auto-review/service.js";
 import { startAutoReview } from "../auto-review/service.js";
-import { parseReviewVerdict } from "./verdict.js";
+import { latestReviewText, parseReviewVerdict } from "./verdict.js";
 
 /** How long a queued QC station may sit before the conveyor closes the work. */
 export const STALE_REVIEW_MS = 30 * 60 * 1000;
@@ -26,7 +26,7 @@ export type ConveyorStore = {
   acceptArtifactVersion: (ctx: ServiceContext, input: AcceptInput) => DomainResult<ArtifactVersion>;
   transitionJob: (
     ctx: ServiceContext,
-    input: { requestId: string; expectedRevision: number; jobId: string; to: "canceled" },
+    input: { requestId: string; expectedRevision: number; jobId: string; to: "canceled" | "blocked" },
   ) => DomainResult<Job>;
 };
 
@@ -75,15 +75,6 @@ export function isAutoReviewJob(db: SqlDatabase, jobId: string): boolean {
   );
 }
 
-function latestComment(db: SqlDatabase, jobId: string): string {
-  const row = db
-    .prepare(
-      `SELECT comment FROM agency_activity WHERE job_id = ? AND kind = 'comment' AND comment IS NOT NULL ORDER BY rowid DESC LIMIT 1`,
-    )
-    .get(jobId) as { comment: string | null } | undefined;
-  return row?.comment?.trim() ?? "";
-}
-
 function autoReviewJobIds(db: SqlDatabase): Set<string> {
   const rows = db
     .prepare(`SELECT review_job_id FROM agency_auto_review WHERE review_job_id IS NOT NULL`)
@@ -103,8 +94,8 @@ export function productReadyMessage(
   const file = row?.relative_path ?? "";
   const en = agencyLanguage() === "en";
   const text = en
-    ? `The product is ready: ${job.key} «${job.title}».${file ? ` Result: ${file} (version ${result.version}).` : ""} Nothing to accept: the line has checked it. If it is not what you ordered, return ${job.key} with a remark.`
-    : `Продукт готов: ${job.key} «${job.title}».${file ? ` Результат: ${file} (версия ${result.version}).` : ""} Принимать ничего не нужно: линия его проверила. Если это не то, что заказывали, верните ${job.key} с замечанием.`;
+    ? `The product is ready: ${job.key} «${job.title}».${file ? ` Result: ${file} (version ${result.version}).` : ""} The final result is published and the required reviews are complete. If it is not what you ordered, return ${job.key} with a remark.`
+    : `Продукт готов: ${job.key} «${job.title}».${file ? ` Результат: ${file} (версия ${result.version}).` : ""} Итоговый результат опубликован, обязательные проверки завершены. Если это не то, что заказывали, верните ${job.key} с замечанием.`;
   // The hash keeps one message per delivered version: a reclaimed product is announced again.
   return { text, jobId: job.id, dedupeKey: `product-ready:${job.id}:${result.hash}` };
 }
@@ -137,6 +128,34 @@ function systemCtx(ctx: ServiceContext, bindingId: string): ServiceContext {
   return { actor: { kind: "system" }, allowedBindingIds: [bindingId], caller: undefined };
 }
 
+/** A parent's final version must be published after its working children finish. */
+function freshParentSummary(db: SqlDatabase, jobId: string): boolean {
+  const publication = db.prepare(`SELECT MAX(rowid) AS seq FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'`).get(jobId) as { seq: number | null };
+  const lastWork = db.prepare(`SELECT MAX(a.rowid) AS seq FROM agency_activity a JOIN agency_job j ON j.id = a.job_id
+    WHERE j.parent_job_id = ? AND a.kind IN ('job_created', 'artifact_published', 'job_transitioned')
+      AND NOT EXISTS (SELECT 1 FROM agency_auto_review q WHERE q.review_job_id = j.id)`).get(jobId) as { seq: number | null };
+  return lastWork.seq === null || (publication.seq !== null && publication.seq > lastWork.seq);
+}
+
+function stationReadyForAcceptance(ports: ClosePorts, job: Job): boolean {
+  if (openWorkChildren(ports.db, job.id) > 0) return false;
+  // Every automatic close, including sweep and parent cascade, shares the same gates.
+  if (!isAutoReviewJob(ports.db, job.id)) {
+    if (latestReviewerHoldsParent(ports, job.id)) return false;
+    const version = latestHandedInVersion(ports.db, job.id);
+    if (version && ports.db.prepare(`SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?`).get(job.id, version.hash)) return false;
+    const claim = version ? ports.db.prepare(`SELECT review_job_id FROM agency_auto_review WHERE job_id = ? AND hash = ?`)
+      .get(job.id, version.hash) as { review_job_id: string | null } | undefined : undefined;
+    if (claim) {
+      const qc = claim.review_job_id ? ports.store.getJob(claim.review_job_id) : undefined;
+      if (!qc || qc.state !== "done" || parseReviewVerdict(latestReviewText(ports.db, qc.id)) !== "accept") return false;
+    }
+    // An organisational report handed in before the work finished is not a final delivery.
+    if (!freshParentSummary(ports.db, job.id)) return false;
+  }
+  return true;
+}
+
 /**
  * Closes a station on its published version. `seed` names the reason; the request id also carries
  * the job revision, so a station that comes back (rework, reclamation) is closed again instead of
@@ -151,8 +170,7 @@ export function closeStation(ports: ClosePorts, jobId: string, seed: string): Do
     return ok(job);
   }
   if (job.state !== "review") return ok(null);
-  // A parent is not a product while its work children are on the line; the last child closes it.
-  if (openWorkChildren(ports.db, jobId) > 0) return ok(null);
+  if (!stationReadyForAcceptance(ports, job)) return ok(null);
   const version = latestHandedInVersion(ports.db, jobId);
   if (!version) {
     return fail("missing_transition_guard", `review ${job.key} has no published version to accept`);
@@ -180,6 +198,10 @@ export function closeStation(ports: ClosePorts, jobId: string, seed: string): Do
  * the parent closes when this was its last open work child. No second transition is asked of anyone.
  */
 export function acceptOnLine<T extends AcceptInput>(ports: ClosePorts, input: T): DomainResult<ArtifactVersion> {
+  const job = ports.store.getJob(input.jobId);
+  if (job && !stationReadyForAcceptance(ports, job)) {
+    return fail("acceptance_pending", "The result needs completed work, a fresh final report and an explicit passing review. / Нужны завершённые работы, свежий итоговый отчёт и положительное заключение проверки.");
+  }
   const accepted = ports.store.acceptArtifactVersion(ports.ctx, input);
   if (accepted.ok) {
     discardOpenReviews(ports, input.jobId);
@@ -234,13 +256,22 @@ export async function applyReviewHandIn(
   const work = ports.store.getJob(workJobId);
   const review = ports.store.getJob(reviewJobId);
   if (!work || !review) return "idle";
-  const verdict = parseReviewVerdict(latestComment(ports.db, reviewJobId));
+  const verdict = parseReviewVerdict(latestReviewText(ports.db, reviewJobId));
   const en = agencyLanguage() === "en";
+  if (verdict === "inconclusive") {
+    if (review.state === "review" && ports.returnForRework) {
+      const clarified = await ports.returnForRework(review, en
+        ? "The review has no explicit decision. Publish a new report with Verdict: accept or Verdict: rework and evidence; no additional implementation work is requested."
+        : "В заключении нет явного решения. Опубликуйте новую версию с «Вердикт: принять» или «Вердикт: доработать» и доказательствами; новую реализацию выполнять не нужно.");
+      if (clarified.ok) return "rework";
+    }
+    return "pending";
+  }
   if (review.state === "review") {
     closeStation(ports, review.id, "conveyor-qc-handin");
   }
   if (verdict === "rework") {
-    const remark = latestComment(ports.db, reviewJobId) || (en ? "QC: rework." : "ОТК: доработать.");
+    const remark = latestReviewText(ports.db, reviewJobId) || (en ? "QC: rework." : "ОТК: доработать.");
     if (ports.returnForRework) {
       const returned = await ports.returnForRework(work, remark);
       if (returned.ok) {
@@ -296,38 +327,34 @@ function membershipRole(db: SqlDatabase, departmentId: string, agentId: string |
   return row?.role ?? null;
 }
 
-/** The newest comment that actually carries a verdict line. Later conveyor notes do not count. */
-function latestVerdictText(db: SqlDatabase, jobId: string): string {
-  const rows = db
-    .prepare(
-      `SELECT comment FROM agency_activity WHERE job_id = ? AND kind = 'comment' AND comment IS NOT NULL ORDER BY rowid DESC`,
-    )
-    .all(jobId) as Array<{ comment: string }>;
-  const line = /(?:вердикт|verdict)\s*[:：]?\s*(?:принять|accept|доработать|rework|return)/i;
-  for (const row of rows) {
-    if (line.test(row.comment)) return row.comment;
-  }
-  return rows[0]?.comment?.trim() ?? "";
-}
-
 function reviewerRework(ports: ClosePorts, jobId: string): boolean {
   const job = ports.store.getJob(jobId);
   if (!job || membershipRole(ports.db, job.departmentId, job.assignedAgentId) !== "reviewer") return false;
-  return parseReviewVerdict(latestVerdictText(ports.db, jobId)) === "rework";
+  return parseReviewVerdict(latestReviewText(ports.db, jobId)) === "rework";
 }
 
 /** The last reviewer on the line asked for rework. Their report stays; the product stays open. */
 function latestReviewerHoldsParent(ports: ClosePorts, parentId: string): boolean {
-  const siblings = ports.db
-    .prepare(`SELECT id FROM agency_job WHERE parent_job_id = ? ORDER BY rowid`)
-    .all(parentId) as Array<{ id: string }>;
+  // Automatic QC is checked by its exact work/version claim. Old QC siblings must not
+  // block a later accepted version or an unrelated next stage.
+  const siblings = ports.db.prepare(`SELECT j.id FROM agency_job j
+    WHERE j.parent_job_id = ? AND j.state != 'canceled'
+      AND NOT EXISTS (SELECT 1 FROM agency_auto_review q WHERE q.review_job_id = j.id)
+    ORDER BY j.rowid`).all(parentId) as Array<{ id: string }>;
   let lastReviewerId: string | null = null;
   for (const row of siblings) {
     const job = ports.store.getJob(row.id);
-    if (!job) continue;
-    if (membershipRole(ports.db, job.departmentId, job.assignedAgentId) === "reviewer") lastReviewerId = job.id;
+    if (job && membershipRole(ports.db, job.departmentId, job.assignedAgentId) === "reviewer") lastReviewerId = job.id;
   }
-  return lastReviewerId !== null && parseReviewVerdict(latestVerdictText(ports.db, lastReviewerId)) === "rework";
+  if (!lastReviewerId || parseReviewVerdict(latestReviewText(ports.db, lastReviewerId)) === "accept") return false;
+  // The lead may have handed those defects to a subsequent working stage (AG-187 → AG-188).
+  // Only completed work that explicitly consumed that report supersedes it, not any later sibling.
+  const successor = ports.db.prepare(`SELECT j.id FROM agency_job j JOIN agency_job_input_ref i ON i.target_job_id = j.id
+    LEFT JOIN agency_membership m ON m.department_id = j.department_id AND m.agent_id = j.assigned_agent_id
+    WHERE j.parent_job_id = ? AND j.state = 'done' AND COALESCE(m.role, '') != 'reviewer'
+      AND i.source_job_id = ? AND j.rowid > (SELECT rowid FROM agency_job WHERE id = ?) LIMIT 1`)
+    .get(parentId, lastReviewerId, lastReviewerId);
+  return !successor;
 }
 
 export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): Promise<ConveyorAdvance> {
@@ -341,6 +368,8 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
   if (job && ports.handInGate && ports.returnForRework) {
     const gate = await ports.handInGate(job);
     if (gate?.action === "rework") {
+      const version = latestHandedInVersion(ports.db, job.id);
+      if (version) ports.db.prepare(`INSERT OR REPLACE INTO agency_handin_hold (job_id, hash, remark) VALUES (?, ?, ?)`).run(job.id, version.hash, gate.remark);
       const returned = await ports.returnForRework(job, gate.remark);
       if (returned.ok) {
         const en = agencyLanguage() === "en";
@@ -352,10 +381,12 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
         );
         return "rework";
       }
+      return "pending"; // An undeliverable return cannot turn rejection into acceptance.
     }
   }
   const outcome: AutoReviewOutcome = await startAutoReview(ports.autoReview, jobId);
   if (outcome === "created" || outcome === "pending") return outcome;
+  if (outcome === "failed") return "pending";
   if (job && !job.parentJobId && latestReviewerHoldsParent(ports, job.id)) {
     const en = agencyLanguage() === "en";
     ports.comment(
@@ -377,11 +408,7 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
         ? en
           ? "Conveyor: this review report does not accept the product. A loop mark can refuse the next station."
           : "Конвейер: этот отчёт проверки продукт не закрывает. Стоп круга может не пустить следующую станцию."
-        : outcome === "failed"
-          ? en
-            ? "Conveyor: automatic QC failed; the station is closed on the published version."
-            : "Конвейер: автопроверка не создалась; станция закрыта по опубликованной версии."
-          : en
+        : en
             ? "Conveyor: QC is not required for this station; the published version is accepted."
             : "Конвейер: ОТК этой станции не нужно; опубликованная версия принята.",
     );
@@ -389,74 +416,36 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
   return closedNow(closed) ? "closed" : "idle";
 }
 
-type AutoReviewRow = {
-  job_id: string;
-  review_job_id: string | null;
-  outcome: string;
-  created_at: string;
-};
-
 export function sweepStaleReviewStations(ports: ConveyorPorts): number {
-  const now = Date.parse(ports.now?.() ?? new Date().toISOString());
-  const staleMs = ports.staleMs ?? STALE_REVIEW_MS;
-  const jobs = ports.db
-    .prepare(`SELECT id FROM agency_job WHERE state = 'review'`)
-    .all() as Array<{ id: string }>;
+  const jobs = ports.db.prepare(`SELECT id FROM agency_job WHERE state = 'review'`).all() as Array<{ id: string }>;
   let closed = 0;
-  const en = agencyLanguage() === "en";
   for (const row of jobs) {
+    if (isAutoReviewJob(ports.db, row.id)) continue;
     const job = ports.store.getJob(row.id);
-    if (!job || job.state !== "review") continue;
-    if (isAutoReviewJob(ports.db, job.id)) {
-      const workId = workJobIdForReview(ports.db, job.id);
-      const work = workId ? ports.store.getJob(workId) : undefined;
-      if (work && CLOSED.has(work.state)) {
-        if (closedNow(closeStation(ports, job.id, "conveyor-orphan-qc"))) closed += 1;
-      }
-      continue;
-    }
-    const claim = ports.db
-      .prepare(`SELECT job_id, review_job_id, outcome, created_at FROM agency_auto_review WHERE job_id = ? ORDER BY rowid DESC LIMIT 1`)
-      .get(job.id) as AutoReviewRow | undefined;
+    if (!job) continue;
+    const version = latestHandedInVersion(ports.db, job.id);
+    const claim = version ? ports.db.prepare(`SELECT review_job_id, created_at FROM agency_auto_review WHERE job_id = ? AND hash = ?`).get(job.id, version.hash) as { review_job_id: string | null; created_at: string } | undefined : null;
     if (claim?.review_job_id) {
-      const review = ports.store.getJob(claim.review_job_id);
-      const reviewAge = Date.parse(claim.created_at);
-      const stuck =
-        !review ||
-        review.state === "blocked" ||
-        review.state === "canceled" ||
-        (!Number.isNaN(reviewAge) && now - reviewAge >= staleMs);
-      if (!stuck) continue;
-      // A held parent (open subtasks) is not closed and gets no comment on every sweep.
-      if (closedNow(closeStation(ports, job.id, "conveyor-stale"))) {
-        closed += 1;
-        ports.comment(
-          job,
-          en
-            ? `Conveyor: QC ${review?.key ?? claim.review_job_id} stalled; the work station is closed.`
-            : `Конвейер: проверка ${review?.key ?? claim.review_job_id} зависла; рабочая станция закрыта.`,
-        );
+      const qc = ports.store.getJob(claim.review_job_id);
+      const now = Date.parse(ports.now?.() ?? new Date().toISOString());
+      if (qc && (qc.state === "queued" || qc.state === "backlog") && now - Date.parse(claim.created_at) >= (ports.staleMs ?? STALE_REVIEW_MS)) {
+        const blocked = ports.store.transitionJob(systemCtx(ports.ctx, qc.bindingId), {
+          requestId: ports.requestId(`conveyor-qc-stalled:${qc.id}:${qc.revision}`), expectedRevision: qc.revision, jobId: qc.id, to: "blocked",
+        });
+        if (blocked.ok) ports.comment(qc, agencyLanguage() === "en" ? "QC could not start within 30 minutes. The lead must restore its inputs or execution. The work remains unaccepted." : "Проверка не запустилась за 30 минут. Руководителю нужно восстановить входы или запуск. Результат работы не принят.");
       }
-      continue;
     }
-    const handed = Date.parse(job.updatedAt);
-    if (!Number.isNaN(handed) && now - handed < 120_000 && !claim) continue;
-    if (closedNow(closeStation(ports, job.id, "conveyor-no-qc"))) closed += 1;
+    // Do not race hand-in evaluation or silently skip a required QC that has not been created yet.
+    if (!claim) {
+      if (job.assignedAgentId && ports.autoReview.enabled(job) && ports.autoReview.memberRole(job.departmentId, job.assignedAgentId) === "executor") continue;
+      if (Date.parse(ports.now?.() ?? new Date().toISOString()) - Date.parse(job.updatedAt) < 120_000) continue;
+    }
+    if (closedNow(closeStation(ports, row.id, "conveyor-sweep"))) closed += 1;
   }
   return closed;
 }
 
-export function closeBlockedReviewStation(ports: ConveyorPorts, jobId: string): DomainResult<Job | null> {
-  const workId = workJobIdForReview(ports.db, jobId);
-  if (!workId) return ok(null);
-  const work = ports.store.getJob(workId);
-  if (!work || work.state !== "review") return ok(null);
-  const en = agencyLanguage() === "en";
-  ports.comment(
-    work,
-    en
-      ? "Conveyor: the QC run stopped; the work station is closed on the published version."
-      : "Конвейер: запуск проверки остановился; рабочая станция закрыта по опубликованной версии.",
-  );
-  return closeStation(ports, work.id, "conveyor-qc-blocked");
+/** A failed QC run needs recovery by the lead, never synthetic acceptance of its work. */
+export function closeBlockedReviewStation(_ports: ConveyorPorts, _jobId: string): DomainResult<Job | null> {
+  return ok(null);
 }

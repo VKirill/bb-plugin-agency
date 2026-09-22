@@ -1,3 +1,4 @@
+import { reworkRoundCount } from "./lineage.js";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { fail, ok, type DomainResult } from "../../../domain";
 import type { Job } from "../../../shared/contracts";
@@ -177,7 +178,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   const job = deps.store.getJob(input.jobId);
   if (!job) return fail("not_found", `job ${input.jobId} not found`);
   const root = rootJobId(deps.db, job.parentJobId ?? job.id);
-  if (loopEffect(latestLoopMark(deps.db, root)) === "block") {
+  if (loopEffect(latestLoopMark(deps.db, root, job.reworkOfJobId ?? job.id)) === "block") {
     announceLoopBlock(deps.db, root);
     return fail("loop_blocked", "loop mark blocks another pass on this line; ask the owner with report-needs-input");
   }
@@ -201,9 +202,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   // The department limit bounds rounds inside the line; a reclamation is the customer's call.
   if (!row && deps.reworkLimit && !delivered) {
     const limit = deps.reworkLimit(job);
-    const done = (deps.db
-      .prepare(`SELECT COUNT(*) AS n FROM agency_rework WHERE job_id = ? AND send_state = 'confirmed'`)
-      .get(job.id) as { n: number }).n;
+    const done = reworkRoundCount(deps.db, job.reworkOfJobId ?? job.id);
     if (done >= limit) {
       return fail(
         "rework_limit_reached",

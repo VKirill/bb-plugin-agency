@@ -1,3 +1,4 @@
+import { latestReviewText, parseReviewVerdict } from "../conveyor/verdict.js";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { createRepositories } from "../../db/repositories.js";
 import type { SqlDatabase } from "../../db/sql";
@@ -198,7 +199,11 @@ export function enqueueParentWake(db: SqlDatabase, child: Job, activity: Activit
   if (!isCurrentTransitionCausation(db, child.id, activity.id, activity.causationId ?? activity.id)) return false;
   // Automatic QC children are conveyor traffic. Pinging the lead on every
   // «done» burned a planning turn on a status the lead does not act on.
-  if (isAutoReviewChild(db, child.id)) return false;
+  if (isAutoReviewChild(db, child.id)) {
+    const needsLead = childState === "blocked" || childState === "waiting_input" ||
+      (childState === "done" && parseReviewVerdict(latestReviewText(db, child.id)) !== "accept");
+    if (!needsLead) return false;
+  }
   const target = resolveParentTarget(db, child);
   if (!target) return false;
   const result = db

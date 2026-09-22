@@ -249,9 +249,12 @@ describe("factory conveyor: the customer gets a product, not stamps", () => {
     expect(sweepStaleReviewStations({ ...ports, now: later })).toBe(0);
     expect(s.store.getJob(root.id)?.state).toBe("review");
 
-    // The last station closes → the root closes by itself.
+    // The last station closes; the lead must hand in the final product after it.
     handIn(s, db, sew.id);
     expect(await advanceAfterHandIn(ports, sew.id)).toBe("closed");
+    expect(s.store.getJob(root.id)?.state).toBe("review");
+    handIn(s, db, root.id);
+    expect(await advanceAfterHandIn(ports, root.id)).toBe("closed");
     expect(s.store.getJob(root.id)?.state).toBe("done");
     expect(ownerInbox(s, db)).toEqual([]);
 
@@ -275,6 +278,9 @@ describe("factory conveyor: the customer gets a product, not stamps", () => {
     expect(await advanceAfterHandIn(partQcOff, part.id)).toBe("closed");
     expect(s.store.getJob(root.id)?.state).toBe("review");
 
+    // Final summary is published after the child, and receives its own version-bound QC.
+    handIn(s, db, root.id);
+    expect(await advanceAfterHandIn(ports, root.id)).toBe("created");
     const qcId = qcJobFor(db, root.id);
     handIn(s, db, qcId);
     comment(s, qcId, "Verdict: accept");
@@ -321,61 +327,56 @@ describe("factory conveyor: the customer gets a product, not stamps", () => {
     );
     expect(result.exitCode, result.stderr ?? result.stdout).toBe(0);
     expect(s.store.getJob(only.id)?.state).toBe("done");
-    // No second transition: the root closed with its last child.
+    expect(s.store.getJob(root.id)?.state).toBe("review");
+    handIn(s, db, root.id);
+    expect(await advanceAfterHandIn(ports, root.id)).toBe("closed");
     expect(s.store.getJob(root.id)?.state).toBe("done");
     expect(ready.map((item) => item.key)).toEqual([root.key]);
     db.close();
   });
 
-  it("a stalled auto-review does not keep dependents or the root waiting forever", async () => {
+  it("a stalled auto-review never accepts unverified work or releases dependents", async () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const root = s.job("Партия", s.lead);
-    const sole = child(s, root.id, "Подошва");
-    const box = child(s, root.id, "Упаковка");
-    const edge = s.store.addJobDependency(s.ctx, { requestId: randomUUID(), jobId: box.id, dependsOnJobId: sole.id });
-    expect(edge.ok).toBe(true);
-    handIn(s, db, sole.id);
-    const { ports, comments } = conveyor(s, db, { qc: true });
-    expect(await advanceAfterHandIn(ports, sole.id)).toBe("created");
-    const qcId = qcJobFor(db, sole.id);
-
-    const blockedByDependency = s.store.transitionJob(s.ctx, {
-      requestId: randomUUID(),
-      expectedRevision: s.store.getJob(box.id)!.revision,
-      jobId: box.id,
-      to: "queued",
-    });
-    expect(blockedByDependency).toMatchObject({ ok: false, error: { code: "open_blockers" } });
-
-    // The reviewer never answers. Inside the timeout the station waits; after it the line closes it.
-    expect(sweepStaleReviewStations({ ...ports, now: () => "2026-09-20T00:10:00.000Z" })).toBe(0);
-    expect(s.store.getJob(sole.id)?.state).toBe("review");
-    const claimedAt = (db.prepare(`SELECT created_at FROM agency_auto_review WHERE job_id = ?`).get(sole.id) as { created_at: string }).created_at;
-    const afterTimeout = new Date(Date.parse(claimedAt) + 31 * 60_000).toISOString();
-    expect(sweepStaleReviewStations({ ...ports, now: () => afterTimeout })).toBe(1);
-    expect(s.store.getJob(sole.id)?.state).toBe("done");
-    expect(s.store.getJob(qcId)?.state).toBe("canceled");
-    expect(comments.some((text) => text.includes("зависла"))).toBe(true);
-
-    const released = s.store.transitionJob(s.ctx, {
-      requestId: randomUUID(),
-      expectedRevision: s.store.getJob(box.id)!.revision,
-      jobId: box.id,
-      to: "queued",
-    });
-    expect(released.ok).toBe(true);
-    expect(ownerInbox(s, db)).toEqual([]);
-
-    // The rest of the line closes and the root follows; the stalled reviewer held nothing.
-    handIn(s, db, root.id);
-    handIn(s, db, box.id);
-    expect(await advanceAfterHandIn(conveyor(s, db).ports, box.id)).toBe("closed");
-    expect(s.store.getJob(root.id)?.state).toBe("done");
+    const work = child(s, root.id, "Подошва");
+    const next = child(s, root.id, "Упаковка");
+    expect(s.store.addJobDependency(s.ctx, { requestId: randomUUID(), jobId: next.id, dependsOnJobId: work.id }).ok).toBe(true);
+    handIn(s, db, work.id);
+    const { ports, ready } = conveyor(s, db, { qc: true });
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("created");
+    const qcId = qcJobFor(db, work.id);
+    expect(sweepStaleReviewStations({ ...ports, now: () => "2099-09-20T00:00:00.000Z" })).toBe(0);
+    expect(s.store.getJob(work.id)?.state).toBe("review");
+    expect(s.store.getJob(qcId)?.state).not.toBe("canceled");
+    expect(s.store.transitionJob(s.ctx, { requestId: randomUUID(), expectedRevision: s.store.getJob(next.id)!.revision, jobId: next.id, to: "queued" }))
+      .toMatchObject({ ok: false, error: { code: "open_blockers" } });
+    expect(ready).toEqual([]);
     db.close();
   });
 
-  it("closes the work station at once when the QC run is blocked", async () => {
+  it("does not close on an inconclusive QC or reuse a verdict from its previous report", async () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const root = s.job("Партия", s.lead);
+    const work = child(s, root.id, "Работа");
+    handIn(s, db, work.id);
+    const { ports } = conveyor(s, db, { qc: true });
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("created");
+    const qcId = qcJobFor(db, work.id);
+    handIn(s, db, qcId);
+    comment(s, qcId, "Verdict: accept");
+    handIn(s, db, qcId); // new published report, previous verdict does not apply
+    comment(s, qcId, "Отчёт опубликован, решение не указано.");
+    expect(await advanceAfterHandIn(ports, qcId)).toBe("pending");
+    expect(s.store.getJob(work.id)?.state).toBe("review");
+    expect(sweepStaleReviewStations({ ...ports, now: () => "2099-01-01T00:00:00.000Z" })).toBe(0);
+    comment(s, qcId, "Вердикт — принять");
+    expect(await advanceAfterHandIn(ports, qcId)).toBe("closed");
+    db.close();
+  });
+
+  it("keeps work unaccepted when its QC run is blocked", async () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const root = s.job("Партия", s.lead);
@@ -386,7 +387,8 @@ describe("factory conveyor: the customer gets a product, not stamps", () => {
     const qcId = qcJobFor(db, work.id);
     db.prepare(`UPDATE agency_job SET state = 'blocked' WHERE id = ?`).run(qcId);
     const closed = closeBlockedReviewStation(ports, qcId);
-    expect(closed.ok && closed.value?.state).toBe("done");
+    expect(closed).toEqual({ ok: true, value: null });
+    expect(s.store.getJob(work.id)?.state).toBe("review");
     // A blocked QC job is a factory matter: it has a parent and never reaches the customer's inbox.
     expect(ownerInbox(s, db)).toEqual([]);
     db.close();

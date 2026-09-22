@@ -7,6 +7,7 @@ import { formatJobPack, parseReviewVerdict } from "../src/server/runtime/conveyo
 import {
   advanceAfterHandIn,
   closeParentIfChildrenDone,
+  sweepStaleReviewStations,
   closeStation,
   type ConveyorPorts,
 } from "../src/server/runtime/conveyor";
@@ -77,10 +78,13 @@ function closePorts(s: ReturnType<typeof seed>, db: ReturnType<typeof openMigrat
 }
 
 describe("review verdict", () => {
-  it("reads an explicit verdict line and defaults unknown to accept", () => {
+  it("reads explicit verdicts including AG-177 punctuation and keeps unknown undecided", () => {
     expect(parseReviewVerdict("Вердикт: доработать\nкритерий не пройден")).toBe("rework");
     expect(parseReviewVerdict("Verdict: accept\nall green")).toBe("accept");
-    expect(parseReviewVerdict("Looks fine overall.")).toBe("accept");
+    expect(parseReviewVerdict("AG-181 сдана: вердикт — доработать.")).toBe("rework");
+    expect(parseReviewVerdict("**Verdict:** — accept")).toBe("accept");
+    expect(parseReviewVerdict("Looks fine overall.")).toBe("inconclusive");
+    expect(parseReviewVerdict("Конвейер: этот отчёт проверки продукт не закрывает.")).toBe("inconclusive");
   });
 });
 
@@ -119,7 +123,7 @@ describe("conveyor close", () => {
     db.close();
   });
 
-  it("closes the parent in review when every work child is done", () => {
+  it("requires a fresh parent summary after every work child is done", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const main = s.job("Корень", s.lead);
@@ -177,6 +181,9 @@ describe("conveyor close", () => {
       }).ok,
     ).toBe(true);
     expect(closeParentIfChildrenDone(ports, second.value.id).ok).toBe(true);
+    expect(s.store.getJob(main.id)?.state).toBe("review");
+    publish(s, main.id);
+    expect(closeStation(ports, main.id, "final-summary").ok).toBe(true);
     expect(s.store.getJob(main.id)?.state).toBe("done");
     db.close();
   });
@@ -236,6 +243,21 @@ describe("conveyor close", () => {
     expect(s.store.getJob(job.id)?.state).toBe("done");
     expect(closeStation(ports, job.id, randomUUID()).ok).toBe(true);
     expect(version.hash).toBe(HASH);
+    db.close();
+  });
+
+  it("holds a rejected hand-in even if the worker cannot be resumed and the sweeper runs", async () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const work = s.job("Итог", s.lead);
+    publish(s, work.id);
+    intoReview(s, db, work.id);
+    const ports = closePorts(s, db);
+    ports.handInGate = async () => ({ action: "rework", remark: "Only an organisational report; no code exists." });
+    ports.returnForRework = async () => ({ ok: false, error: { code: "rework_no_thread", message: "thread missing" } });
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("pending");
+    expect(sweepStaleReviewStations({ ...ports, now: () => "2099-01-01T00:00:00.000Z" })).toBe(0);
+    expect(s.store.getJob(work.id)?.state).toBe("review");
     db.close();
   });
 

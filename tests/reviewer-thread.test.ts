@@ -60,8 +60,9 @@ function setup() {
 }
 
 describe("REVIEWER_THREAD_MIGRATION", () => {
-  it("stays applied and the loop-mark migration is last", () => {
-    expect(migrations.at(-1)).toBe(LOOP_MARK_MIGRATION);
+  it("preserves released migrations when new columns are appended", () => {
+    expect(migrations).toContain(LOOP_MARK_MIGRATION);
+    expect(migrations.indexOf(LOOP_MARK_MIGRATION)).toBeGreaterThan(migrations.indexOf(REVIEWER_THREAD_MIGRATION));
     expect(migrations).toContain(REVIEWER_THREAD_MIGRATION);
     const db = openMigratedDatabase(new Database(":memory:"));
     const names = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[]).map(

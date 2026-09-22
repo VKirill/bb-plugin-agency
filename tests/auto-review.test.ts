@@ -68,6 +68,30 @@ describe("executor → reviewer chain", () => {
     expect(t.comments[0]).toContain(`Автопроверка: создана ${review[0]!.key} по версии v2, проверка в очереди запуска`);
   });
 
+  it("copies normative inputs before queueing the review (AG-191)", async () => {
+    const t = setup();
+    const spec = t.s.job("Нормативная спецификация", t.s.lead);
+    t.s.input(t.work.id, spec.id);
+    const sources: string[] = [];
+    t.ports.attachInput = async (_review, source) => { sources.push(source.id); return ok({}); };
+    t.ports.queue = review => {
+      expect(sources).toEqual([t.work.id, spec.id]);
+      return ok(review.id);
+    };
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("created");
+    t.db.close();
+  });
+
+  it("never queues a review with an inherited input that failed to attach", async () => {
+    const t = setup();
+    const spec = t.s.job("Спецификация", t.s.lead);
+    t.s.input(t.work.id, spec.id);
+    t.ports.attachInput = async (_review, source) => source.id === spec.id ? fail("input_missing", "missing spec") : ok({});
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("failed");
+    expect(t.queued).toEqual([]);
+    t.db.close();
+  });
+
   it("does nothing when the rule is off or the work is not an executor's", async () => {
     const off = setup({ enabled: false });
     expect(await startAutoReview(off.ports, off.work.id)).toBe("skipped");

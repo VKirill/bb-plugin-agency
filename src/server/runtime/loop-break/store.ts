@@ -35,11 +35,11 @@ export function rootJobId(db: SqlDatabase, jobId: string): string {
   return jobId;
 }
 
-export function latestLoopMark(db: SqlDatabase, rootId: string): LoopMark | null {
+export function latestLoopMark(db: SqlDatabase, rootId: string, workJobId?: string): LoopMark | null {
   if (!tableReady(db)) return null;
   const row = db
-    .prepare(`SELECT relation, cause FROM agency_loop_mark WHERE root_job_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
-    .get(rootId) as MarkRow | undefined;
+    .prepare(`SELECT relation, cause FROM agency_loop_mark WHERE root_job_id = ? AND (? IS NULL OR work_job_id = ? OR work_job_id IS NULL) ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+    .get(rootId, workJobId ?? null, workJobId ?? null) as MarkRow | undefined;
   if (!row) return null;
   return { relation: asRelation(row.relation), cause: asCause(row.cause) };
 }
@@ -61,6 +61,7 @@ export function insertLoopMark(
   db: SqlDatabase,
   input: {
     rootJobId: string;
+    workJobId?: string | null;
     attemptId: string;
     fingerprint: string;
     relation: LoopRelation | null;
@@ -70,8 +71,8 @@ export function insertLoopMark(
 ): void {
   if (!input.attemptId.trim() || !tableReady(db)) return;
   db.prepare(
-    `INSERT INTO agency_loop_mark (id, root_job_id, attempt_id, fingerprint, relation, cause, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO agency_loop_mark (id, root_job_id, attempt_id, fingerprint, relation, cause, created_at, work_job_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     `lmk_${randomBytes(12).toString("hex")}`,
     input.rootJobId,
@@ -80,6 +81,7 @@ export function insertLoopMark(
     input.relation,
     input.cause,
     input.createdAt,
+    input.workJobId ?? null,
   );
 }
 

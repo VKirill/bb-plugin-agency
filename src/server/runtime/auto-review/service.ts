@@ -44,13 +44,13 @@ export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedIn
     return {
       title,
       brief: `Independent review of version v${version.version} of ${job.key} «${job.title}» against its acceptance criteria. The version is attached as input: open it by hash, do not trust working files.\nDo not fix the result: describe defects (criterion → place → how to reproduce → severity).`,
-      acceptance: `The review report is published as a version. First line: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
+      acceptance: `The review report is published as a version. First line of both the report and closing job comment: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
     };
   }
   return {
     title,
     brief: `Независимая проверка версии v${version.version} результата ${job.key} «${job.title}» по её критериям приёмки. Версия приложена входом: открывайте её по hash, рабочим файлам на слово не верьте.\nРезультат не правьте: описывайте дефекты (критерий → место → как воспроизвести → серьёзность).`,
-    acceptance: `Заключение опубликовано версией. Первая строка: Вердикт: принять или Вердикт: доработать. Затем каждый критерий приёмки ${job.key} — пройден / не пройден / не проверен с командой или местом.`,
+    acceptance: `Заключение опубликовано версией. Первая строка отчёта и итогового комментария задачи: Вердикт: принять или Вердикт: доработать. Затем каждый критерий приёмки ${job.key} — пройден / не пройден / не проверен с командой или местом.`,
   };
 }
 
@@ -85,6 +85,20 @@ export async function startAutoReview(ports: AutoReviewPorts, jobId: string): Pr
   if (!attached.ok) {
     ports.discard(ports.getJob(review.value.id) ?? review.value);
     return failWith(attached.error.message);
+  }
+  // A reviewer needs the same normative inputs as the author, not only the hand-in.
+  const inputs = ports.db.prepare(`SELECT source_job_id, artifact_id, version, hash FROM agency_job_input_ref WHERE target_job_id = ?`)
+    .all(job.id) as Array<{ source_job_id: string; artifact_id: string; version: number; hash: string }>;
+  for (const input of inputs) {
+    const source = ports.getJob(input.source_job_id);
+    if (!source) continue;
+    const inherited = await ports.attachInput(ports.getJob(review.value.id) ?? review.value, source, {
+      artifactId: input.artifact_id, version: input.version, hash: input.hash,
+    });
+    if (!inherited.ok) {
+      ports.discard(ports.getJob(review.value.id) ?? review.value);
+      return failWith(inherited.error.message);
+    }
   }
   const queued = ports.queue(ports.getJob(review.value.id) ?? review.value);
   finish(queued.ok ? "queued" : "created", review.value.id);

@@ -399,6 +399,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     placement: input.placement ?? null,
     withoutSandbox: input.permissionMode === "full",
     roleInstructions: input.roleInstructions ?? null,
+    memberRole: input.memberRole ?? null,
   };
   const levels = buildPromptLevels(levelArgs);
   const packFiles = buildAttemptPack(packInput(levelArgs, levels, input.memberRole ?? null, input.packLanguage ?? "en"));
@@ -424,6 +425,8 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       assignedAgentId,
       briefHash: sha256Hex(job.brief),
       acceptanceHash: sha256Hex(job.acceptance),
+      workKind: job.workKind ?? null,
+      reworkOfJobId: job.reworkOfJobId ?? null,
       ...(input.workProfiles?.body ? { workProfileHash: sha256Hex(input.workProfiles.body) } : {}),
       ...(input.passport?.text ? { passportHash: sha256Hex(input.passport.text) } : {}),
       ...(input.briefing?.text ? { briefingHash: sha256Hex(input.briefing.text) } : {}),
@@ -521,6 +524,7 @@ type PromptLevelArgs = {
   placement: CompileContextSnapshotInput["placement"] | null;
   withoutSandbox: boolean;
   roleInstructions: string | null;
+  memberRole: string | null;
 };
 
 function buildPromptLevels(args: PromptLevelArgs): ContextPromptLevels {
@@ -638,6 +642,10 @@ function buildPromptLevels(args: PromptLevelArgs): ContextPromptLevels {
       ...(roleInstructions?.trim() ? [roleInstructions.trim(), "", "## Brief"] : []),
       job.brief,
       `acceptance ${job.acceptance}`,
+      ...(job.workKind === "discovery" || job.workKind === "spike"
+        ? [`Work phase: ${job.workKind}. This is a bounded investigation before the final specification. Stay within the explicit contract; do not implement or deploy production changes.`] : []),
+      ...(job.reworkOfJobId ? [`Rework of job ${job.reworkOfJobId}; preserve this result lineage in any further repair task.`] : []),
+      ...(args.memberRole === "lead" ? ["Publish the final summary only after all working children have finished and the original acceptance criteria are fulfilled. Progress belongs in comments. Create a repair task with reworkOfJobId pointing to the original work; unrelated next stages are new work. A bounded discovery/spike subtask with mayChange, mustNotTouch and checks may precede the final spec."] : []),
       ...(workProfiles?.body ? ["", workProfiles.body] : []),
       ...(briefing?.text ? ["", briefing.text] : []),
       ...(contractText(job.contract)

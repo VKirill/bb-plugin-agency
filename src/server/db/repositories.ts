@@ -79,6 +79,7 @@ type JobRow = {
   origin_thread_id?: string | null;
   section_id?: string | null;
   work_kind?: string | null;
+  rework_of_job_id?: string | null;
   revision: number;
   updated_at: string;
 };
@@ -259,6 +260,7 @@ function mapJob(row: JobRow): Job {
     parentJobId: row.parent_job_id,
     sectionId: row.section_id ?? null,
     workKind: (row.work_kind ?? null) as Job["workKind"],
+    ...(row.rework_of_job_id ? { reworkOfJobId: row.rework_of_job_id } : {}),
     assignedAgentId: row.assigned_agent_id,
     reviewerAgentIds: parseTeamIds(row.reviewer_agent_ids),
     observerAgentIds: parseTeamIds(row.observer_agent_ids),
@@ -547,8 +549,8 @@ export function createRepositories(db: SqlDatabase) {
           `INSERT INTO agency_job
             (id, key, binding_id, department_id, title, brief, acceptance, state, parent_job_id,
              assigned_agent_id, reviewer_agent_ids, observer_agent_ids, priority, due_at, revision, updated_at,
-             closed_at, contract_json, work_profile_key, origin_thread_id, section_id, work_kind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             closed_at, contract_json, work_profile_key, origin_thread_id, section_id, work_kind, rework_of_job_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           row.id,
           row.key,
@@ -572,6 +574,7 @@ export function createRepositories(db: SqlDatabase) {
           row.originThreadId ?? null,
           row.sectionId ?? null,
           row.workKind ?? null,
+          row.reworkOfJobId ?? null,
         );
       },
       update(row: Job): void {

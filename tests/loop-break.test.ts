@@ -5,7 +5,7 @@ import { openMigratedDatabase } from "../src/server/db";
 import { askLoopBreak, LOOP_BREAK_POINT } from "../src/server/decisions/loop-break";
 import { loopEffect } from "../src/server/runtime/loop-break/mark";
 import { insertLoopMark } from "../src/server/runtime/loop-break/store";
-import { advanceAfterHandIn, closeParentIfChildrenDone } from "../src/server/runtime/conveyor";
+import { advanceAfterHandIn, closeParentIfChildrenDone, sweepStaleReviewStations } from "../src/server/runtime/conveyor";
 import { formatParentWakeText } from "../src/server/runtime/parent-wake";
 import { DEFAULT_DECISION_SETTINGS } from "../src/shared/decisions";
 import { seed } from "./role-types.test";
@@ -83,7 +83,7 @@ describe("loop break on the line", () => {
     publish(s, review.value.id);
     db.prepare(`UPDATE agency_job SET state = 'review' WHERE id = ?`).run(main.id);
     db.prepare(`UPDATE agency_job SET state = 'review' WHERE id = ?`).run(review.value.id);
-    comment(s, review.value.id, "Вердикт: доработать\nбаннер исчезает");
+    comment(s, review.value.id, "AG-181 сдана: вердикт — доработать.\nбаннер исчезает");
     const ports = {
       db,
       store: {
@@ -111,10 +111,26 @@ describe("loop break on the line", () => {
     expect(await advanceAfterHandIn(ports, review.value.id)).toBe("closed");
     expect(s.store.getJob(review.value.id)?.state).toBe("done");
     expect(s.store.getJob(main.id)?.state).toBe("review");
+    comment(s, review.value.id, "Конвейер: этот отчёт проверки продукт не закрывает. Стоп круга может не пустить следующую станцию.");
+    sweepStaleReviewStations({ ...ports, now: () => "2099-09-22T00:00:00.000Z" });
+    expect(s.store.getJob(main.id)?.state).toBe("review");
     expect(closeParentIfChildrenDone(ports, review.value.id).ok).toBe(true);
     expect(s.store.getJob(main.id)?.state).toBe("review");
     expect(await advanceAfterHandIn(ports, main.id)).toBe("rework");
     expect(s.store.getJob(main.id)?.state).toBe("review");
+    // A subsequent completed implementation explicitly consumed that report (AG-188).
+    const successor = s.store.createJob(s.ctx, {
+      requestId: randomUUID(), bindingId: main.bindingId, departmentId: s.departmentId,
+      parentJobId: main.id, assignedAgentId: s.developer, title: "Реализация замечаний", brief: "Исправить", acceptance: "Проверено", priority: "normal", dueAt: null,
+    });
+    if (!successor.ok) throw new Error(successor.error.message);
+    s.input(successor.value.id, review.value.id);
+    publish(s, successor.value.id);
+    db.prepare(`UPDATE agency_job SET state = 'review' WHERE id = ?`).run(successor.value.id);
+    expect(await advanceAfterHandIn(ports, successor.value.id)).toBe("closed");
+    expect(s.store.getJob(main.id)?.state).toBe("review"); // no stale organisational report
+    publish(s, main.id);
+    expect(await advanceAfterHandIn(ports, main.id)).toBe("closed");
     db.close();
   });
 
@@ -122,6 +138,7 @@ describe("loop break on the line", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const main = s.job("Корень", s.lead);
+    let sourceId: string | undefined;
     const child = (request: string) =>
       s.store.createJob(s.ctx, {
         requestId: request,
@@ -132,9 +149,13 @@ describe("loop break on the line", () => {
         acceptance: "Тест.",
         parentJobId: main.id,
         assignedAgentId: s.developer,
+        reworkOfJobId: sourceId,
         priority: "normal",
         dueAt: null,
       });
+    const source = child(randomUUID());
+    if (!source.ok) throw new Error(source.error.message);
+    sourceId = source.value.id;
     insertLoopMark(db, {
       rootJobId: main.id,
       attemptId: "run_testattempt000000000001",
@@ -143,6 +164,10 @@ describe("loop break on the line", () => {
       cause: "contract",
       createdAt: "2026-09-22T01:00:00.000Z",
     });
+    const savedSourceId = sourceId;
+    sourceId = undefined;
+    expect(child(randomUUID()).ok).toBe(true);
+    sourceId = savedSourceId;
     const blocked = child(randomUUID());
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.error.code).toBe("loop_blocked");

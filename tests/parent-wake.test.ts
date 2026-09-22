@@ -509,14 +509,14 @@ describe("parent wake", () => {
     expect(recoverParentWakesFromActivities(db, new Date().toISOString())).toBe(0);
   });
 
-  it("does not wake the lead when an automatic QC child changes state", async () => {
+  it("wakes the lead when automatic QC is blocked instead of silently accepting work", async () => {
     const db = openDb();
     const family = await seedFamily(db);
     db.prepare(
       `INSERT INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at) VALUES (?, ?, ?, 'pending', ?)`,
     ).run(family.parent.id, "ab".repeat(32), family.child.id, FROZEN_CLOCK);
     blockChild(family);
-    expect(wakes(db)).toHaveLength(0);
+    expect(wakes(db)).toHaveLength(1);
   });
 });
 

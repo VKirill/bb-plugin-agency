@@ -1,22 +1,27 @@
-/**
- * QC report → accept | rework. Unknown defaults to accept: the factory
- * must not stall a station because the reviewer forgot the verdict line.
- */
+import type { SqlDatabase } from "../../db/sql";
 
-export type ReviewVerdict = "accept" | "rework";
+/** A missing or malformed decision is never an acceptance. Shared by QC and loop-break. */
+export type ReviewVerdict = "accept" | "rework" | "inconclusive";
 
-const VERDICT_LINE =
-  /(?:вердикт|verdict)\s*[:：]?\s*(принять|accept|доработать|rework|return)/i;
-const REWORK_WORD = /доработать|rework|на доработку/i;
-const ACCEPT_WORD = /принять|accept/i;
+function explicitVerdict(text: string): ReviewVerdict | null {
+  const plain = text.slice(0, 8000).replace(/\*\*|__/g, "");
+  const line = /(?:вердикт|verdict)[\s:：—–-]*(принять|accept|доработать|rework|return|inconclusive|не проверено)(?=$|[\s.,;!?])/i.exec(plain);
+  if (!line) return null;
+  const token = line[1]!.toLowerCase();
+  if (token === "принять" || token === "accept") return "accept";
+  if (token === "доработать" || token === "rework" || token === "return") return "rework";
+  return "inconclusive";
+}
 
 export function parseReviewVerdict(text: string): ReviewVerdict {
-  const head = text.slice(0, 8000);
-  const line = VERDICT_LINE.exec(head);
-  if (line) {
-    const token = line[1]!.toLowerCase();
-    return token === "доработать" || token === "rework" || token === "return" ? "rework" : "accept";
-  }
-  if (REWORK_WORD.test(head) && !ACCEPT_WORD.test(head)) return "rework";
-  return "accept";
+  return explicitVerdict(text) ?? "inconclusive";
+}
+
+/** Only a decision for the latest published report; later system notes cannot overwrite it. */
+export function latestReviewText(db: SqlDatabase, jobId: string): string {
+  const rows = db.prepare(`SELECT comment FROM agency_activity
+    WHERE job_id = ? AND kind = 'comment' AND comment IS NOT NULL
+      AND rowid > COALESCE((SELECT MAX(rowid) FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'), 0)
+    ORDER BY rowid DESC`).all(jobId, jobId) as Array<{ comment: string }>;
+  return rows.find(row => explicitVerdict(row.comment) !== null)?.comment ?? "";
 }
