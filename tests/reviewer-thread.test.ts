@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { migrations } from "../src/server/db/migrations";
+import { LOOP_MARK_MIGRATION } from "../src/server/runtime/loop-break/store";
 import { openMigratedDatabase } from "../src/server/db";
 import {
   composeReviewFollowUp,
@@ -59,13 +60,15 @@ function setup() {
 }
 
 describe("REVIEWER_THREAD_MIGRATION", () => {
-  it("is appended last and creates the table", () => {
-    expect(migrations[migrations.length - 1]).toBe(REVIEWER_THREAD_MIGRATION);
+  it("stays applied and the loop-mark migration is last", () => {
+    expect(migrations.at(-1)).toBe(LOOP_MARK_MIGRATION);
+    expect(migrations).toContain(REVIEWER_THREAD_MIGRATION);
     const db = openMigratedDatabase(new Database(":memory:"));
     const names = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[]).map(
       (row) => row.name,
     );
     expect(names).toContain("agency_reviewer_thread");
+    expect(names).toContain("agency_loop_mark");
     db.close();
   });
 });

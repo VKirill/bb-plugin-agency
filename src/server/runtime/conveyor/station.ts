@@ -47,6 +47,8 @@ export type ConveyorPorts = ClosePorts & {
   returnForRework?: (job: Job, comment: string) => Promise<DomainResult<Job>>;
   /** First pass on an executor hand-in. Rework only; accept never skips independent QC. */
   handInGate?: (job: Job) => Promise<HandInGateDecision | null>;
+  /** Once per rework verdict. Writes a loop mark or does nothing. Fail-open. */
+  classifyLoop?: (job: Job) => Promise<void>;
   now?: () => string;
   staleMs?: number;
 };
@@ -217,6 +219,8 @@ export function closeParentIfChildrenDone(ports: ClosePorts, childJobId: string)
   const work = siblings.filter((row) => !qc.has(row.id));
   if (work.length === 0) return ok(null);
   if (!work.every((row) => CLOSED.has(row.state))) return ok(null);
+  // The latest reviewer said rework: accepting their report is not accepting the product.
+  if (latestReviewerHoldsParent(ports, parent.id)) return ok(null);
   // The parent's own QC is still reading: its verdict (or the stale sweep) closes the parent.
   if (liveQc(ports, parent.id)) return ok(null);
   return closeStation(ports, parent.id, "conveyor-parent");
@@ -243,6 +247,15 @@ export async function applyReviewHandIn(
         ports.comment(
           work,
           en ? `Conveyor: QC returned ${work.key} for rework.` : `Конвейер: ОТК вернуло ${work.key} на доработку.`,
+        );
+        return "rework";
+      }
+      if (returned.error.code === "loop_blocked") {
+        ports.comment(
+          work,
+          en
+            ? `Conveyor: loop mark blocked another pass on ${work.key}. Ask the owner with report-needs-input.`
+            : `Конвейер: стоп круга не пустил повтор ${work.key}. Спросите владельца через report-needs-input.`,
         );
         return "rework";
       }
@@ -275,7 +288,53 @@ export async function applyReviewHandIn(
   return "idle";
 }
 
+function membershipRole(db: SqlDatabase, departmentId: string, agentId: string | null): string | null {
+  if (!agentId) return null;
+  const row = db
+    .prepare(`SELECT role FROM agency_membership WHERE department_id = ? AND agent_id = ?`)
+    .get(departmentId, agentId) as { role: string } | undefined;
+  return row?.role ?? null;
+}
+
+/** The newest comment that actually carries a verdict line. Later conveyor notes do not count. */
+function latestVerdictText(db: SqlDatabase, jobId: string): string {
+  const rows = db
+    .prepare(
+      `SELECT comment FROM agency_activity WHERE job_id = ? AND kind = 'comment' AND comment IS NOT NULL ORDER BY rowid DESC`,
+    )
+    .all(jobId) as Array<{ comment: string }>;
+  const line = /(?:вердикт|verdict)\s*[:：]?\s*(?:принять|accept|доработать|rework|return)/i;
+  for (const row of rows) {
+    if (line.test(row.comment)) return row.comment;
+  }
+  return rows[0]?.comment?.trim() ?? "";
+}
+
+function reviewerRework(ports: ClosePorts, jobId: string): boolean {
+  const job = ports.store.getJob(jobId);
+  if (!job || membershipRole(ports.db, job.departmentId, job.assignedAgentId) !== "reviewer") return false;
+  return parseReviewVerdict(latestVerdictText(ports.db, jobId)) === "rework";
+}
+
+/** The last reviewer on the line asked for rework. Their report stays; the product stays open. */
+function latestReviewerHoldsParent(ports: ClosePorts, parentId: string): boolean {
+  const siblings = ports.db
+    .prepare(`SELECT id FROM agency_job WHERE parent_job_id = ? ORDER BY rowid`)
+    .all(parentId) as Array<{ id: string }>;
+  let lastReviewerId: string | null = null;
+  for (const row of siblings) {
+    const job = ports.store.getJob(row.id);
+    if (!job) continue;
+    if (membershipRole(ports.db, job.departmentId, job.assignedAgentId) === "reviewer") lastReviewerId = job.id;
+  }
+  return lastReviewerId !== null && parseReviewVerdict(latestVerdictText(ports.db, lastReviewerId)) === "rework";
+}
+
 export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): Promise<ConveyorAdvance> {
+  if (reviewerRework(ports, jobId)) {
+    const review = ports.store.getJob(jobId);
+    if (review) await ports.classifyLoop?.(review).catch(() => undefined);
+  }
   const workId = workJobIdForReview(ports.db, jobId);
   if (workId) return applyReviewHandIn(ports, workId, jobId);
   const job = ports.store.getJob(jobId);
@@ -297,19 +356,34 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
   }
   const outcome: AutoReviewOutcome = await startAutoReview(ports.autoReview, jobId);
   if (outcome === "created" || outcome === "pending") return outcome;
+  if (job && !job.parentJobId && latestReviewerHoldsParent(ports, job.id)) {
+    const en = agencyLanguage() === "en";
+    ports.comment(
+      job,
+      en
+        ? "Conveyor: the latest review asked for rework, so this hand-in does not accept the product."
+        : "Конвейер: последняя проверка просит доработку, эта сдача продукт не закрывает.",
+    );
+    return "rework";
+  }
   const closed = closeStation(ports, jobId, "conveyor-skip-qc");
   if (closed.ok && !closedNow(closed)) return openWorkChildren(ports.db, jobId) > 0 ? "pending" : "idle";
   if (closedNow(closed)) {
     const en = agencyLanguage() === "en";
+    const held = reviewerRework(ports, jobId);
     ports.comment(
       closed.value,
-      outcome === "failed"
+      held
         ? en
-          ? "Conveyor: automatic QC failed; the station is closed on the published version."
-          : "Конвейер: автопроверка не создалась; станция закрыта по опубликованной версии."
-        : en
-          ? "Conveyor: QC is not required for this station; the published version is accepted."
-          : "Конвейер: ОТК этой станции не нужно; опубликованная версия принята.",
+          ? "Conveyor: this review report does not accept the product. A loop mark can refuse the next station."
+          : "Конвейер: этот отчёт проверки продукт не закрывает. Стоп круга может не пустить следующую станцию."
+        : outcome === "failed"
+          ? en
+            ? "Conveyor: automatic QC failed; the station is closed on the published version."
+            : "Конвейер: автопроверка не создалась; станция закрыта по опубликованной версии."
+          : en
+            ? "Conveyor: QC is not required for this station; the published version is accepted."
+            : "Конвейер: ОТК этой станции не нужно; опубликованная версия принята.",
     );
   }
   return closedNow(closed) ? "closed" : "idle";

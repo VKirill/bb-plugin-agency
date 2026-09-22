@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { COMPLETION_REMINDER_MIGRATION } from "../runtime/completion-reminder/service";
 import { RUN_WATCH_MIGRATION } from "../runtime/run-watch/service";
 import { REWORK_MIGRATION } from "../runtime/rework/service";
+import { LOOP_MARK_MIGRATION } from "../runtime/loop-break/store";
 import { REVIEWER_THREAD_MIGRATION } from "../runtime/reviewer-thread/service";
 import { WORK_RULES_MIGRATION } from "../rules/work-rules";
 import { DUE_REMINDER_MIGRATION } from "../runtime/due-reminder/service";
@@ -731,6 +732,7 @@ ALTER TABLE agency_knowledge_next RENAME TO agency_knowledge;`,
 CREATE INDEX agency_stale_nudge_job_idx ON agency_stale_nudge(job_id);
 CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   REVIEWER_THREAD_MIGRATION,
+  LOOP_MARK_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

@@ -482,4 +482,7 @@ export const EN_SETTINGS: Record<string, string> = {
     "Hand-in gatekeeper",
   "Когда исполнитель сдаёт версию: выглядит ли сдача пустой или мимо брифа. Уверенный мусор возвращается тому же исполнителю в ту же сессию. Принятие независимую проверку не пропускает: неоднозначное — молчание, дальше обычный конвейер.":
     "When an executor hands in a version: whether the hand-in looks empty or off-brief. Confident junk goes back to the same executor in the same session. An accept never skips independent review: an ambiguous answer is silence, and the conveyor continues as usual.",
+  "Стоп круга": "Loop stop",
+  "После вердикта «доработать»: та же гипотеза (same_loop) или новая улика (new_evidence), и причина code, env, contract или context. same_loop, env и contract запрещают новую станцию и повтор в тот же тред. new_evidence снимает блок. Нет ключа, таймаут и низкая уверенность — линия идёт как раньше, её держит только лимит кругов.":
+    "After a rework verdict: the same hypothesis (same_loop) or new evidence (new_evidence), and a cause of code, env, contract, or context. same_loop, env, and contract refuse another station and a retry into the same thread. new_evidence lifts the block. No key, a timeout, or low confidence leaves the line as before, held only by the rework limit.",
 };

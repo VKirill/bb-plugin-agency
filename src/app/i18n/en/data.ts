@@ -418,6 +418,10 @@ export const EN_DATA: Record<string, string> = {
   "Заполните «Что нужно сделать» и «Критерии приёмки».": "Fill in “What needs doing” and “Acceptance criteria”.",
   "Лимит кругов доработки исчерпан. Решите сами: принять с замечаниями, отменить или поднять лимит в правилах отдела.":
     "The rework round limit is used up. Decide yourself: accept with notes, cancel, or raise the limit in the department's rules.",
+  "Стоп круга: та же гипотеза, среда или рамки задачи. Новую станцию и повтор в тот же тред сервер не создаёт. Спросите владельца через report-needs-input. Новая улика снимает блок.":
+    "Loop stop: the same hypothesis, the environment, or the task bounds. The server does not open another station or retry the same thread. Ask the owner with report-needs-input. New evidence lifts the block.",
+  "Родительская задача закрыта. Новую подзадачу создать нельзя.":
+    "The parent job is closed. A new subtask cannot be created.",
   "Эту настройку нельзя задать на этом уровне.": "This setting can't be set at this level.",
   "Задача закрыта: новые версии и файлы в неё не добавляются. Для доработки создайте новую задачу.":
     "The job is closed: new versions and files aren't added to it. Create a new job for further work.",

@@ -5,6 +5,8 @@ import { parseJson } from "../../db/sql";
 import type { Activity, ActivityActor, Job } from "../../../shared/contracts";
 import { TERMINAL_RUN_ATTEMPT_STATES } from "../run-store/types.js";
 import type { IsolatedSendOutcome, IsolatedSendPort } from "../isolated-sdk/send-port.js";
+import { loopWakeNote } from "../loop-break/mark.js";
+import { latestLoopMark, rootJobId } from "../loop-break/store.js";
 
 /** Closing states wake the lead too: an owner may accept or cancel a subtask from the card. */
 export const PARENT_WAKE_STATES = new Set(["review", "blocked", "waiting_input", "done", "canceled"]);
@@ -23,12 +25,19 @@ const CLOSING_HINT_EN: Record<string, string> = {
   canceled: "Subtask canceled. Decide whether it needs a replacement.",
 };
 
-export function formatParentWakeText(child: { key: string; state: string }, activityId: string, lang: AgencyLanguage = agencyLanguage()): string {
+export function formatParentWakeText(
+  child: { key: string; state: string },
+  activityId: string,
+  lang: AgencyLanguage = agencyLanguage(),
+  note?: string | null,
+): string {
+  const line = note?.trim();
   if (lang === "en") {
     return [
       `${child.key} → ${child.state}.`,
       "Read the child with getJob. This is not an acceptance and not access to its artifacts.",
       ...(CLOSING_HINT_EN[child.state] ? [CLOSING_HINT_EN[child.state]] : []),
+      ...(line ? [line] : []),
       parentWakeToken(activityId),
     ].join("\n");
   }
@@ -36,6 +45,7 @@ export function formatParentWakeText(child: { key: string; state: string }, acti
     `${child.key} → ${child.state}.`,
     "Прочитайте ребёнка getJob. Это не приёмка и не доступ к артефактам.",
     ...(CLOSING_HINT[child.state] ? [CLOSING_HINT[child.state]] : []),
+    ...(line ? [line] : []),
     parentWakeToken(activityId),
   ].join("\n");
 }
@@ -340,7 +350,12 @@ export async function flushParentWakes(deps: {
       if (item.sendNow) {
         outcome = await deps.send.send({
           threadId: row.parent_thread_id,
-          text: formatParentWakeText({ key: row.child_key, state: row.child_state }, row.activity_id, "en"),
+          text: formatParentWakeText(
+            { key: row.child_key, state: row.child_state },
+            row.activity_id,
+            "en",
+            loopWakeNote(latestLoopMark(deps.db, rootJobId(deps.db, row.parent_job_id)), "en"),
+          ),
         });
       } else {
         const presence = await deps.send.recoverContinuation(

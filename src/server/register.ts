@@ -7,6 +7,7 @@ import { askMemoryGate } from "./decisions/memory-gate";
 import { askBriefingDetailed, BRIEFING_POINT } from "./decisions/briefing";
 import { recordLeadIntake } from "./decisions/intake";
 import { askHandInGate } from "./decisions/hand-in-gate";
+import { noteReworkLoop } from "./runtime/loop-break/record";
 import { probeDecisionPoints } from "./decisions/probe";
 import { appendDecisionLog, decisionLogLine, formatDecisionAnswers, listDecisionLog } from "./decisions/log";
 import { listSkillGrants, listSkillPool, logSkillGrants, setSkillPool } from "./organization/skill-pool";
@@ -1943,6 +1944,7 @@ export function registerAgency(bb: BbPluginApi) {
         if (asked?.action !== "rework") return null;
         return { action: "rework" as const, remark: asked.remark };
       },
+      classifyLoop: (job) => noteReworkLoop(db, job),
       returnForRework: async (job, comment) =>
         returnJobForRework(
           {

@@ -7,6 +7,9 @@ import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
 import type { ServiceContext } from "../../services/context.js";
 import type { DomainStore } from "../../services/domain-store.js";
 import { uuidV5 } from "../launch/operation-ids.js";
+import { announceLoopBlock } from "../loop-break/announce.js";
+import { loopEffect } from "../loop-break/mark.js";
+import { latestLoopMark, rootJobId } from "../loop-break/store.js";
 
 /**
  * Returning a result for rework continues the same worker thread: the worker
@@ -173,6 +176,11 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   }
   const job = deps.store.getJob(input.jobId);
   if (!job) return fail("not_found", `job ${input.jobId} not found`);
+  const root = rootJobId(deps.db, job.parentJobId ?? job.id);
+  if (loopEffect(latestLoopMark(deps.db, root)) === "block") {
+    announceLoopBlock(deps.db, root);
+    return fail("loop_blocked", "loop mark blocks another pass on this line; ask the owner with report-needs-input");
+  }
   const delivered = job.state === "done";
   if (delivered) {
     if (ctx.caller) return fail("reclamation_owner_only", `${job.key} is delivered; only the customer returns a delivered product`);

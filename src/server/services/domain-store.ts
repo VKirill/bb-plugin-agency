@@ -6,6 +6,9 @@ import { currentAgencyRules } from "../templates/store";
 import { handInCommentMissing } from "../runtime/hand-in/service";
 import { clearExhaustedModels } from "../runtime/agent-fallback";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
+import { announceLoopBlock } from "../runtime/loop-break/announce";
+import { latestLoopMark } from "../runtime/loop-break/store";
+import { loopEffect } from "../runtime/loop-break/mark";
 import { foreignRuleKeys, readStoredRules, rulesForDepartment, rulesForLaunch, workRulesView, writeStoredRules } from "../rules/work-rules";
 import { inspectSpecGate, specIntakeViolationComment } from "../flow/spec-gate";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, type SaveWorkRulesCommand, type WorkRulesView } from "../../shared/contracts/work-rules";
@@ -1407,8 +1410,23 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (parsed.data.parentJobId) {
           const parent = requireJob(parsed.data.parentJobId);
           if (!parent.ok) return parent;
+          if (parent.value.state === "done" || parent.value.state === "canceled") {
+            return fail(
+              "parent_closed",
+              `parent ${parent.value.key} is ${parent.value.state}; a closed product does not take a new subtask`,
+            );
+          }
           const placed = assertSubtaskPlacement(parent.value, parsed.data.bindingId, assignedAgentId);
           if (!placed.ok) return placed;
+          const root = rootJobId(parent.value.id);
+          const mark = latestLoopMark(db, root);
+          if (loopEffect(mark) === "block") {
+            announceLoopBlock(db, root);
+            return fail(
+              "loop_blocked",
+              "loop mark blocks another station on this line; ask the owner with report-needs-input",
+            );
+          }
         }
         const atWorkplace = assertWorkplace(assignedAgentId, parsed.data.bindingId);
         if (!atWorkplace.ok) return atWorkplace;

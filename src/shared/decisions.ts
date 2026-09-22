@@ -70,7 +70,7 @@ export const DEFAULT_DECISION_SETTINGS: DecisionSettings = {
   timeoutMs: 8_000,
   // Защитные точки включены сразу, необязательные — по выбору владельца: привратники ловят
   // секрет в тексте, который иначе уедет во все запуски.
-  points: ["memory-gate", "passport-gate"],
+  points: ["memory-gate", "passport-gate", "loop-break"],
   revision: 0,
 };
 
@@ -127,6 +127,12 @@ export const DECISION_POINTS: readonly DecisionPoint[] = [
     title: "Привратник сдачи",
     hint: "Когда исполнитель сдаёт версию: выглядит ли сдача пустой или мимо брифа. Уверенный мусор возвращается тому же исполнителю в ту же сессию. Принятие независимую проверку не пропускает: неоднозначное — молчание, дальше обычный конвейер.",
     threshold: 0.7,
+  },
+  {
+    key: "loop-break",
+    title: "Стоп круга",
+    hint: "После вердикта «доработать»: та же гипотеза (same_loop) или новая улика (new_evidence), и причина code, env, contract или context. same_loop, env и contract запрещают новую станцию и повтор в тот же тред. new_evidence снимает блок. Нет ключа, таймаут и низкая уверенность — линия идёт как раньше, её держит только лимит кругов.",
+    threshold: 0.8,
   },
 ];
 

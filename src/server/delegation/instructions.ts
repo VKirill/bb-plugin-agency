@@ -302,6 +302,7 @@ function leadRuleLines(rules: WorkerContext["rules"]): string[] {
   if (!rules) return [];
   return [
     `- Department rules: at most ${rules.reworkLimit} rework rounds per job. When they run out the server refuses another rework: compare the versions already made, pick the best one, say in a comment why it is the best and what it still lacks, and hand it to the owner as "accepted with remarks" (report-needs-input). Do not stall on a fourth round.`,
+    "- A loop mark (same_loop, env, contract) makes createJob and return fail with loop_blocked. Do not open another station and do not retry the same thread. Ask the owner with report-needs-input. new_evidence lifts the block.",
     rules.minorDefectsWithoutRound
       ? "- Minor defects do not open a new round: list them in the final report and assemble the result."
       : "- Every open defect, minor ones included, gets a rework subtask and another review.",
