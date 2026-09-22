@@ -391,6 +391,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
     workProfiles: input.workProfiles ?? null,
     passport: input.passport ?? null,
     briefing: input.briefing ?? null,
+    recentHistory: input.recentHistory ?? null,
     selected,
     selectedMcps,
     inputArtifacts,
@@ -516,6 +517,7 @@ type PromptLevelArgs = {
   workProfiles: NonNullable<CompileContextSnapshotInput["workProfiles"]> | null;
   passport: NonNullable<CompileContextSnapshotInput["passport"]> | null;
   briefing: NonNullable<CompileContextSnapshotInput["briefing"]> | null;
+  recentHistory: string | null;
   selected: SelectedSkill[];
   selectedMcps: SelectedMcp[];
   inputArtifacts: InputArtifactRef[];
@@ -688,6 +690,7 @@ function packInput(
       ...placementLines(args.placement ?? null),
     ],
     handoff: args.handoff === null ? null : levels.handoff,
+    recentHistory: args.recentHistory,
     briefing: args.briefing?.text ?? null,
     rules: [
       ...block("Agency rules", args.agencyRules?.text),

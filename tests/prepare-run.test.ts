@@ -292,6 +292,31 @@ function runPrepare(
 }
 
 describe("prepare-run", () => {
+  it("carries the lead's access correction into the worker pack and hashes it", async () => {
+    const opened = openFileDb();
+    const root = bindingRoot();
+    writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+    const seeded = await seedProject(opened.db, root);
+    const opts = { files: recordingFiles("host_mini").port, runs: createRunStore(opened.db), server: serverBinding([".bb/AGENTS.md"]) };
+    const first = await runPrepare(seeded, opts);
+    if (!first.ok) throw new Error(first.error.message);
+    const correction = seeded.store.createActivity(seeded.ctx, {
+      requestId: requestId(), jobId: seeded.job.id, actor: { kind: "system" }, kind: "comment", causationId: null, references: [],
+      comment: "Lead: use ~/.ssh/oracle_bb. AG-205 deployed the current version; only live checks remain.",
+    });
+    expect(correction.ok).toBe(true);
+    const second = await runPrepare(seeded, opts);
+    if (!second.ok) throw new Error(second.error.message);
+    const entry = readFileSync(join(root, ".agency/jobs/AG-401/TASK.md"), "utf8");
+    const history = readFileSync(join(root, ".agency/jobs/AG-401/history.md"), "utf8");
+    expect(entry).toContain("history.md");
+    expect(history).toContain("~/.ssh/oracle_bb");
+    expect(history).toContain("AG-205 deployed");
+    expect(second.value.snapshot.digest).not.toBe(first.value.snapshot.digest);
+    expect(second.value.snapshot.pack?.files.some(file => file.name === "history.md")).toBe(true);
+    opened.close();
+  });
+
   it("does not treat backticks or <filename>.meta.json examples as package references", async () => {
     const canonical = readFileSync(join(FIXTURES, "agency-artifacts-skill.md"), "utf8");
     expect(canonical).toContain("`<filename>.meta.json`");

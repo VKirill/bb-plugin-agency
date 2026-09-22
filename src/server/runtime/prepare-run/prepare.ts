@@ -22,6 +22,7 @@ import {
 import type { VerifiedPrepareConfig } from "./server-config.js";
 import type { JobInputPort } from "./job-input.js";
 import { hashCatalogSkillPackage } from "./skill-package.js";
+import { recentJobHistory } from "./recent-history.js";
 import { launchModelSource } from "../agent-fallback.js";
 
 const PREPARE_JOB_STATES = new Set(["backlog", "queued"]);
@@ -258,6 +259,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         helperSkillIds: roles.value.helperSkillIds,
         providerLimits: {},
         handoff: persistedInputs.value.handoff,
+        recentHistory: recentJobHistory(deps.store.listActivity(job.id)),
         agencyRules: agencyRulesInput(deps.store.currentAgencyRules?.() ?? null),
         knowledge: deps.store.knowledgeForLaunch?.(job.departmentId, binding.id, briefing?.lessonIds ?? null, job.sectionId) ?? null,
         workProfiles: deps.store.workProfilesForLaunch?.(binding.id, job.workProfileKey ?? null) ?? null,

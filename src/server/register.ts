@@ -1,3 +1,4 @@
+import { assertRelaunchAllowed } from "./runtime/rework/lineage.js";
 import { ensureLaunchIssue, readLaunchIssue } from "./runtime/launch-queue/issues";
 import { traceHandlers } from "./runtime/trace/handlers";
 import { configureTrace, listTrace, recordTrace } from "./runtime/trace/store";
@@ -433,6 +434,8 @@ export function registerAgency(bb: BbPluginApi) {
   /** Every launch, by hand or from the queue: the jobs it depends on are done, then the limits. */
   const checkLaunchGate = async (job: Job, pendingJobIds: readonly string[] = []) => {
     const en = agencyLanguage() === "en";
+    const relaunch = assertRelaunchAllowed(db, job.id);
+    if (!relaunch.ok) return relaunch;
     const dependencies = assertDependenciesDone(db, job, en);
     if (!dependencies.ok) return dependencies;
     const spec = assertSpecAccepted(db, job, rulesForDepartment(db, job.departmentId), en);

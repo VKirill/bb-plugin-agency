@@ -77,6 +77,8 @@ export type CompileContextSnapshotInput = {
   helperSkillIds: readonly CatalogSkillId[];
   providerLimits: ProviderLimits;
   handoff: HandoffPackage | null;
+  /** Bounded, attributed job comments for corrections between attempts. */
+  recentHistory?: string | null;
   /** Agency-wide rules in force: the top prompt layer. Absent when the owner has none. */
   agencyRules?: { versionId: string; version: number; hash: string; text: string } | null;
   /** Work profiles of the project: the index for everyone, the body of the one this job follows. */

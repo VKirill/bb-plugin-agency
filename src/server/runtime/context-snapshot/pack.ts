@@ -20,7 +20,7 @@ export type SnapshotPack = {
 
 export const PACK_ENTRY = "TASK.md";
 /** Every name the pack may write: a file of this list that the new pack lacks is stale and goes away. */
-export const PACK_FILE_NAMES = [PACK_ENTRY, "contract.md", "inputs.md", "handoff.md", "briefing.md", "rules.md", "project.md", "cli.md"] as const;
+export const PACK_FILE_NAMES = [PACK_ENTRY, "contract.md", "inputs.md", "history.md", "handoff.md", "briefing.md", "rules.md", "project.md", "cli.md"] as const;
 
 export function attemptPackDir(jobKey: string): string {
   return `.agency/jobs/${jobKey}`;
@@ -38,6 +38,7 @@ export type AttemptPackInput = {
   inputLines: readonly string[];
   /** Compiled handoff of the previous attempt; null on a first attempt. */
   handoff: string | null;
+  recentHistory?: string | null;
   briefing: string | null;
   /** Agency rules, role guidance, department process, employee instructions, skills of the launch. */
   rules: readonly string[];
@@ -58,6 +59,7 @@ const COPY = {
     files: {
       "contract.md": "границы работы: что можно менять, что нельзя, проверки перед сдачей",
       "inputs.md": "входные версии и папки",
+      "history.md": "последние уточнения и результаты попыток; прочитать до повторения работы",
       "handoff.md": "передача с предыдущей попытки",
       "briefing.md": "подсказка оценщика: какие навыки и записи памяти здесь нужны; не приказ",
       "rules.md": "правила агентства, регламент отдела, должностная инструкция, навыки запуска",
@@ -97,6 +99,7 @@ const COPY = {
     files: {
       "contract.md": "the boundary of the work: what may change, what may not, checks before hand-in",
       "inputs.md": "input versions and folders",
+      "history.md": "recent corrections and attempt results; read before repeating work",
       "handoff.md": "handoff from the previous attempt",
       "briefing.md": "the evaluator's hint: skills and memory records needed here; not an order",
       "rules.md": "agency rules, department process, employee instructions, skills of this launch",
@@ -163,6 +166,7 @@ function section(title: string, lines: readonly string[]): string {
 export function buildAttemptPack(input: AttemptPackInput): AttemptPackFile[] {
   const copy = COPY[input.lang];
   const optional: AttemptPackFile[] = [
+    ...(input.recentHistory?.trim() ? [{ name: "history.md", body: input.recentHistory.trim() }] : []),
     ...(input.contract.trim() ? [{ name: "contract.md", body: section(copy.contract, [copy.contractIntro, "", input.contract.trim()]) }] : []),
     ...(input.inputLines.length ? [{ name: "inputs.md", body: section(copy.inputs, input.inputLines) }] : []),
     ...(input.handoff?.trim() ? [{ name: "handoff.md", body: section(copy.handoff, [input.handoff.trim()]) }] : []),
@@ -176,6 +180,7 @@ export function buildAttemptPack(input: AttemptPackInput): AttemptPackFile[] {
     `# ${input.job.key}: ${input.job.title}`,
     "",
     ...(role ? [copy.roleLine(role, input.position.trim()), ""] : []),
+    ...(input.recentHistory?.trim() ? [input.lang === "ru" ? "Сначала прочитайте `history.md`: там последние уточнения и результаты предыдущей работы. Затем выполняйте оставшуюся часть задания." : "Read `history.md` first for recent corrections and prior results. Then complete the remaining work.", ""] : []),
     `## ${copy.todo}`,
     input.job.brief.trim() || copy.emptyBrief,
     "",

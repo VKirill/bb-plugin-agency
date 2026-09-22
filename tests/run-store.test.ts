@@ -1,3 +1,5 @@
+import { assertRelaunchAllowed, reworkRoundCount } from "../src/server/runtime/rework/lineage";
+import { rulesForDepartment } from "../src/server/rules/work-rules";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -176,6 +178,43 @@ function attestation(seeded: ReturnType<typeof seedProject>) {
 }
 
 describe("run store persist", () => {
+  it("counts canceled worker restarts and refuses another atomic reservation at the department limit", () => {
+    const opened = openFileDb();
+    const seeded = seedProject(opened.db);
+    const snapshot = compileFor(seeded);
+    const runs = createRunStore(opened.db);
+    const limit = rulesForDepartment(opened.db, seeded.job.departmentId).reworkLimit;
+    for (let index = 0; index <= limit; index++) {
+      const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) throw new Error(reserved.error.message);
+      opened.db.prepare("UPDATE agency_run_attempt SET state = 'canceled', thread_id = ? WHERE id = ?")
+        .run(`thr_restart_${index}`, reserved.value.attempt.attemptId);
+    }
+    expect(reworkRoundCount(opened.db, seeded.job.id)).toBe(limit);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id)).toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
+    expect(runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) }))
+      .toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
+    expect(opened.db.prepare("SELECT COUNT(*) AS n FROM agency_run_attempt WHERE job_id = ?").get(seeded.job.id))
+      .toEqual({ n: limit + 1 });
+    opened.close();
+  });
+
+  it("does not charge refused spawns without a worker thread as rework", () => {
+    const opened = openFileDb();
+    const seeded = seedProject(opened.db);
+    const snapshot = compileFor(seeded);
+    const runs = createRunStore(opened.db);
+    for (let index = 0; index < 6; index++) {
+      const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
+      if (!reserved.ok) throw new Error(reserved.error.message);
+      opened.db.prepare("UPDATE agency_run_attempt SET state = 'failed' WHERE id = ?").run(reserved.value.attempt.attemptId);
+    }
+    expect(reworkRoundCount(opened.db, seeded.job.id)).toBe(0);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id).ok).toBe(true);
+    opened.close();
+  });
+
   it("keeps launch adapter unavailable and documents no automatic spawn retry", () => {
     expect(RUN_LAUNCH_ADAPTER_CONTRACT.executionAvailable).toBe(false);
     expect(RUN_LAUNCH_ADAPTER_CONTRACT.automaticSpawnRetry).toBe(false);

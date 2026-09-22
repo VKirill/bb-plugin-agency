@@ -1,3 +1,4 @@
+import { assertRelaunchAllowed } from "../rework/lineage.js";
 import { fail, ok, type DomainResult } from "../../../domain";
 import { matchRevision } from "../../../domain";
 import { requestIdSchema } from "../../../shared/contracts";
@@ -349,6 +350,8 @@ function createRunStoreParts(db: SqlDatabase): { writes: RunStore; reads: Intern
               return fail("active_attempt_exists", `job ${input.snapshot.job.id} already has an active attempt`);
             }
           }
+          const relaunch = assertRelaunchAllowed(db, input.snapshot.job.id);
+          if (!relaunch.ok) return relaunch;
           const attempt: RunAttempt = {
             attemptId: newOpaqueId("runAttempt"),
             jobId: input.snapshot.job.id,
