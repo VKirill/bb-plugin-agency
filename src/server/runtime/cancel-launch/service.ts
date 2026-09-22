@@ -10,6 +10,7 @@ import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../st
 import { OCCUPYING_THREAD_STATUSES, type OfficialThreadStatus } from "../stop-handoff/types.js";
 import { uuidV5 } from "../launch/operation-ids.js";
 import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
+import { findReviewerThread, markReviewerThreadDead, resolveReviewLine } from "../reviewer-thread/service.js";
 
 export const CANCEL_LAUNCH_KIND = "agency.cancelLaunch";
 
@@ -166,6 +167,13 @@ export function createCancelLaunchService(deps: CancelLaunchDeps) {
           [snapshot.value.snapshot.binding.id],
           nowUtc(ctx),
         );
+        const lineJobId = resolveReviewLine(deps.db, input.jobId);
+        if (lineJobId) {
+          const row = findReviewerThread(deps.db, snapshot.value.snapshot.agentVersion.agentId, lineJobId);
+          if (row && row.threadId === input.threadId) {
+            markReviewerThreadDead(deps.db, snapshot.value.snapshot.agentVersion.agentId, lineJobId, "cancel_launch", nowUtc(ctx));
+          }
+        }
         return result;
       });
     },

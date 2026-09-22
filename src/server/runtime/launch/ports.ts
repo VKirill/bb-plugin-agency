@@ -47,6 +47,8 @@ export type ConfirmedThreadClaim = {
   jobId: string;
   snapshotId: string;
   digest: string;
+  /** Origin pluginMetadata when this attempt reused a prior reviewer's thread. */
+  expectedMetadata?: { launchId: string; attemptId: string; jobId: string };
 };
 
 export type VerifiedThreadIdentity = {
@@ -121,6 +123,25 @@ export type JobRunningPort = {
   onConfirmedBind(ctx: ServiceContext, bind: ConfirmedJobBind): Promise<DomainResult<true>>;
 };
 
+export type ReusedReviewerThread = {
+  threadId: string;
+  originLaunchId: string;
+  originAttemptId: string;
+  originJobId: string;
+};
+
+export type ThreadReuseDeliverOutcome =
+  | { kind: "confirmed"; delivery: "sent" | "queued"; queuedMessageId?: string }
+  | { kind: "unknown"; code: string; message: string }
+  | { kind: "rejected"; code: string; message: string };
+
+export type ThreadReusePort = {
+  resolve(ctx: ServiceContext, attempt: RunAttempt, snapshot: ContextSnapshot): ReusedReviewerThread | null;
+  deliver(threadId: string, attempt: RunAttempt, snapshot: ContextSnapshot): Promise<ThreadReuseDeliverOutcome>;
+  remember(ctx: ServiceContext, attempt: RunAttempt, threadId: string, launchId: string): void;
+  markDead(ctx: ServiceContext, attempt: RunAttempt, reason: string): void;
+};
+
 export type LaunchPorts = {
   store: AttemptStorePort;
   liveIdentity: LiveIdentityPort;
@@ -128,4 +149,6 @@ export type LaunchPorts = {
   spawn: SpawnPort;
   threadVerify: ThreadVerifyPort;
   jobRunning: JobRunningPort;
+  /** Auto-review only. Absent → every launch goes through spawn. */
+  threadReuse?: ThreadReusePort;
 };

@@ -201,10 +201,13 @@ export function createIsolatedThreadVerifyPort(threads: IsolatedThreadsApi, supp
           await threads.get({ threadId: receipt.threadId, include: "environment,host" }),
         );
         const ids = callerIdsFromThread(loaded);
-        if (ids.launchId !== receipt.launchId) {
+        const expectedLaunchId = receipt.expectedMetadata?.launchId ?? receipt.launchId;
+        const expectedAttemptId = receipt.expectedMetadata?.attemptId ?? receipt.attemptId;
+        const expectedJobId = receipt.expectedMetadata?.jobId ?? receipt.jobId;
+        if (ids.launchId !== expectedLaunchId) {
           return { kind: "rejected", code: "caller_launch_mismatch", message: "thread launch id does not match" };
         }
-        if (ids.attemptId !== receipt.attemptId) {
+        if (ids.attemptId !== expectedAttemptId) {
           return { kind: "rejected", code: "caller_attempt_mismatch", message: "thread attempt id does not match" };
         }
         if (!present(ids.jobId)) {
@@ -214,7 +217,7 @@ export function createIsolatedThreadVerifyPort(threads: IsolatedThreadsApi, supp
             message: "receipt has jobId but the thread omitted agencyJobId",
           };
         }
-        if (ids.jobId !== receipt.jobId) {
+        if (ids.jobId !== expectedJobId) {
           return { kind: "rejected", code: "caller_job_mismatch", message: "thread job id does not match the receipt job" };
         }
         const extracted = identityFromServerThread(loaded);

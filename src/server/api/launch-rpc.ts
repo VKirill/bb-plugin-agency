@@ -60,6 +60,7 @@ import { returnJobForRework } from "../runtime/rework/service";
 import { readProjectRulesFile } from "./project-rules";
 import { agencyLanguage } from "../i18n/language.js";
 import type { IsolatedSendPort } from "../runtime/isolated-sdk/send-port.js";
+import { createReviewerThreadReusePort } from "../runtime/reviewer-thread/service.js";
 import { flushParentWakes } from "../runtime/parent-wake";
 import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../runtime/stop-handoff/ports.js";
 import type { OfficialThreadStatus } from "../runtime/stop-handoff/types.js";
@@ -224,6 +225,7 @@ export function createIsolatedLaunchRpc(deps: {
       ),
       threadVerify: createIsolatedThreadVerifyPort(officialThreads, true),
       jobRunning: createStoreJobRunningPort(deps.store),
+      threadReuse: createReviewerThreadReusePort(deps.db, officialThreads, deps.send),
     });
   }
 
@@ -686,17 +688,37 @@ export function createIsolatedLaunchRpc(deps: {
 }
 
 export function listBoundLaunchWatches(db: SqlDatabase): Array<{ threadId: string; jobId: string; launchId: string }> {
-  return (
-    db
-      .prepare(
-        `SELECT launch_id as launchId, job_id as jobId, thread_id as threadId
-         FROM agency_launch_receipt
-         WHERE thread_id IS NOT NULL`,
-      )
-      .all() as Array<{ launchId: string; jobId: string; threadId: string | null }>
-  )
-    .filter((row): row is { launchId: string; jobId: string; threadId: string } => Boolean(row.threadId))
-    .map((row) => ({ launchId: row.launchId, jobId: row.jobId, threadId: row.threadId }));
+  const placeholders = ACTIVE_RUN_ATTEMPT_STATES.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT r.launch_id as launchId, r.job_id as jobId, r.thread_id as threadId,
+              a.attempt_no as attemptNo, a.updated_at as updatedAt
+         FROM agency_launch_receipt r
+         INNER JOIN agency_run_attempt a ON a.id = r.attempt_id
+         WHERE r.thread_id IS NOT NULL
+           AND a.state IN (${placeholders})`,
+    )
+    .all(...ACTIVE_RUN_ATTEMPT_STATES) as Array<{
+    launchId: string;
+    jobId: string;
+    threadId: string | null;
+    attemptNo: number;
+    updatedAt: string;
+  }>;
+  const latest = new Map<string, { launchId: string; jobId: string; threadId: string; attemptNo: number; updatedAt: string }>();
+  for (const row of rows) {
+    if (!row.threadId) continue;
+    const current = latest.get(row.threadId);
+    const next = { launchId: row.launchId, jobId: row.jobId, threadId: row.threadId, attemptNo: row.attemptNo, updatedAt: row.updatedAt };
+    if (
+      !current ||
+      next.attemptNo > current.attemptNo ||
+      (next.attemptNo === current.attemptNo && next.updatedAt > current.updatedAt)
+    ) {
+      latest.set(row.threadId, next);
+    }
+  }
+  return [...latest.values()].map((row) => ({ launchId: row.launchId, jobId: row.jobId, threadId: row.threadId }));
 }
 
 /**

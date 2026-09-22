@@ -20,10 +20,10 @@ function indexes(db: Database.Database, table: string): string[] {
 describe("миграция agency_stale_nudge", () => {
   const sql = migrations.find((item) => item.includes("CREATE TABLE agency_stale_nudge"));
 
-  it("добавлена новой миграцией в конец и не переписывает предыдущие", () => {
+  it("добавлена одной миграцией и не переписывает предыдущие", () => {
     expect(sql).toBeDefined();
-    expect(migrations[migrations.length - 1]).toBe(sql);
     expect(migrations.filter((item) => item.includes("CREATE TABLE agency_stale_nudge"))).toHaveLength(1);
+    expect(migrations.indexOf(sql!)).toBeGreaterThanOrEqual(0);
   });
 
   it("создаёт таблицу на свежей базе", () => {
@@ -55,7 +55,7 @@ describe("миграция agency_stale_nudge", () => {
 
   it("добавляет таблицу к существующей базе и повторный прогон идемпотентен", () => {
     const raw = new Database(":memory:");
-    applyAgencyMigrations(raw, { throughId: migrations.length - 2 });
+    applyAgencyMigrations(raw, { throughId: migrations.indexOf(sql!) - 1 });
     expect(tableNames(raw)).not.toContain("agency_stale_nudge");
     applyAgencyMigrations(raw);
     expect(tableNames(raw)).toContain("agency_stale_nudge");

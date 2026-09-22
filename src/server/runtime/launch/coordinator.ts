@@ -290,13 +290,47 @@ export function createLaunchCoordinator(ports: LaunchPorts) {
       });
     }
 
-    let outcome: SpawnOutcome;
-    try {
-      outcome = await ports.spawn.spawn(contract.value);
-    } catch {
-      return markUnknown(ctx, input.requestId, launching.value, launchId, "spawn_transport_unknown");
+    const spawnOutcome = await spawnOrReuse(ctx, launching.value, snapshot, contract.value);
+    const settled = await settleSpawn(ctx, input, snapshot, launching.value, launchId, contract.value, spawnOutcome);
+    rememberConfirmedReviewThread(ctx, settled, launchId);
+    return settled;
+  }
+
+  async function spawnOrReuse(
+    ctx: ServiceContext,
+    launching: RunAttempt,
+    snapshot: ContextSnapshot,
+    contract: LaunchContract,
+  ): Promise<SpawnOutcome> {
+    const reuse = ports.threadReuse?.resolve(ctx, launching, snapshot) ?? null;
+    if (reuse && ports.threadReuse) {
+      let delivered: Awaited<ReturnType<NonNullable<LaunchPorts["threadReuse"]>["deliver"]>>;
+      try {
+        delivered = await ports.threadReuse.deliver(reuse.threadId, launching, snapshot);
+      } catch {
+        delivered = { kind: "unknown", code: "reuse_deliver_unknown", message: "thread reuse deliver failed" };
+      }
+      if (delivered.kind === "confirmed") {
+        return { kind: "confirmed", threadId: reuse.threadId };
+      }
+      ports.threadReuse.markDead(ctx, launching, delivered.code);
     }
-    return settleSpawn(ctx, input, snapshot, launching.value, launchId, contract.value, outcome);
+    try {
+      return await ports.spawn.spawn(contract);
+    } catch {
+      return { kind: "unknown", code: "spawn_transport_unknown", message: "spawn threw" };
+    }
+  }
+
+  function rememberConfirmedReviewThread(
+    ctx: ServiceContext,
+    settled: DomainResult<LaunchCoordinatorResult>,
+    launchId: string,
+  ): void {
+    if (!ports.threadReuse || !settled.ok || settled.value.kind !== "running") return;
+    const threadId = settled.value.receipt.threadId ?? settled.value.attempt.threadId;
+    if (!threadId) return;
+    ports.threadReuse.remember(ctx, settled.value.attempt, threadId, launchId);
   }
 
   async function settleSpawn(
@@ -573,6 +607,15 @@ export function createLaunchCoordinator(ports: LaunchPorts) {
       });
     }
 
+    const reuse = ports.threadReuse?.resolve(ctx, attempt, snapshot.value.snapshot) ?? null;
+    const expectedMetadata =
+      reuse && reuse.threadId === hintThreadId
+        ? {
+            launchId: reuse.originLaunchId,
+            attemptId: reuse.originAttemptId,
+            jobId: reuse.originJobId,
+          }
+        : undefined;
     const verified = await ports.threadVerify.verifyConfirmedThread(
       {
         launchId: input.launchId,
@@ -581,6 +624,7 @@ export function createLaunchCoordinator(ports: LaunchPorts) {
         jobId: attempt.jobId,
         snapshotId: attempt.snapshotId,
         digest: attempt.digest,
+        expectedMetadata,
       },
       snapshot.value.snapshot,
     );
