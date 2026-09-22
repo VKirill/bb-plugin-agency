@@ -88,7 +88,7 @@ export const STARTER_KIT: KitDepartment[] = [
         roleType: "reviewer",
         preset: {
           providerId: "codex",
-          model: "gpt-5.6-sol",
+          model: "gpt-6-sol",
           reasoningEffort: "high",
           label: { ru: "GPT-5.6-Sol · Codex", en: "GPT-5.6-Sol \u00b7 Codex" },
         },
@@ -233,7 +233,7 @@ export const STARTER_KIT: KitDepartment[] = [
         roleType: "executor",
         preset: {
           providerId: "codex",
-          model: "gpt-5.6-sol",
+          model: "gpt-6-sol",
           reasoningEffort: "high",
           label: { ru: "GPT-5.6-Sol \u00b7 Codex", en: "GPT-5.6-Sol \u00b7 Codex" },
         },
@@ -247,7 +247,7 @@ export const STARTER_KIT: KitDepartment[] = [
         roleType: "reviewer",
         preset: {
           providerId: "codex",
-          model: "gpt-5.6-sol",
+          model: "gpt-6-sol",
           reasoningEffort: "high",
           label: { ru: "GPT-5.6-Sol \u00b7 Codex", en: "GPT-5.6-Sol \u00b7 Codex" },
         },

@@ -42,7 +42,7 @@ export const GROK: KitModel = {
 /** Проверка: другой вендор, чем у исполнителя. */
 export const SOL: KitModel = {
   providerId: "codex",
-  model: "gpt-5.6-sol",
+  model: "gpt-6-sol",
   reasoningEffort: "high",
   label: { ru: "GPT-5.6-Sol · Codex", en: "GPT-5.6-Sol · Codex" },
 };
