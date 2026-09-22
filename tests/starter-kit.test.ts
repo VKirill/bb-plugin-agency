@@ -95,8 +95,8 @@ describe("starter kit", () => {
   it("gives the conveyor employees the CLI their work is meant for", () => {
     const conveyor = STARTER_KIT.find((item) => item.key === "dev-conveyor")!;
     const preset = (key: string) => conveyor.agents.find((agent) => agent.key === key)?.preset;
-    // The code is written by Grok in fast mode, planning and review go to other vendors.
-    expect(preset("conveyor-coder")).toMatchObject({ providerId: "acp-cursor", model: "grok-4.6", reasoningEffort: "medium", serviceTier: "fast" });
+    // The code is written by Grok in normal mode, planning and review go to other vendors.
+    expect(preset("conveyor-coder")).toMatchObject({ providerId: "acp-cursor", model: "grok-4.6", reasoningEffort: "medium", serviceTier: "default" });
     expect(preset("conveyor-lead")).toMatchObject({ providerId: "claude-code" });
     expect(preset("conveyor-assistant")).toMatchObject({ providerId: "codex", model: "gpt-5.6-luna", reasoningEffort: "high", serviceTier: "fast" });
     expect(preset("conveyor-scout")).toMatchObject({ providerId: "codex", serviceTier: "fast" });

@@ -30,13 +30,13 @@ export const SONNET: KitModel = {
   label: { ru: "Claude Sonnet 5 · Claude Code", en: "Claude Sonnet 5 · Claude Code" },
 };
 
-/** Код по плану: быстрый режим другого вендора, чем у проверяющего. */
+/** Код по плану: другой вендор, чем у проверяющего. */
 export const GROK: KitModel = {
   providerId: "acp-cursor",
   model: "grok-4.6",
   reasoningEffort: "medium",
-  serviceTier: "fast",
-  label: { ru: "Grok 4.6 · быстрый режим · Cursor", en: "Grok 4.6 · fast mode · Cursor" },
+  serviceTier: "default",
+  label: { ru: "Grok 4.6 · Cursor", en: "Grok 4.6 · Cursor" },
 };
 
 /** Проверка: другой вендор, чем у исполнителя. */
