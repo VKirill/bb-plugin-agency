@@ -424,6 +424,11 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
     expectedRevision: 0,
     rules: { reworkLimit: 2, minorDefectsWithoutRound: true, concurrencyLimit: 3 },
   },
+  recoverJob: {
+    requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", expectedRevision: 5,
+    comment: "Continue the original task with the corrected input.",
+    recoveryDecision: { cause: "The input pointed to an obsolete version.", correction: "Attached the accepted current artifact and corrected the brief.", verification: "Readiness verified against the exact artifact hash; record the evidence path here." },
+  },
   returnJobForRework: {
     requestId: REQUEST_ID,
     jobId: "job_aaaaaaaaaaaa",

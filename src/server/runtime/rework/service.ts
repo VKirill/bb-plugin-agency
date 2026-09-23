@@ -1,3 +1,10 @@
+import { failedLaunchCount } from "../recovery/permit";
+import { randomUUID } from "node:crypto";
+import { ensureLaunchIssue, resolveLaunchIssue } from "../launch-queue/issues";
+import { enqueueParentWake } from "../parent-wake";
+import { recordTrace } from "../trace/store";
+import { assertRecoveryAuthority, recoveryText } from "../recovery/authorization";
+import { recoveryDecisionSchema, type RecoveryDecision } from "../../../shared/rpc-contract";
 import { reworkRoundCount } from "./lineage.js";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import { fail, ok, type DomainResult } from "../../../domain";
@@ -8,7 +15,6 @@ import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
 import type { ServiceContext } from "../../services/context.js";
 import type { DomainStore } from "../../services/domain-store.js";
 import { uuidV5 } from "../launch/operation-ids.js";
-import { announceLoopBlock } from "../loop-break/announce.js";
 import { loopEffect } from "../loop-break/mark.js";
 import { latestLoopMark, rootJobId } from "../loop-break/store.js";
 
@@ -42,6 +48,7 @@ export type ReturnForReworkInput = {
   jobId: string;
   expectedRevision: number;
   comment: string;
+  recoveryDecision?: RecoveryDecision;
 };
 
 export type ReworkDeps = {
@@ -73,7 +80,7 @@ export function reworkToken(requestId: string): string {
 export function reworkText(jobKey: string, comment: string, returnedHash: string, requestId: string, lang: AgencyLanguage = agencyLanguage()): string {
   if (lang === "en") {
     return [
-      `Agency: the owner returned ${jobKey} for rework.`,
+      `Agency: returned ${jobKey} for rework.`,
       "",
       "Remarks:",
       comment.trim(),
@@ -83,7 +90,7 @@ export function reworkText(jobKey: string, comment: string, returnedHash: string
     ].join("\n");
   }
   return [
-    `Агентство: владелец вернул ${jobKey} на доработку.`,
+    `Агентство: задача ${jobKey} возвращена на доработку.`,
     "",
     "Замечания:",
     comment.trim(),
@@ -163,14 +170,37 @@ function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expe
     });
     if (!commented.ok) return commented;
     setSendState(deps.db, row.request_id, "confirmed", new Date().toISOString());
+    resolveLaunchIssue(deps.db, job.id);
+    recordTrace(deps.db, { jobId: job.id, step: "rework.return", outcome: "succeeded", reason: row.comment.startsWith("Recovery decision") ? "lead_recovery" : "ordinary_return", requestId: row.request_id, attemptId: row.attempt_id, threadId: row.thread_id, artifactHash: row.returned_hash });
     return ok(moved.value);
   })();
 }
 
+function reportRecoveryBlock(deps: ReworkDeps, ctx: ServiceContext, job: Job, code: string): void {
+  const now = new Date().toISOString();
+  const activity = ensureLaunchIssue(deps.db, job, code, now, comment => deps.store.createActivity(ctx, {
+    requestId: randomUUID(), jobId: job.id, actor: { kind: "system" }, kind: "comment", causationId: null,
+    references: [{ type: "launch_issue", id: code }, { type: "job_state", id: job.state }], comment,
+  }), agencyLanguage() === "en");
+  if (activity) enqueueParentWake(deps.db, job, activity, now);
+}
+
 export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, input: ReturnForReworkInput): Promise<DomainResult<Job>> {
-  const comment = input.comment.trim();
+  if (input.recoveryDecision && !recoveryDecisionSchema.safeParse(input.recoveryDecision).success)
+    return fail("invalid_command", "Recovery requires a cause, correction and verified evidence.");
+  const target = deps.store.getJob(input.jobId);
+  if (!target) return fail("not_found", `job ${input.jobId} not found`);
+  if (input.recoveryDecision) {
+    const authority = assertRecoveryAuthority(deps.db, ctx, target);
+    if (!authority.ok) return authority;
+  }
+  const comment = input.recoveryDecision
+    ? `${recoveryText(input.recoveryDecision)}\nDecision by: ${ctx.caller?.agentId ?? (ctx.actor.kind === "agent" ? ctx.actor.agentId : ctx.actor.kind)}\n\n${input.comment.trim()}`
+    : input.comment.trim();
   if (!comment) return fail("invalid_command", "rework comment is required");
   const existing = readRow(deps.db, input.requestId);
+  if (existing && (existing.job_id !== input.jobId || existing.comment !== comment))
+    return fail("request_conflict", "Rework request identity changed.");
   if (existing?.send_state === "confirmed") {
     const job = deps.store.getJob(existing.job_id);
     return job ? ok(job) : fail("not_found", `job ${existing.job_id} not found`);
@@ -178,9 +208,9 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   const job = deps.store.getJob(input.jobId);
   if (!job) return fail("not_found", `job ${input.jobId} not found`);
   const root = rootJobId(deps.db, job.parentJobId ?? job.id);
-  if (loopEffect(latestLoopMark(deps.db, root, job.reworkOfJobId ?? job.id)) === "block") {
-    announceLoopBlock(deps.db, root);
-    return fail("loop_blocked", "loop mark blocks another pass on this line; ask the owner with report-needs-input");
+  if (!input.recoveryDecision && loopEffect(latestLoopMark(deps.db, root, job.reworkOfJobId ?? job.id)) === "block") {
+    reportRecoveryBlock(deps, ctx, job, "loop_blocked");
+    return fail("loop_blocked", "loop mark blocks another pass; the responsible lead must repair the cause and use job recover with verified evidence");
   }
   const delivered = job.state === "done";
   if (delivered) {
@@ -201,12 +231,13 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   let row = existing;
   // The department limit bounds rounds inside the line; a reclamation is the customer's call.
   if (!row && deps.reworkLimit && !delivered) {
-    const limit = deps.reworkLimit(job);
-    const done = reworkRoundCount(deps.db, job.reworkOfJobId ?? job.id);
-    if (done >= limit) {
+    const limit = Math.min(2, deps.reworkLimit(job));
+    const done = reworkRoundCount(deps.db, job.reworkOfJobId ?? job.id) + failedLaunchCount(deps.db, job.id);
+    if (done >= limit && !input.recoveryDecision) {
+      reportRecoveryBlock(deps, ctx, job, "rework_limit_reached");
       return fail(
         "rework_limit_reached",
-        `the job was returned ${done} time(s), the department limit is ${limit}. Choose the best version already made, say why and what it lacks, and hand it to the owner instead of another round.`,
+        `the job was returned ${done} time(s), automatic continuation limit ${limit} (three failed passes maximum, or a stricter department setting). The responsible department lead must diagnose the failures, fix the cause and authorize one recovery with cause, correction and verification. Do not launch another unchanged pass.`,
       );
     }
   }

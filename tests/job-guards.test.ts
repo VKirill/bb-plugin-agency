@@ -64,7 +64,7 @@ describe("server guards on jobs", () => {
 describe("rework", () => {
   it("tells the worker what to fix and blocks review on the returned version only", () => {
     const text = reworkText("AG-7", "Итог не сходится.", "ab".repeat(32), "7a3f0c52-8d1e-4d8e-9a55-0f4a3a6b1c11");
-    expect(text).toContain("владелец вернул AG-7 на доработку");
+    expect(text).toContain("задача AG-7 возвращена на доработку");
     expect(text).toContain("Итог не сходится.");
     expect(text).toContain("Прежняя версия abababab");
     expect(text).toContain("agency.rework:7a3f0c52-8d1e-4d8e-9a55-0f4a3a6b1c11");

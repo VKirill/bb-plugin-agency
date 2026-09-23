@@ -1,3 +1,4 @@
+import { ensureRecoveryTriage } from "./runtime/recovery/escalation";
 import { assertRelaunchAllowed } from "./runtime/rework/lineage.js";
 import { ensureLaunchIssue, readLaunchIssue } from "./runtime/launch-queue/issues";
 import { traceHandlers } from "./runtime/trace/handlers";
@@ -1884,6 +1885,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "listJobAttempts"
     | "getIsolationReadiness"
     | "cancelLaunch"
+    | "recoverJob"
     | "returnJobForRework"
     | "saveEventDefinition"
     | "saveEventSource"
@@ -1929,6 +1931,12 @@ export function registerAgency(bb: BbPluginApi) {
     }), agencyLanguage() === "en");
     if (!activity) return;
     enqueueParentWake(db, job, activity, now);
+    const hasParentTarget = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? LIMIT 1").get(activity.id);
+    if (!hasParentTarget && ["rework_limit_reached", "loop_blocked"].includes(code)) {
+      const triage = ensureRecoveryTriage(db, store, access.value.ctx, job, activity, agencyLanguage() === "en");
+      if (triage && ["backlog", "queued"].includes(triage.state)) queueJobForLaunch(triage, uuidV5(LAUNCH_QUEUE_NAMESPACE, `recovery-queue:${triage.id}`));
+      if (triage) return;
+    }
     void flushParentWakes({ db, send, now }).catch(() => {
       recordTrace(db, { jobId: job.id, step: "lead.delivery", outcome: "failed", reason: "flush_exception", collapse: true });
     });
@@ -1958,6 +1966,7 @@ export function registerAgency(bb: BbPluginApi) {
         enqueueProductReady(db, job, new Date().toISOString());
         void flushClientBounces({ db, send, now: new Date().toISOString() }).catch(() => undefined);
       },
+      notifyLead: notifyQueueLead,
       autoReview: autoReviewPorts(),
       handInGate: async (job) => {
         if (!["executor", "lead"].includes(store.memberRole(job.departmentId, job.assignedAgentId) ?? "")) {
@@ -2123,6 +2132,16 @@ export function registerAgency(bb: BbPluginApi) {
     if (queueBusy) return;
     queueBusy = true;
     try {
+      for (const issue of db.prepare("SELECT job_id, code FROM agency_launch_issue WHERE code IN ('rework_limit_reached','loop_blocked')").all() as Array<{ job_id: string; code: string }>) {
+        const held = store.getJob(issue.job_id);
+        if (held && ["blocked", "review", "queued", "backlog"].includes(held.state)) notifyQueueLead(held, issue.code);
+      }
+      // Reconciliation may leave a failed job outside the launch queue. Escalate there too.
+      for (const row of db.prepare("SELECT id FROM agency_job WHERE state = 'blocked'").all() as Array<{ id: string }>) {
+        const gate = assertRelaunchAllowed(db, row.id);
+        const blocked = store.getJob(row.id);
+        if (blocked && !gate.ok && ["rework_limit_reached", "loop_blocked"].includes(gate.error.code)) notifyQueueLead(blocked, gate.error.code);
+      }
       // A launch that vanished from the queue goes back in line before the sweep.
       if (repairQueuedJobs(db, new Date().toISOString()).length) onChanged();
       if (reopenDroppedAssignedJobs(db, new Date().toISOString()).length) onChanged();

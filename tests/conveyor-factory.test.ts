@@ -472,6 +472,33 @@ describe("reclamation: the customer returns the delivered product as a whole", (
     };
   }
 
+  it("allows one audited lead recovery without granting the worker an override", async () => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const root = s.job("Product", s.lead);
+    const work = child(s, root.id, "Fix exit status");
+    handIn(s, db, work.id);
+    s.attempt(work.id, "awaiting_review");
+    s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: work.id, threadBound: true });
+    const sent: Array<{ threadId: string; text: string }> = [];
+    const deps = reworkDeps(s, db, sent);
+    const owner: ServiceContext = { actor: { kind: "user", userId: "usr_owner" }, allowedBindingIds: [s.bindingId] };
+    const input = { requestId: randomUUID(), jobId: work.id, expectedRevision: s.store.getJob(work.id)!.revision, comment: "Reject exit 73 even when stdout says accepted." };
+    expect(await returnJobForRework(deps, owner, input)).toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
+    const decision = { ...input, recoveryDecision: { cause: "The exit status was ignored in stdout parsing.", correction: "Return the exact reproducer to the existing worker.", verification: "Confirmed exit 73 reproducer in reviewer artifact." } };
+    expect(await returnJobForRework(deps, { ...owner, caller: { threadId: "thr_worker", attemptId: "run_worker", jobId: work.id, agentId: s.developer } }, decision))
+      .toMatchObject({ ok: false, error: { code: "recovery_lead_only" } });
+    expect(sent).toHaveLength(0);
+    expect((await returnJobForRework(deps, { ...owner, caller: { threadId: "thr_lead", attemptId: "run_lead", jobId: root.id, agentId: s.lead } }, decision)).ok).toBe(true);
+    expect((await returnJobForRework(deps, { ...owner, caller: { threadId: "thr_lead", attemptId: "run_lead", jobId: root.id, agentId: s.lead } }, decision)).ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain(decision.recoveryDecision.cause);
+    expect(s.store.listActivity(work.id).some(row => row.comment?.includes(decision.recoveryDecision.cause))).toBe(true);
+    expect(deps.reworkLimit!(work)).toBe(0);
+    expect(db.prepare("SELECT 1 FROM agency_launch_issue WHERE job_id = ?").get(work.id)).toBeUndefined();
+    db.close();
+  });
+
   function deliveredRoot(s: Seed, db: Db) {
     const root = s.job("Партия кроссовок", s.lead);
     const facts = s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: root.id, threadBound: true });

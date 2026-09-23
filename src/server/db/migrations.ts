@@ -1,3 +1,5 @@
+import { RECOVERY_TRIAGE_MIGRATION } from "../runtime/recovery/escalation";
+import { RECOVERY_MIGRATION } from "../runtime/recovery/permit";
 import { LAUNCH_ISSUE_MIGRATION } from "../runtime/launch-queue/issues";
 import { TRACE_MIGRATION } from "../runtime/trace/store";
 import { SAVED_VIEWS_MIGRATION } from "../insights/archive";
@@ -741,6 +743,8 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   `CREATE TABLE agency_handin_hold (job_id TEXT NOT NULL REFERENCES agency_job(id), hash TEXT NOT NULL, remark TEXT NOT NULL, PRIMARY KEY (job_id, hash))`,
   TRACE_MIGRATION,
   LAUNCH_ISSUE_MIGRATION,
+  RECOVERY_MIGRATION,
+  RECOVERY_TRIAGE_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

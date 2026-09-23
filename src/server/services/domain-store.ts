@@ -421,7 +421,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     }
     const lineId = source.reworkOfJobId ?? source.id;
     const count = reworkRoundCount(db, lineId);
-    const limit = rulesForDepartment(db, departmentId).reworkLimit;
+    const limit = Math.min(2, rulesForDepartment(db, departmentId).reworkLimit);
     if (count >= limit) return fail("rework_limit_reached", `${count} rework round(s) already on this result, department limit ${limit}. Resolve the cause before another round.`);
     return ok(lineId);
   }

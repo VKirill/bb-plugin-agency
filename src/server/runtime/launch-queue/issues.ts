@@ -10,7 +10,10 @@ export const LAUNCH_ISSUE_MIGRATION = `CREATE TABLE agency_launch_issue (
 export const LEAD_ACTION_CODES = new Set(["spec_required", "owns_overlap", "catalog_skill_hash_mismatch", "loop_blocked", "rework_limit_reached"]);
 
 export function launchIssueText(jobKey: string, code: string, en: boolean): string {
-  const action = code === "spec_required"
+  const action = code === "rework_limit_reached" || code === "loop_blocked"
+    ? en ? "Automatic repetition is stopped. Read the attempts, reviewer remarks and recent history. Diagnose the root cause; repair the brief, instructions, inputs, access configuration or implementation within authorized scope. Conveyor/plugin defects may be fixed as a separate repair job with regression checks and independent review. Then call job recover on THIS job with recoveryDecision {cause, correction, verification}, citing concrete verified evidence. This authorizes one continuation, not a budget reset. Save the verified lesson in department knowledge."
+      : "Автоматические повторы остановлены. Прочитайте попытки, замечания проверяющего и историю. Найдите причину; исправьте задание, инструкции, входы, настройки доступа или реализацию в пределах полномочий. Дефект конвейера/плагина можно исправить отдельной задачей с регрессионной проверкой и независимым ревью. Затем вызовите job recover для ЭТОЙ задачи с recoveryDecision {cause, correction, verification} и конкретными проверенными доказательствами. Это разрешение на одно продолжение, а не сброс лимита. Сохраните подтверждённый урок в знаниях отдела."
+    : code === "spec_required"
     ? en ? "Read the source work and its published inputs. Attach the exact normative artifact/version/hash or add the required dependency. Do not rewrite an existing specification or create a replacement review."
       : "Прочитайте исходную работу и её опубликованные входы. Прикрепите точный нормативный артефакт/версию/hash либо добавьте нужную зависимость. Не переписывайте существующую спецификацию и не создавайте замену проверки."
     : code === "owns_overlap"

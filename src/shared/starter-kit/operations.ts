@@ -41,7 +41,7 @@ export const INFRA_KIT: KitDepartment = {
 План выкладки уходит на проверку принятой версией: команды, порядок, откат, как убедиться, что всё поднялось.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Выкладка на живую систему, миграция базы, удаление данных, изменение прав доступа, оплата тарифов — всегда решение владельца.`,
@@ -79,7 +79,7 @@ Keeping it running and not losing it: servers, deploys, monitoring, backups and 
 The deploy plan reaches the review as an accepted version: the commands, the order, the rollback, how to be sure everything came up.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Deploying to a live system, migrating a database, deleting data, changing access rights, paying for plans — always the owner's decision.`,
@@ -358,7 +358,7 @@ export const AUTOMATION_KIT: KitDepartment = {
 Автоматизация уходит на проверку принятой версией: расписание, условие, действие, что будет при ошибке, как выключить.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Автоматизация тратит деньги или пишет наружу; новый сотрудник или отдел; правило, которое запускает работу без человека чаще раза в час.`,
@@ -396,7 +396,7 @@ So the routine runs itself: BB automations, scripts, skills and instructions for
 The automation reaches the review as an accepted version: the schedule, the condition, the action, what happens on an error, how to switch it off.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 An automation that spends money or writes outward; a new employee or department; a rule that starts work without a human more often than once an hour.`,

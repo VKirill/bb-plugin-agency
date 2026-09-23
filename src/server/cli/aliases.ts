@@ -142,6 +142,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "attempts") return "listJobAttempts";
     if (rest[0] === "comment") return "createJobComment";
     if (rest[0] === "usage") return "listDashboardUsage";
+    if (rest[0] === "recover") return "recoverJob";
     if (rest[0] === "return") return "returnJobForRework";
   }
   if (head === "launch" && rest.length === 1) {

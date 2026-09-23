@@ -40,7 +40,7 @@ export const PRODUCT_KIT: KitDepartment = {
 Спецификация уходит дальше принятой версией через attach-input. Разработка получает критерии приёмки дословно, а не пересказом.
 
 ## При дефекте
-Подзадача доработки автору спецификации с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору спецификации с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Требования противоречат друг другу или обещаниям клиентам; нужен бюджет или внешний сервис; решение меняет продукт целиком.`,
@@ -80,7 +80,7 @@ Requirements you can build on: what we make, for whom, and how we will know it w
 The specification travels on as an accepted version through attach-input. Development gets the acceptance criteria word for word, not as a retelling.
 
 ## On a defect
-A rework subtask for the author of the specification with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author of the specification with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Requirements contradict each other or the promises made to customers; a budget or an external service is needed; the decision changes the product as a whole.`,
@@ -434,7 +434,7 @@ export const DESIGN_KIT: KitDepartment = {
 Макет уходит в разработку принятой версией: описание экрана, состояния, поведение при ошибках и на узком экране.
 
 ## При дефекте
-Подзадача доработки автору макета с перечнем замечаний критика. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору макета с перечнем замечаний критика. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Платный ресурс, без которого нельзя обойтись; решение меняет продукт целиком; требования дизайна противоречат продукту.`,
@@ -474,7 +474,7 @@ How the product looks and how it is used: scenarios, page mockups, one system of
 The mockup reaches development as an accepted version: the screen description, its states, the behaviour on errors and on a narrow screen.
 
 ## On a defect
-A rework subtask for the author of the mockup with the critic's remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author of the mockup with the critic's remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 A paid resource that cannot be avoided; the decision changes the product as a whole; design requirements contradict the product.`,

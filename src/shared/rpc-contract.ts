@@ -1169,12 +1169,27 @@ export type InstalledPluginRecord = z.infer<typeof installedPluginSchema>;
 export type PluginDirectoryView = z.infer<typeof pluginDirectorySchema>;
 export type WebhookSourceView = z.infer<typeof webhookSourceViewSchema>;
 
+export const recoveryDecisionSchema = z.object({
+  cause: z.string().trim().min(10).max(2000),
+  correction: z.string().trim().min(10).max(2000),
+  verification: z.string().trim().min(10).max(2000),
+}).strict();
+export type RecoveryDecision = z.infer<typeof recoveryDecisionSchema>;
+export const recoverJobCommandSchema = z.object({
+  requestId: requestIdSchema,
+  jobId: opaqueIdSchema,
+  expectedRevision: z.number().int().positive(),
+  comment: z.string().trim().min(1).max(8000),
+  recoveryDecision: recoveryDecisionSchema,
+}).strict();
 export const returnJobForReworkCommandSchema = z
   .object({
     requestId: requestIdSchema,
     jobId: opaqueIdSchema,
     expectedRevision: z.number().int().positive(),
     comment: z.string().trim().min(1).max(8_000),
+    /** One scoped continuation authorized by the responsible lead or owner. */
+    recoveryDecision: recoveryDecisionSchema.optional(),
   })
   .strict();
 export type ReturnJobForReworkCommand = z.infer<typeof returnJobForReworkCommandSchema>;
@@ -1563,6 +1578,7 @@ export const rpcContract = defineRpcContract({
     input: cancelLaunchCommandSchema,
     output: domainResultSchema(cancelLaunchRecordSchema),
   },
+  recoverJob: { input: recoverJobCommandSchema, output: domainResultSchema(jobSchema) },
   returnJobForRework: {
     input: returnJobForReworkCommandSchema,
     output: domainResultSchema(jobSchema),

@@ -45,6 +45,7 @@ export type HandInGateDecision = { action: "rework"; remark: string };
 
 export type ConveyorPorts = ClosePorts & {
   autoReview: AutoReviewPorts;
+  notifyLead?: (job: Job, code: string) => void;
   returnForRework?: (job: Job, comment: string) => Promise<DomainResult<Job>>;
   /** First pass on an executor hand-in. Rework only; accept never skips independent QC. */
   handInGate?: (job: Job) => Promise<HandInGateDecision | null>;
@@ -288,20 +289,28 @@ export async function applyReviewHandIn(
         );
         return "rework";
       }
+      if (returned.error.code === "rework_limit_reached") {
+        ports.notifyLead?.(work, returned.error.code);
+        ports.comment(work, en
+          ? `Conveyor: the rework budget is exhausted (${returned.error.message}). The worker thread is preserved. The department lead must diagnose the cause and use job recover with cause, correction and verification for one further continuation.`
+          : `Конвейер: лимит доработок исчерпан (${returned.error.message}). Тред исполнителя сохранён. Руководитель отдела должен разобрать причину и вызвать job recover с причиной, исправлением и проверкой для одного продолжения.`);
+        return "rework";
+      }
       if (returned.error.code === "loop_blocked") {
+        ports.notifyLead?.(work, returned.error.code);
         ports.comment(
           work,
           en
-            ? `Conveyor: loop mark blocked another pass on ${work.key}. Ask the owner with report-needs-input.`
-            : `Конвейер: стоп круга не пустил повтор ${work.key}. Спросите владельца через report-needs-input.`,
+            ? `Conveyor: loop mark blocked another pass on ${work.key}. The responsible lead must repair the cause and record a recovery decision.`
+            : `Конвейер: стоп круга не пустил повтор ${work.key}. Руководитель должен устранить причину и записать решение о восстановлении.`,
         );
         return "rework";
       }
       ports.comment(
         work,
         en
-          ? `Conveyor: QC asked for rework, but the worker thread is gone (${returned.error.message}).`
-          : `Конвейер: ОТК просит доработку, но тред исполнителя уже нет (${returned.error.message}).`,
+          ? `Conveyor: QC asked for rework, but delivery failed (${returned.error.message}).`
+          : `Конвейер: ОТК просит доработку, но замечания не доставлены (${returned.error.message}).`,
       );
     }
     return "rework";
@@ -378,6 +387,7 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
       const version = latestHandedInVersion(ports.db, job.id);
       if (version) ports.db.prepare(`INSERT OR REPLACE INTO agency_handin_hold (job_id, hash, remark) VALUES (?, ?, ?)`).run(job.id, version.hash, gate.remark);
       const returned = await ports.returnForRework(job, gate.remark);
+      if (!returned.ok && ["rework_limit_reached", "loop_blocked"].includes(returned.error.code)) ports.notifyLead?.(job, returned.error.code);
       if (returned.ok) {
         const en = agencyLanguage() === "en";
         ports.comment(

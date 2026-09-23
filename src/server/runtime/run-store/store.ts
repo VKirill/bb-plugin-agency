@@ -1,3 +1,4 @@
+import { consumeRecoveryPermit } from "../recovery/permit";
 import { assertRelaunchAllowed } from "../rework/lineage.js";
 import { fail, ok, type DomainResult } from "../../../domain";
 import { matchRevision } from "../../../domain";
@@ -466,6 +467,7 @@ function createRunStoreParts(db: SqlDatabase): { writes: RunStore; reads: Intern
           if (!written || written.revision !== updated.revision) {
             return fail("revision_conflict", "attempt revision changed during update");
           }
+          if (!current.thread_id && written.thread_id) consumeRecoveryPermit(db, job.id, written.id);
           return ok(mapAttempt(written));
         },
       );

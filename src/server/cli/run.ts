@@ -93,6 +93,7 @@ const WRITE_OPERATIONS = new Set<CliRoutedOperation>([
   "enqueueLaunch",
   "dequeueLaunch",
   "returnJobForRework",
+  "recoverJob",
   "saveEventDefinition",
   "saveEventSource",
   "saveRuleVersion",

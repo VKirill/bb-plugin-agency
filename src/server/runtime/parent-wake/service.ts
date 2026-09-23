@@ -136,7 +136,7 @@ function isCurrentTransitionCausation(db: SqlDatabase, jobId: string, activityId
   const issue = readLaunchIssue(db, jobId);
   if (issue?.activity_id === activityId && causationId === activityId) {
     const current = createRepositories(db).job.get(jobId);
-    return Boolean(current && current.revision === issue.revision && (current.state === "queued" || current.state === "backlog"));
+    return Boolean(current && current.revision === issue.revision && !["done", "canceled"].includes(current.state));
   }
   const latest = latestJobTransitioned(db, jobId);
   if (!latest) return false;

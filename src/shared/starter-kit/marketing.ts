@@ -44,7 +44,7 @@ export const MARKETING_KIT: KitDepartment = {
 Стратегия уходит в ветви принятой версией: обещание, сегменты, запреты. Ветвь не придумывает обещание.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Деньги на площадки; юридические обязательства; публикация от имени компании.`,
@@ -85,7 +85,7 @@ There is no strategy skill in the catalogue: the library stays empty, grant noth
 The strategy reaches the branches as an accepted version: the promise, the segments, the prohibitions. A branch does not invent the promise.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Money for platforms; legal obligations; publishing on behalf of the company.`,
@@ -362,7 +362,7 @@ export const SEO_KIT: KitDepartment = {
 ТЗ и карта уходят на проверку принятой версией. В редакцию — только после проверки: запрос, намерение, структура, внутренние ссылки, чего избегать.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Доступы и баланс платных сервисов до пачки; переезд, склейка и структура с живым трафиком; покупка ссылок.`,
@@ -407,7 +407,7 @@ Situations stay separate: one "do SEO" frankenstein is forbidden.
 The brief and the map reach review as accepted versions. Editorial gets them only after review: query, intent, structure, internal links, what to avoid.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Access and paid-tool balance before a batch; a move, a merge and structure with live traffic; buying links.`,
@@ -759,7 +759,7 @@ export const ADS_KIT: KitDepartment = {
 Объявления уходят на проверку принятой версией: текст, креатив, аудитория, ссылка, ожидаемая цена результата.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Любой запуск и любая трата; правила площадки запрещают обещание; нужен доступ к кабинету или карта.`,
@@ -804,7 +804,7 @@ Situations stay separate: a media plan, ad copy and a settings draft are differe
 Ads reach the review as an accepted version: text, creative, audience, link, expected cost per result.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Any launch and any spending; the platform rules forbid the promise; access to the account or a card is needed.`,

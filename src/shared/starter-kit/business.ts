@@ -42,7 +42,7 @@ export const SALES_KIT: KitDepartment = {
 Черновик уходит на проверку принятой версией: текст, расчёт, на чём основаны обещания.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Скидка или особые условия; обещание, которого продукт не выполняет; отправка любого сообщения клиенту; спор о деньгах.`,
@@ -81,7 +81,7 @@ Help the customer buy and stay: offers, answers to questions, a support answer b
 The draft reaches the review as an accepted version: the text, the arithmetic, what every promise rests on.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 A discount or special terms; a promise the product does not keep; sending any message to a customer; a dispute about money.`,
@@ -415,7 +415,7 @@ export const ADMIN_KIT: KitDepartment = {
 Разбор уходит на проверку принятой версией: пункт договора → что он означает → чем рискуем.
 
 ## При дефекте
-Подзадача доработки автору с перечнем замечаний. Не больше трёх кругов, дальше вопрос владельцу.
+Подзадача доработки автору с перечнем замечаний. После третьего неудачного прохода — разбор руководителем отдела; после проверенного исправления он возобновляет исходную задачу через job recover.
 
 ## Эскалация владельцу
 Подпись, оплата, отправка контрагенту; спорный пункт с риском денег; всё, что требует решения юриста.`,
@@ -453,7 +453,7 @@ Documents and money in order: invoices, acts, contracts, compliance checklists.
 The reading reaches the review as an accepted version: the clause → what it means → what we risk.
 
 ## On a defect
-A rework subtask for the author with the list of remarks. No more than three rounds, then a question to the owner.
+A rework subtask for the author with the list of remarks. After the third unsuccessful pass, the department lead diagnoses the cause and resumes the original job with job recover after verifying the correction.
 
 ## Escalation to the owner
 Signing, paying, sending to a counterparty; a contested clause with money at risk; anything that needs a lawyer's decision.`,

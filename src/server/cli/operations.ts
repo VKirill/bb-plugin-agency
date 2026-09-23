@@ -28,6 +28,7 @@ import {
   openArtifactRpcSchema,
   cancelLaunchCommandSchema,
   returnJobForReworkCommandSchema,
+  recoverJobCommandSchema,
   getIsolationReadinessRpcSchema,
   getLaunchRpcSchema,
   interpretWorkerCompletionRpcSchema,
@@ -215,6 +216,7 @@ export const CLI_OPERATIONS = {
     input: getIsolationReadinessRpcSchema,
     summary: "Native threads.spawn + assigned CLI; любой CLI, подключённый в BB, если его разрешают политики проекта и сотрудника",
   },
+  recoverJob: { input: recoverJobCommandSchema, summary: "Решение руководителя: причина, исправление, проверка; один возврат или запуск исходной задачи" },
   returnJobForRework: {
     input: returnJobForReworkCommandSchema,
     summary: "Вернуть версию на доработку: замечание уходит в тред исполнителя, задача снова в работе",

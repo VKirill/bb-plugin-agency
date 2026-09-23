@@ -1,3 +1,4 @@
+import { hasRecoveryPermit, failedLaunchCount } from "../recovery/permit";
 import type { SqlDatabase } from "../../db/sql";
 import { fail, ok, type DomainResult } from "../../../domain";
 import { rulesForDepartment } from "../../rules/work-rules";
@@ -25,14 +26,17 @@ export function assertRelaunchAllowed(db: SqlDatabase, jobId: string): DomainRes
     { id: string; parent_job_id: string | null; rework_of_job_id: string | null; department_id: string } | undefined;
   if (!job) return fail("not_found", `job ${jobId} not found`);
   const lineId = job.rework_of_job_id ?? job.id;
+  if (hasRecoveryPermit(db, jobId)) return ok(true);
   const root = rootJobId(db, job.parent_job_id ?? job.id);
   if (loopEffect(latestLoopMark(db, root, lineId)) === "block")
     return fail("loop_blocked", "A recorded loop blocks another launch on this result. Resolve the cause before retrying.");
+  if (failedLaunchCount(db, jobId) >= 3)
+    return fail("rework_limit_reached", "Three launch attempts failed before a worker thread was bound. The lead must repair the launch and authorize recovery.");
   const previous = db.prepare(`SELECT 1 FROM agency_run_attempt WHERE job_id = ? AND thread_id IS NOT NULL LIMIT 1`).get(jobId);
   if (!previous) return ok(true);
-  const used = reworkRoundCount(db, lineId);
-  const limit = rulesForDepartment(db, job.department_id).reworkLimit;
+  const used = reworkRoundCount(db, lineId) + failedLaunchCount(db, jobId);
+  const limit = Math.min(2, rulesForDepartment(db, job.department_id).reworkLimit);
   return used >= limit
-    ? fail("rework_limit_reached", `${used} rework round(s), including worker restarts, already used; department limit ${limit}. Canceling and requeueing does not reset it. Resolve the repeated blocker and escalate for a decision; do not start another copy.`)
+    ? fail("rework_limit_reached", `${used} rework round(s), including worker restarts, already used; automatic continuation limit ${limit} (three failed passes maximum, or a stricter department setting). Canceling and requeueing does not reset it. Resolve the repeated blocker and escalate for a decision; do not start another copy.`)
     : ok(true);
 }

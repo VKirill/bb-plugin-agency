@@ -1,3 +1,5 @@
+import { recoverJob } from "../src/server/runtime/recovery/service";
+import { hasRecoveryPermit } from "../src/server/runtime/recovery/permit";
 import { assertRelaunchAllowed, reworkRoundCount } from "../src/server/runtime/rework/lineage";
 import { rulesForDepartment } from "../src/server/rules/work-rules";
 import { createHash, randomUUID } from "node:crypto";
@@ -183,7 +185,7 @@ describe("run store persist", () => {
     const seeded = seedProject(opened.db);
     const snapshot = compileFor(seeded);
     const runs = createRunStore(opened.db);
-    const limit = rulesForDepartment(opened.db, seeded.job.departmentId).reworkLimit;
+    const limit = Math.min(2, rulesForDepartment(opened.db, seeded.job.departmentId).reworkLimit);
     for (let index = 0; index <= limit; index++) {
       const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
       expect(reserved.ok).toBe(true);
@@ -200,18 +202,44 @@ describe("run store persist", () => {
     opened.close();
   });
 
-  it("does not charge refused spawns without a worker thread as rework", () => {
+  it("allows one atomic reservation after recovery and consumes permission on real thread binding", async () => {
+    const opened = openFileDb(); const seeded = seedProject(opened.db); const runs = createRunStore(opened.db);
+    const snapshot = compileFor(seeded);
+    for (let i = 0; i < 3; i++) {
+      const r = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
+      if (!r.ok) throw new Error(r.error.message);
+      opened.db.prepare("UPDATE agency_run_attempt SET state = 'failed', thread_id = ? WHERE id = ?").run(i === 0 ? "thr_previous" : null, r.value.attempt.attemptId);
+    }
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id).ok).toBe(false);
+    const recovery = await recoverJob({ db: opened.db, store: seeded.store, runs, reads: createInternalRunStoreReads(opened.db),
+      send: { send: async () => { throw new Error("No old thread continuation"); }, recoverContinuation: async () => "absent" }, currentPublishedHash: async () => null }, seeded.ctx, {
+      requestId: requestId(), jobId: seeded.job.id, expectedRevision: seeded.job.revision, comment: "Resume after the verified environment repair.",
+      recoveryDecision: { cause: "Worker configuration pointed to a stale path.", correction: "Corrected the configured path and removed the stale input.", verification: "Verified access to the new path and current source hash." },
+    });
+    if (!recovery.ok) throw new Error(recovery.error.message);
+    const updated = { ...seeded, job: recovery.value };
+    const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot: compileFor(updated), attestation: attestation(updated) });
+    if (!reserved.ok) throw new Error(reserved.error.message);
+    expect(hasRecoveryPermit(opened.db, seeded.job.id)).toBe(true);
+    const launching = runs.transitionAttempt(seeded.ctx, { requestId: requestId(), attemptId: reserved.value.attempt.attemptId, expectedRevision: 1, to: "launching" });
+    if (!launching.ok) throw new Error(launching.error.message);
+    const bound = runs.transitionAttempt(seeded.ctx, { requestId: requestId(), attemptId: launching.value.attemptId, expectedRevision: launching.value.revision, to: "running", threadId: "thr_recovered" });
+    expect(bound.ok).toBe(true); expect(hasRecoveryPermit(opened.db, seeded.job.id)).toBe(false);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id).ok).toBe(false); opened.close();
+  });
+
+  it("escalates three failed launches separately without charging them as worker rework", () => {
     const opened = openFileDb();
     const seeded = seedProject(opened.db);
     const snapshot = compileFor(seeded);
     const runs = createRunStore(opened.db);
-    for (let index = 0; index < 6; index++) {
+    for (let index = 0; index < 3; index++) {
       const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
       if (!reserved.ok) throw new Error(reserved.error.message);
       opened.db.prepare("UPDATE agency_run_attempt SET state = 'failed' WHERE id = ?").run(reserved.value.attempt.attemptId);
     }
     expect(reworkRoundCount(opened.db, seeded.job.id)).toBe(0);
-    expect(assertRelaunchAllowed(opened.db, seeded.job.id).ok).toBe(true);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id)).toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
     opened.close();
   });
 

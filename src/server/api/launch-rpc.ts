@@ -1,3 +1,4 @@
+import { recoverJob } from "../runtime/recovery/service";
 import { WAIT_CODES } from "../runtime/launch-queue/service";
 import { buildWorkerInstructions, readJobRoleContext } from "../delegation/instructions";
 import { listTemplates } from "../templates/store";
@@ -73,7 +74,8 @@ type LaunchMethod =
   | "listJobAttempts"
   | "getIsolationReadiness"
   | "cancelLaunch"
-  | "returnJobForRework";
+  | "returnJobForRework"
+  | "recoverJob";
 type LaunchHandlers = Pick<PluginRpcHandlers<typeof rpcContract>, LaunchMethod>;
 
 const DEFAULT_APPLICABLE = [{ sourceId: "binding", relativePath: ".bb/AGENTS.md" }] as const;
@@ -651,6 +653,36 @@ export function createIsolatedLaunchRpc(deps: {
         if (result.ok && deps.send) {
           await flushParentWakes({ db: deps.db, send: deps.send, now: new Date().toISOString() });
         }
+        return result;
+      });
+    },
+    recoverJob: async (input) => {
+      return withAccess(async (ctx) => {
+        if (!deps.send) return fail("sdk_send_unsupported", "thread messages are not available on this server");
+        const job = deps.store.getJob(input.jobId);
+        if (!job) return fail("not_found", `job ${input.jobId} not found`);
+        const access = deps.store.assertBindingAccess(ctx, job.bindingId);
+        if (!access.ok) return access;
+        const result = await recoverJob(
+          {
+            db: deps.db,
+            store: deps.store,
+            runs,
+            reads,
+            send: deps.send,
+            reworkLimit: (reworkJob) => deps.store.rulesForDepartment(reworkJob.departmentId).reworkLimit,
+            currentPublishedHash: async (jobId) => {
+              const published = await readJobPublishedArtifact(
+                { ctx, store: deps.store, db: deps.db, documents: deps.documents },
+                jobId,
+              );
+              return published.ok && published.value.publishedVerified ? published.value.publishedHash : null;
+            },
+          },
+          ctx,
+          input,
+        );
+        if (result.ok) deps.onChanged?.();
         return result;
       });
     },
