@@ -791,6 +791,32 @@ describe("awaiting_review lifecycle", () => {
     }
   });
 
+  it("finishes an accepted job whose worker became idle after acceptance", async () => {
+    const opened = openFileDb();
+    try {
+      const live = await seedRunningAttempt(opened.db);
+      const version = publishVersion(live.seeded, new TextEncoder().encode("early acceptance"));
+      const accepted = live.seeded.store.acceptArtifactVersion(live.seeded.ctx, {
+        requestId: requestId(), expectedRevision: live.seeded.store.getJob(live.seeded.job.id)!.revision,
+        jobId: live.seeded.job.id, artifactId: version.artifactId, version: version.version, hash: version.hash,
+      });
+      expect(accepted.ok).toBe(true);
+      // Reproduce a persisted done job with a still-running attempt (acceptance
+      // raced the completion sweep); never manufacture success from job state.
+      opened.db.prepare("UPDATE agency_job SET state = 'done' WHERE id = ?").run(live.seeded.job.id);
+      const apply = (threadStatus: "active" | "idle", publishedVerified: boolean, acceptedVerified: boolean) =>
+        applyVerifiedCompletionLifecycle({ store: live.seeded.store, runs: live.runs, reads: live.reads,
+          ctx: live.seeded.ctx, jobId: live.seeded.job.id, launchId: live.receipt.launchId,
+          reading: interpretVerifiedCompletion({ threadStatus, publishedVerified, acceptedVerified }), publishedHash: version.hash });
+      for (const result of [apply("active", true, true), apply("idle", true, false), apply("idle", false, true)]) {
+        expect(result.ok && result.value.attemptState).toBe("running");
+      }
+      const result = apply("idle", true, true);
+      expect(result).toMatchObject({ ok: true, value: { jobState: "done", attemptState: "succeeded", attemptAcceptedApplied: true } });
+      expect(apply("idle", true, true)).toMatchObject({ ok: true, value: { attemptState: "succeeded", attemptAcceptedApplied: false } });
+    } finally { opened.close(); }
+  });
+
   it("moves awaiting_review to succeeded only with accepted current + job done + attempt evidence", async () => {
     const opened = openFileDb();
     try {

@@ -116,11 +116,12 @@ export function canEnterAwaitingReview(input: {
   jobState: string | null;
   threadStatus: string | null;
   publishedVerified: boolean;
+  acceptedVerified?: boolean;
   publishedHash: string | null;
 }): boolean {
   return (
     input.attemptState === "running" &&
-    input.jobState === "review" &&
+    (input.jobState === "review" || (input.jobState === "done" && input.acceptedVerified === true)) &&
     input.threadStatus === "idle" &&
     input.publishedVerified === true &&
     Boolean(input.publishedHash)
@@ -135,6 +136,7 @@ export function applyAwaitingReviewToAttempt(deps: {
   jobState: string | null;
   threadStatus: string | null;
   publishedVerified: boolean;
+  acceptedVerified?: boolean;
   publishedHash: string | null;
 }): DomainResult<{ attempt: RunAttempt | null; changed: boolean }> {
   const receipt = deps.reads.getLaunchReceipt(deps.ctx, deps.launchId);
@@ -151,6 +153,7 @@ export function applyAwaitingReviewToAttempt(deps: {
       jobState: deps.jobState,
       threadStatus: deps.threadStatus,
       publishedVerified: deps.publishedVerified,
+      acceptedVerified: deps.acceptedVerified,
       publishedHash: deps.publishedHash,
     })
   ) {
@@ -280,6 +283,7 @@ export function applyVerifiedCompletionLifecycle(deps: {
     jobState: reviewed.value.jobState,
     threadStatus: reviewed.value.threadStatus,
     publishedVerified: reviewed.value.publishedVerified,
+    acceptedVerified: reviewed.value.acceptedVerified,
     publishedHash: reviewed.value.publishedHash,
   });
   if (!marked.ok) return marked;
