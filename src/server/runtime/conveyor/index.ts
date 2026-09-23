@@ -8,6 +8,7 @@ export {
   STALE_REVIEW_MS,
   acceptOnLine,
   advanceAfterHandIn,
+  pendingHandInJobIds,
   applyReviewHandIn,
   closeBlockedReviewStation,
   closeParentIfChildrenDone,

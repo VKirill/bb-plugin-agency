@@ -20,6 +20,7 @@ import {
   closeStation,
   productReadyMessage,
   sweepStaleReviewStations,
+  pendingHandInJobIds,
   type ConveyorPorts,
 } from "../src/server/runtime/conveyor";
 import type { AutoReviewPorts } from "../src/server/runtime/auto-review/service";
@@ -180,6 +181,20 @@ function qcJobFor(db: Db, workJobId: string): string {
 }
 
 describe("factory conveyor: the customer gets a product, not stamps", () => {
+  it("recovers a review entered without the completion callback, once per published version", async () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const root = s.job("Product", s.lead); const work = child(s, root.id, "Implementation");
+    handIn(s, db, work.id); const { ports } = conveyor(s, db, { qc: true, now: () => "2099-01-01T00:00:00Z" });
+    let decisions = 0; ports.handInGate = async () => { decisions++; return null; }; ports.returnForRework = async () => { throw new Error("Not a rejection"); };
+    expect(pendingHandInJobIds(ports)).toContain(work.id);
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("created");
+    expect(pendingHandInJobIds(ports)).not.toContain(work.id);
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("pending");
+    expect(decisions).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_auto_review WHERE job_id = ?").get(work.id)).toEqual({ n: 1 });
+    db.close();
+  });
+
   it("closes a child station after QC «принять» and leaves the owner's inbox empty", async () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);

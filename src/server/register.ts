@@ -41,6 +41,7 @@ import { createWebhookRateLimiter } from "./triggers/webhook-ingress/rate-limit"
 import { reviewJobText, type AutoReviewPorts } from "./runtime/auto-review/service";
 import {
   advanceAfterHandIn,
+  pendingHandInJobIds,
   closeBlockedReviewStation,
   productReadyMessage,
   sweepStaleReviewStations,
@@ -2026,6 +2027,18 @@ export function registerAgency(bb: BbPluginApi) {
         ),
     };
   };
+  // Both completion events and the durable recovery sweep use the same single-flight dispatcher.
+  const handInsInFlight = new Set<string>();
+  const dispatchHandIn = (conveyor: ConveyorPorts, jobId: string) => {
+    if (handInsInFlight.has(jobId)) return;
+    handInsInFlight.add(jobId);
+    void advanceAfterHandIn(conveyor, jobId).then(outcome => {
+      if (outcome !== "pending" && outcome !== "idle") onChanged();
+    }).catch(error => {
+      recordTrace(db, { jobId, step: "review.handoff", outcome: "failed", reason: "callback_exception", collapse: true });
+      bb.log.warn(`Conveyor after hand-in ${jobId}: ${String(error)}`);
+    }).finally(() => handInsInFlight.delete(jobId));
+  };
   /** Blocked with a system reason; parent wake tells the lead. */
   const blockWithReason = (job: Job, comment: string): boolean => {
     const access = resolveRpcAccess(db);
@@ -2179,6 +2192,10 @@ export function registerAgency(bb: BbPluginApi) {
       if (result.launched || result.removed) onChanged();
       const conveyor = conveyorPorts();
       if (conveyor) {
+        for (const jobId of pendingHandInJobIds(conveyor)) {
+          recordTrace(db, { jobId, step: "review.handoff", outcome: "started", reason: "missing_callback_recovered", collapse: true });
+          dispatchHandIn(conveyor, jobId);
+        }
         const closed = sweepStaleReviewStations(conveyor);
         if (closed > 0) onChanged();
       }
@@ -2645,12 +2662,7 @@ export function registerAgency(bb: BbPluginApi) {
       if (applied.reviewApplied) {
         const conveyor = conveyorPorts();
         if (conveyor) {
-          void advanceAfterHandIn(conveyor, row.jobId).then(
-            (outcome) => {
-              if (outcome !== "pending" && outcome !== "idle") onChanged();
-            },
-            (error) => bb.log.warn(`Conveyor after hand-in ${row.jobId}: ${String(error)}`),
-          );
+          dispatchHandIn(conveyor, row.jobId);
         }
       }
       try {

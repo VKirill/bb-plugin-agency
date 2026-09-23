@@ -373,6 +373,21 @@ function latestReviewerHoldsParent(ports: ClosePorts, parentId: string): boolean
   return !successor;
 }
 
+/** Recover a durable review state whose hand-in callback was lost or bypassed by an explicit CLI transition. */
+export function pendingHandInJobIds(ports: ConveyorPorts, minAgeMs = 120_000): string[] {
+  const now = Date.parse(ports.now?.() ?? new Date().toISOString());
+  const rows = ports.db.prepare("SELECT id FROM agency_job WHERE state = 'review'").all() as Array<{ id: string }>;
+  return rows.filter(row => {
+    const job = ports.store.getJob(row.id);
+    if (!job || now - Date.parse(job.updatedAt) < minAgeMs) return false;
+    if (isAutoReviewJob(ports.db, job.id)) return true; // a reviewer may also use an explicit state transition
+    if (!job.assignedAgentId || !ports.autoReview.enabled(job) || ports.autoReview.memberRole(job.departmentId, job.assignedAgentId) !== "executor") return false;
+    const version = latestHandedInVersion(ports.db, job.id);
+    return Boolean(version && !ports.db.prepare("SELECT 1 FROM agency_auto_review WHERE job_id = ? AND hash = ?").get(job.id, version.hash) &&
+      !ports.db.prepare("SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?").get(job.id, version.hash));
+  }).map(row => row.id);
+}
+
 export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): Promise<ConveyorAdvance> {
   if (reviewerRework(ports, jobId)) {
     const review = ports.store.getJob(jobId);
@@ -381,6 +396,10 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
   const workId = workJobIdForReview(ports.db, jobId);
   if (workId) return applyReviewHandIn(ports, workId, jobId);
   const job = ports.store.getJob(jobId);
+  const currentVersion = job ? latestHandedInVersion(ports.db, job.id) : null;
+  // A durable claim/hold prevents repeating the decision model after a lost callback or reload.
+  if (currentVersion && (ports.db.prepare("SELECT 1 FROM agency_auto_review WHERE job_id = ? AND hash = ?").get(jobId, currentVersion.hash) ||
+    ports.db.prepare("SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?").get(jobId, currentVersion.hash))) return "pending";
   if (job && ports.handInGate && ports.returnForRework) {
     const gate = await ports.handInGate(job);
     if (gate?.action === "rework") {
