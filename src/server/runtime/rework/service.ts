@@ -105,7 +105,9 @@ function readRow(db: SqlDatabase, requestId: string): ReworkRow | undefined {
 }
 
 function setSendState(db: SqlDatabase, requestId: string, state: string, now: string): void {
-  db.prepare(`UPDATE agency_rework SET send_state = ?, updated_at = ? WHERE request_id = ?`).run(state, now, requestId);
+  db.prepare(`UPDATE agency_rework SET send_state = ?, updated_at = ?,
+    confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, ?) ELSE confirmed_at END
+    WHERE request_id = ?`).run(state, now, state, now, requestId);
 }
 
 /**

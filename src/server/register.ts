@@ -2153,6 +2153,7 @@ export function registerAgency(bb: BbPluginApi) {
     return Boolean(nextFreshCandidate(db, agent.id, version, usedLaunchModel(version, row.launchId), new Date().toISOString()));
   };
   const runWatchPorts = (extra?: Partial<RunWatchPorts>): RunWatchPorts => ({
+    onReworkPhase: (event) => bb.log.info(`Run watch rework phase: ${JSON.stringify(event)}`),
     db,
     getJob: (jobId) => store.getJob(jobId),
     attemptForLaunch,

@@ -751,6 +751,10 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   LESSON_FEEDBACK_MIGRATION,
   // Old counters measured total unfinished turns; they are not unanswered wake-ups.
   `UPDATE agency_completion_reminder SET count = 0, idle_since = NULL, awaiting_turn = 0, last_sent_at = NULL WHERE blocked_at IS NULL`,
+  `ALTER TABLE agency_run_watch ADD COLUMN rework_at TEXT`,
+  `ALTER TABLE agency_rework ADD COLUMN confirmed_at TEXT;
+   UPDATE agency_rework SET confirmed_at = CASE WHEN resolved_at IS NULL THEN updated_at ELSE created_at END
+   WHERE send_state = 'confirmed'`,
 ];
 
 function statementHash(sql: string): string {

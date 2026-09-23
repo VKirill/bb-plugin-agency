@@ -216,6 +216,54 @@ describe("run watch", () => {
     h.progressNow();
     expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
     expect(h.blocked[0]).toContain("потолок");
+    expect(h.blocked[0]).toContain("не отменяйте и не перезапускайте себя");
+  });
+
+  it("starts the same attempt's rework phase from confirmed return time, even when review was missed by polling", () => {
+    const h = harness();
+    superviseRun(h.ports, h.row, active);
+    h.tick(RUN_WATCH_CEILING_MS - 10 * 60_000);
+    const returnedAt = "2026-09-16T11:50:00.000Z";
+    h.db.prepare(`INSERT INTO agency_rework
+      (request_id,job_id,attempt_id,thread_id,returned_hash,comment,send_state,created_at,updated_at)
+      VALUES ('return1',?,'run_attempt0001','thr_worker0001','hash','D1/D2','confirmed',?,?)`)
+      .run(job.id, returnedAt, returnedAt);
+    h.tick(25 * 60_000); // Old attempt over 2h, actual rework only 25min.
+    h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("ok");
+    expect(h.db.prepare("SELECT active_since, rework_at FROM agency_run_watch").get())
+      .toEqual({ active_since: returnedAt, rework_at: returnedAt });
+    // Resolving a publication updates the ledger updated_at, not its phase boundary.
+    h.db.prepare("UPDATE agency_rework SET updated_at = '2026-09-16T12:15:00.000Z', resolved_at = '2026-09-16T12:15:00.000Z'").run();
+    // Neither repeated polls nor progress grants more time after the new phase's ceiling.
+    h.tick(RUN_WATCH_CEILING_MS - 25 * 60_000);
+    h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
+    h.db.close();
+  });
+
+  it("repairs a pre-upgrade stale ceiling only with a newer confirmed return; plain running reset cannot bypass it", () => {
+    const h = harness({ getJob: () => ({ ...job, state: "running" }) });
+    superviseRun(h.ports, h.row, active);
+    h.tick(RUN_WATCH_CEILING_MS);
+    h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
+    expect(superviseRun(h.ports, h.row, active)).toBe("skipped");
+    const phase = "2026-09-16T11:45:00.000Z";
+    h.db.prepare(`INSERT INTO agency_rework
+      (request_id,job_id,attempt_id,thread_id,returned_hash,comment,send_state,created_at,updated_at)
+      VALUES ('return2',?,'run_attempt0001','thr_worker0001','hash','repair','failed',?,?)`)
+      .run(job.id, phase, phase);
+    expect(superviseRun(h.ports, h.row, active)).toBe("skipped");
+    h.db.prepare("UPDATE agency_rework SET send_state = 'confirmed'").run();
+    expect(superviseRun(h.ports, h.row, active)).toBe("ok");
+    expect(h.db.prepare("SELECT outcome, active_since FROM agency_run_watch").get())
+      .toEqual({ outcome: null, active_since: phase });
+    h.tick(RUN_WATCH_CEILING_MS);
+    h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
+    expect(superviseRun(h.ports, h.row, active)).toBe("skipped");
+    h.db.close();
   });
 
   it("skips jobs or attempts that are not running", () => {

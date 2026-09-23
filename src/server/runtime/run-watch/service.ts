@@ -81,6 +81,7 @@ export type RunWatchPorts = {
   canSwitchToFallback?: (job: Job, row: RunWatchRow) => boolean;
   /** Cancel this attempt and requeue on the reserve. Does not rewrite the profile. */
   switchToFallback?: (job: Job, row: RunWatchRow) => boolean;
+  onReworkPhase?: (event: { jobId: string; attemptId: string; reworkAt: string; previousActiveSince: string | null }) => void;
   now: () => string;
 };
 
@@ -106,6 +107,7 @@ type WatchRecord = {
   warned_at: string | null;
   outcome: string | null;
   outcome_at: string | null;
+  rework_at: string | null;
 };
 
 const ACTIVE_STATUSES = new Set(["active", "stopping"]);
@@ -127,7 +129,7 @@ export function runWatchText(
   const RUN_WATCH_ERROR_MS = t.errorMs;
   const RUN_WATCH_CEILING_MS = t.ceilingMs;
   if (lang === "en") {
-    const stopEn = `To stop the attempt: bb agency launch cancel; then relaunch or reassign ${jobKey}.`;
+    const stopEn = `Worker: save a checkpoint and report to the lead; do not cancel or relaunch yourself. Responsible lead: diagnose this attempt first. Only if replacement is necessary, use bb agency launch cancel after checkpoint, then authorize recovery of ${jobKey}.`;
     switch (kind) {
       case "quiet":
         return `Agency: ${jobKey} shows no signs of work for ${minutes(RUN_WATCH_QUIET_MS)} min — the thread is active but silent. After ${minutes(RUN_WATCH_STALL_MS)} min without activity the job moves to «needs decision».`;
@@ -138,14 +140,14 @@ export function runWatchText(
       case "error":
         return `Agency: the ${jobKey} thread has been in error for more than ${minutes(RUN_WATCH_ERROR_MS)} min (provider failure or subscription limit). The job moved to «needs decision». ${stopEn}`;
       case "ceiling":
-        return `Agency: ${jobKey} has worked non-stop for more than ${minutes(RUN_WATCH_CEILING_MS) / 60} h — the limit of one attempt. The job moved to «needs decision»: check that the employee is not looping and split the work. ${stopEn}`;
+        return `Agency: ${jobKey} has worked non-stop for more than ${minutes(RUN_WATCH_CEILING_MS) / 60} h — the ceiling of continuous work in this phase. The job moved to «needs decision»: check that the employee is not looping and split the work. ${stopEn}`;
       case "provider_wait":
         return `Agency: the ${jobKey} thread is in error, and BB is waiting to carry it on by itself — a subscription window, an overload or a machine that went offline. The job stays in work; nothing is lost. ${stopEn}`;
       case "usage_limit":
         return `Agency: ${jobKey} hit a usage limit, and BB will not continue this thread. The employee has no reserve model, so the job moved to «needs decision». Set a reserve on the employee and relaunch, or wait for the window to reset. ${stopEn}`;
     }
   }
-  const stop = `Остановить попытку: bb agency launch cancel; затем перезапустить или переназначить ${jobKey}.`;
+  const stop = `Исполнителю: сохраните checkpoint и сообщите руководителю; не отменяйте и не перезапускайте себя. Руководителю: сначала установите причину. Только если нужна замена попытки, после checkpoint выполните bb agency launch cancel и разрешите recovery той же ${jobKey}.`;
   switch (kind) {
     case "quiet":
       return `Агентство: у ${jobKey} нет признаков работы ${minutes(RUN_WATCH_QUIET_MS)} мин — тред активен, но без новых событий. Через ${minutes(RUN_WATCH_STALL_MS)} мин без активности задача перейдёт в «Ожидает решения».`;
@@ -156,7 +158,7 @@ export function runWatchText(
     case "error":
       return `Агентство: тред ${jobKey} в ошибке дольше ${minutes(RUN_WATCH_ERROR_MS)} мин (сбой провайдера или лимит подписки). Задача переведена в «Ожидает решения». ${stop}`;
     case "ceiling":
-      return `Агентство: ${jobKey} работает без перерыва дольше ${minutes(RUN_WATCH_CEILING_MS) / 60} ч — это потолок одной попытки. Задача переведена в «Ожидает решения»: проверьте, не зациклился ли сотрудник, и разбейте работу. ${stop}`;
+      return `Агентство: ${jobKey} работает без перерыва дольше ${minutes(RUN_WATCH_CEILING_MS) / 60} ч — это потолок непрерывной работы в текущем этапе. Задача переведена в «Ожидает решения»: проверьте, не зациклился ли сотрудник, и разбейте работу. ${stop}`;
     case "provider_wait":
       return `Агентство: тред ${jobKey} в ошибке, но BB сам ждёт возможности продолжить — окно подписки, перегрузка провайдера или машина не в сети. Задача остаётся в работе, ничего не потеряно. ${stop}`;
     case "usage_limit":
@@ -171,13 +173,13 @@ function read(db: SqlDatabase, attemptId: string): WatchRecord | undefined {
 function save(db: SqlDatabase, row: WatchRecord, now: string): void {
   db.prepare(
     `INSERT INTO agency_run_watch
-       (attempt_id, job_id, thread_status, status_since, progress_at, active_since, warned_at, outcome, outcome_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (attempt_id, job_id, thread_status, status_since, progress_at, active_since, warned_at, outcome, outcome_at, updated_at, rework_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(attempt_id) DO UPDATE SET
        thread_status = excluded.thread_status, status_since = excluded.status_since,
        progress_at = excluded.progress_at, active_since = excluded.active_since,
        warned_at = excluded.warned_at, outcome = excluded.outcome, outcome_at = excluded.outcome_at,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at, rework_at = excluded.rework_at`,
   ).run(
     row.attempt_id,
     row.job_id,
@@ -189,6 +191,7 @@ function save(db: SqlDatabase, row: WatchRecord, now: string): void {
     row.outcome,
     row.outcome_at,
     now,
+    row.rework_at,
   );
 }
 
@@ -215,7 +218,6 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
   const status = observation.threadStatus;
   const t: RunWatchThresholds = { ...DEFAULT_RUN_WATCH_THRESHOLDS, ...(ports.thresholds?.(job) ?? {}) };
   const stored = read(ports.db, attempt.id);
-  if (stored?.outcome) return "skipped";
 
   const record: WatchRecord = stored ?? {
     attempt_id: attempt.id,
@@ -227,7 +229,27 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
     warned_at: null,
     outcome: null,
     outcome_at: null,
+    rework_at: null,
   };
+  // Review/reclamation can occur entirely between watcher polls. The confirmed
+  // return ledger is the durable work-phase boundary, not the job revision or
+  // a comment. Rebase to its actual time (never to now), once, preserving elapsed
+  // rework time even across server restarts and old false ceiling outcomes.
+  const reworkAt = (ports.db.prepare(`SELECT MAX(COALESCE(confirmed_at, created_at)) AS at FROM agency_rework
+    WHERE attempt_id = ? AND send_state = 'confirmed'`).get(attempt.id) as { at: string | null }).at;
+  if (reworkAt && Date.parse(reworkAt) <= nowMs && (!record.rework_at || Date.parse(reworkAt) > Date.parse(record.rework_at))) {
+    const previousActiveSince = record.active_since;
+    record.rework_at = reworkAt;
+    record.active_since = status && ACTIVE_STATUSES.has(status) ? reworkAt : null;
+    record.status_since = reworkAt;
+    record.progress_at = latest([record.progress_at, reworkAt]);
+    record.warned_at = null;
+    record.outcome = null;
+    record.outcome_at = null;
+    save(ports.db, record, now);
+    ports.onReworkPhase?.({ jobId: job.id, attemptId: attempt.id, reworkAt, previousActiveSince });
+  }
+  if (record.outcome) return "skipped";
   if (stored && stored.thread_status !== status) {
     // A status change is itself a sign of life and opens a new episode.
     record.thread_status = status;
