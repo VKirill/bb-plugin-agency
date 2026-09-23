@@ -121,7 +121,8 @@ describe("conveyor close", () => {
     publish(s, review.id);
     if (mode === "legacy_publication") {
       // The host publication metadata port historically did not emit artifact_published.
-      // Require the input to predate the report author's actual attempt instead.
+      // The input arrived after the attempt started but before this report was reserved.
+      db.prepare("UPDATE agency_job_input_ref SET created_at = '2026-09-18T00:00:00.000Z' WHERE target_job_id = ?").run(review.id);
       s.attempt(review.id, "succeeded");
       db.prepare("UPDATE agency_artifact_version SET author = ? WHERE job_id = ?").run(JSON.stringify({ kind: "run", runId: `run_${review.id}` }), review.id);
       db.prepare("DELETE FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'").run(review.id);

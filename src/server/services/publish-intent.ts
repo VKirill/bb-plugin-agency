@@ -1,3 +1,4 @@
+import { newOpaqueId } from "../db/ids";
 import { assertImmutableArtifactVersion, fail, ok, type DomainResult } from "../../domain";
 import type { ArtifactVersion, ProjectBinding } from "../../shared/contracts";
 import {
@@ -6,7 +7,7 @@ import {
   type ArtifactPublishReservation,
 } from "../artifacts/metadata-port";
 import type { DurablePublishIntent, Repositories } from "../db/repositories";
-import { nowUtc, type ServiceContext } from "./context";
+import { actorToActivity, nowUtc, type ServiceContext } from "./context";
 
 export function bindingMatchesLive(binding: ProjectBinding, draft: ArtifactPublishReservation): boolean {
   return (
@@ -50,6 +51,8 @@ export function reservePublishIntent(
     }
     return ok(existing);
   }
+  const job = repos.job.get(draft.jobId);
+  if (job && ["done", "canceled"].includes(job.state)) return fail("job_closed", "Return the closed job before publishing a new version");
   if (!bindingMatchesLive(liveBinding, draft)) {
     return fail(
       "binding_snapshot_mismatch",
@@ -79,6 +82,7 @@ export function commitPublishIntent(
   repos: Repositories,
   intent: ArtifactPublishIntent,
   version: ArtifactVersion,
+  ctx: ServiceContext,
 ): DomainResult<ArtifactVersion> {
   const stored = repos.publishIntent.get(intent.requestId);
   if (!stored) return fail("intent_missing", `publish intent ${intent.requestId} is missing`);
@@ -116,12 +120,18 @@ export function commitPublishIntent(
   if (stored.state === "committed") {
     return fail("intent_missing", `committed intent ${intent.requestId} has no version row`);
   }
+  const job = repos.job.get(version.jobId);
+  if (job && ["done", "canceled"].includes(job.state)) return fail("job_closed", "The job closed before this publication committed");
   try {
     repos.artifactVersion.insert(version);
   } catch (error) {
     return fail("artifact_immutable", error instanceof Error ? error.message : "artifact version insert failed");
   }
   repos.publishIntent.update({ ...stored, state: "committed", failureCode: undefined });
+  repos.activity.insert({ id: newOpaqueId("activity"), jobId: version.jobId, kind: "artifact_published",
+    actor: actorToActivity(ctx.caller?.agentId ? { kind: "agent", agentId: ctx.caller.agentId } : ctx.actor),
+    causationId: null, timestamp: nowUtc(ctx), references: [{ type: "artifact", id: version.artifactId }, { type: "artifact_hash", id: version.hash }],
+  });
   return ok(version);
 }
 

@@ -509,6 +509,16 @@ describe("agency domain storage", () => {
       expect(committed.ok).toBe(true);
       const again = await port.commitVersion(pending.value, version);
       expect(again.ok).toBe(true);
+      const publications = db.prepare("SELECT timestamp, references_json FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'").all(seeded.job.id) as Array<{ timestamp: string; references_json: string }>;
+      expect(publications).toHaveLength(1);
+      expect(publications[0]!.references_json).toContain(version.hash);
+      expect(publications[0]!.timestamp).toBeTruthy();
+      db.prepare("UPDATE agency_job SET state = 'done' WHERE id = ?").run(seeded.job.id);
+      expect((await port.commitVersion(pending.value, version)).ok).toBe(true); // Exact retries remain idempotent.
+      const afterClose = await reservePublish(reservation(seeded.job.id, seeded.binding.id, {
+        artifactId: artifact.value.id, requestId: requestId(), hash: hashB,
+      }));
+      expect(afterClose).toMatchObject({ ok: false, error: { code: "job_closed" } });
     } finally {
       close();
     }

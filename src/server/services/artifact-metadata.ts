@@ -93,7 +93,7 @@ export function createArtifactMetadataPort(db: SqlDatabase, ctx: ServiceContext)
     async commitVersion(intent, version) {
       return db.transaction(() => {
         if (!visibleJob(intent.jobId)) return fail("job_missing", `job ${intent.jobId} is missing`);
-        return commitPublishIntent(repos, intent, version);
+        return commitPublishIntent(repos, intent, version, ctx);
       })();
     },
     async markIntentFailed(requestId, failureCode) {

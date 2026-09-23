@@ -1815,9 +1815,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         hash: parsed.data.hash,
         author: parsed.data.author,
       };
-      const committed = commitPublishIntent(repos, reserved.value, version);
+      const committed = commitPublishIntent(repos, reserved.value, version, ctx);
       if (!committed.ok) return committed;
-      appendActivity(ctx, artifact.jobId, "artifact_published", [{ type: "artifact", id: artifact.id }]);
       return committed;
     })();
   };

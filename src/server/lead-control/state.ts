@@ -38,10 +38,12 @@ export function readLeadState(db: SqlDatabase, job: Job, offset: number, limit: 
     Array<{ id: string; key: string; title: string; state: string; assignedAgentId: string | null }>;
   const counts = db.prepare("SELECT state, COUNT(*) AS n FROM agency_job WHERE parent_job_id = ? GROUP BY state").all(job.id) as Array<{state: string; n: number}>;
   const total = counts.reduce((n, row) => n + row.n, 0);
-  const publications = db.prepare(`SELECT v.artifact_id AS artifactId, v.version, v.hash, v.relative_path AS relativePath
+  const publications = db.prepare(`SELECT v.artifact_id AS artifactId, v.version, v.hash, v.relative_path AS relativePath,
+    (SELECT p.created_at FROM agency_artifact_publish_intent p WHERE p.artifact_id = v.artifact_id
+      AND p.job_id = v.job_id AND p.version = v.version AND p.hash = v.hash AND p.state = 'committed') AS reservedAt
     FROM agency_artifact_version v WHERE v.job_id = ? AND v.version = (
       SELECT MAX(v2.version) FROM agency_artifact_version v2 WHERE v2.artifact_id = v.artifact_id AND v2.job_id = v.job_id
-    )`).all(job.id) as Array<{ artifactId: string; version: number; hash: string; relativePath: string }>;
+    )`).all(job.id) as Array<{ artifactId: string; version: number; hash: string; relativePath: string; reservedAt: string | null }>;
   const attempt = db.prepare(`SELECT a.id, p.attempt_id AS explicit, s.hash FROM agency_run_attempt a
     LEFT JOIN agency_handin_protocol p ON p.attempt_id = a.id
     LEFT JOIN agency_result_submission s ON s.attempt_id = a.id WHERE a.job_id = ? ORDER BY a.attempt_no DESC LIMIT 1`).get(job.id) as

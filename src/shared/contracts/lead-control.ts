@@ -53,7 +53,7 @@ export const leadStateSchema = z.object({
   }).strict()),
   children: z.array(z.object({ id: opaqueIdSchema, key: z.string(), title: z.string(), state: z.string(), assignedAgentId: opaqueIdSchema.nullable() }).strict()),
   childCounts: z.record(z.string(), z.number().int()), nextOffset: z.number().int().nullable(),
-  publications: z.array(z.object({ artifactId: opaqueIdSchema, version: z.number().int(), hash: contentHashSchema, relativePath: z.string() }).strict()),
+  publications: z.array(z.object({ artifactId: opaqueIdSchema, version: z.number().int(), hash: contentHashSchema, relativePath: z.string(), reservedAt: z.string().nullable() }).strict()),
   handIn: z.object({ protocol: z.enum(["explicit", "legacy"]), dependenciesReady: z.boolean(), submittedHash: contentHashSchema.nullable() }).strict(),
   guidance: z.string(),
 }).strict();
