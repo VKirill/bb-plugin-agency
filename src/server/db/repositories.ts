@@ -760,6 +760,7 @@ export function createRepositories(db: SqlDatabase) {
        * The job's own history plus what employees wrote in its subtasks: the card of a main
        * job then reads as one conversation instead of the lead talking to itself. Only
        * comments come from subtasks; their system events stay in their own cards.
+       * Bound the newest events, then present them chronologically; a long-running job must not freeze on its oldest 400 events.
        */
       listByJobTree(jobId: string, limit = 400): Activity[] {
         return (
@@ -769,7 +770,7 @@ export function createRepositories(db: SqlDatabase) {
              )
              SELECT a.* FROM agency_activity a
              WHERE a.job_id = ? OR (a.job_id IN (SELECT id FROM tree) AND a.kind = 'comment' AND a.comment IS NOT NULL)
-             ORDER BY a.timestamp LIMIT ?`,
+             ORDER BY a.timestamp DESC, a.rowid DESC LIMIT ?`,
           ).all(jobId, jobId, limit) as Array<{
             id: string;
             job_id: string;
@@ -780,7 +781,7 @@ export function createRepositories(db: SqlDatabase) {
             references_json: string;
             comment: string | null;
           }>
-        ).map(mapActivityRow);
+        ).reverse().map(mapActivityRow);
       },
       listByJob(jobId: string): Activity[] {
         return (
