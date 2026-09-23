@@ -277,6 +277,23 @@ describe("instructions inside Agency job threads", () => {
     expect(text).toContain("transition` to blocked");
   });
 
+  it("keeps the roster, recovery protocol and closing instructions with full department rules", () => {
+    const text = buildWorkerInstructions({
+      jobId: "job_root0001", jobKey: "AG-2201", title: "Калькулятор", departmentName: "Программисты",
+      isLead: true, assigneeType: "lead", members,
+      rules: { reworkLimit: 2, minorDefectsWithoutRound: true, reviewRequired: true, autoReview: true },
+    });
+    expect(text.length).toBeGreaterThan(INSTRUCTIONS_LIMIT);
+    expect(text).toContain("agt_dev00001");
+    expect(text).toContain("agt_qa000001");
+    expect(text).toContain("After the third unsuccessful pass");
+    expect(text).toContain("recoveryDecision:{cause,correction,verification}");
+    expect(text).toContain("Auto review is on");
+    expect(text).toContain("5. Finish with a summary report");
+    expect(text).toContain("bb agency launch cancel");
+    expect(text.trimEnd()).toMatch(/Language: write job titles.*in Russian\.$/);
+  });
+
   it("gives a reviewer the checking protocol instead of the executor one", () => {
     const text = buildWorkerInstructions({
       jobId: "job_check001",

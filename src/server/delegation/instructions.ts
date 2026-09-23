@@ -19,17 +19,15 @@ import { formatPendingClientQuestions } from "../runtime/client-bounce";
  *   job, a reviewer checks someone else's version.
  *
  * The provider sits on the thread-start path, so everything here is synchronous
- * SQLite reads and plain string assembly. BB truncates output above 4096 chars;
- * the builders cut lists themselves so the closing rules are never lost.
+ * SQLite reads and plain string assembly. BB truncates ordinary plugin thread
+ * instructions above 4096 chars; that builder fits its routing list. Isolated
+ * workers receive a context snapshot / rules.md, so their role is not truncated.
  */
 
 export const DELEGATION_MODES = ["delegate", "suggest", "off"] as const;
 export type DelegationMode = (typeof DELEGATION_MODES)[number];
 
 export const INSTRUCTIONS_LIMIT = 4_000;
-
-/** The owner's base role instruction is theirs to write; the prompt caps it so one layer cannot eat the rest. */
-export const PLAYBOOK_LIMIT = 4_000;
 
 export type DepartmentRoute = {
   departmentId: string;
@@ -328,7 +326,8 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
   if (worker.isLead) {
     const head = [
       `## Your role: lead of the "${worker.departmentName}" department for ${worker.jobKey}`,
-      `Job "${worker.title}" (jobId ${worker.jobId}). You orchestrate the department; you do not implement.`,
+      `Job "${worker.title}" (jobId ${worker.jobId}). You own the end result and choose the technical route. You may inspect code/docs, diagnose, plan and make decisions within granted authority; delegate production implementation and independent review.`,
+      "Before assigning implementation, identify what is known and unknown. Obtain available facts yourself or through focused discovery/spikes; for software adaptation compare the product with the installed SDK/API and runtime. Missing discoverable facts are not an owner decision. Maintain one plan covering the whole goal and revise it when evidence changes; the owner need not prescribe these steps.",
     ];
     const line = (member: WorkerMember) => `- ${member.name}${member.role ? ` — ${member.role}` : ""}: ${member.agentId}`;
     const executors = worker.members.filter((member) => member.type === "executor").map(line);
@@ -349,7 +348,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "   Two subtasks that may change the same files do not run at once: the Agency holds the later one in the launch queue until the first is done. Give each subtask its own files, or order them with `job depend`.",
       "2. Implementation and rework go to executors, review to reviewers. Pass inputs with `bb agency job attach-input`. Launch with `bb agency launch readiness`, then `launch prepare`.",
       "   Order: `bb agency job depend` (jobId waits for dependsOnJobId). Creating an assigned subtask already puts it in the launch queue; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
-      "3. When a work subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Automatic QC children do not. Do not poll in a loop: end your turn and wait.",
+      "3. When a work subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Automatic QC children do not. Inspect the whole remaining plan and resolve actionable blockers before waiting. End your turn only when work is genuinely delegated or an external dependency is pending and no useful independent action remains. Do not poll in an empty loop.",
       "4. Check each subtask against its acceptance criteria. A defect means a rework subtask and another independent review, not a fix by your own hands. Accept (`bb agency artifact accept`) only versions of subtasks you assigned; the server blocks accepting your own work.",
       ...leadRuleLines(worker.rules),
       "5. Finish with a summary report .agency/jobs/<main job key>/report.md published as a version and a final job comment. Do not accept your own result: acceptance belongs to the owner. Comments are Markdown: first line the outcome, details as a list, no run_/thr_/job_ ids unless needed.",
@@ -357,7 +356,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "A subtask returned to you as blocked with \"Return\" (or \"Возврат\"): reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
       workLanguageLine(),
     ];
-    return withPlaybook(worker, [fit(head, list, tail)]);
+    return withPlaybook(worker, [...head, ...list, ...tail]);
   }
   const common = [
     "- Job comments are Markdown: first line the outcome, details as a list (`\\n` line breaks in JSON), technical ids only when needed. Long material goes to the report.",
@@ -408,7 +407,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
  */
 function withPlaybook(worker: WorkerContext, lines: string[]): string {
   const playbook = worker.playbook?.trim();
-  return [...lines, ...(playbook ? ["", playbook.slice(0, PLAYBOOK_LIMIT)] : [])].join("\n");
+  return [...lines, ...(playbook ? ["", playbook] : [])].join("\n");
 }
 
 /** Instructions for ordinary BB chats: route work to the Agency or do it in the chat. */

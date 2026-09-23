@@ -13,6 +13,7 @@ describe("instruction templates", () => {
     expect(jobDescriptionKind("reviewer")).toBe("reviewer");
     expect(jobDescriptionKind("developer")).toBe("executor");
     expect(jobDescriptionTemplate("developer")).toContain("## Не мой пул — вернуть руководителю");
-    expect(jobDescriptionTemplate("lead")).toContain("Сам не исполняю");
+    expect(jobDescriptionTemplate("lead")).toContain("Сам анализирую");
+    expect(jobDescriptionTemplate("lead")).toContain("production-реализацию поручаю сотрудникам");
   });
 });

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
-import { buildWorkerInstructions, PLAYBOOK_LIMIT, type WorkerContext } from "../src/server/delegation/instructions";
+import { buildWorkerInstructions, type WorkerContext } from "../src/server/delegation/instructions";
 import { listTemplates, saveTemplate } from "../src/server/templates/store";
 import { PLAYBOOK_KEYS, defaultTemplates } from "../src/shared/templates";
 
@@ -36,6 +36,16 @@ describe("base role instructions", () => {
     }
   });
 
+  it("delivers the complete default lead policy, including the escalation boundary, in both languages", () => {
+    for (const language of ["ru", "en"] as const) {
+      const playbook = defaultTemplates(language).playbookLead;
+      const prompt = buildWorkerInstructions({ ...base, isLead: true, assigneeType: "lead", playbook });
+      expect(prompt.endsWith(playbook), language).toBe(true);
+      expect(prompt).toContain("Missing discoverable facts are not an owner decision");
+      expect(prompt).toContain("resolve actionable blockers before waiting");
+    }
+  });
+
   it("gives an assistant their own role, not the executor's", () => {
     const assistant = buildWorkerInstructions({ ...base, isLead: false, assigneeType: "assistant" });
     expect(assistant).toContain("## Your role: assistant");
@@ -43,11 +53,14 @@ describe("base role instructions", () => {
     expect(assistant).not.toContain("## Your role: executor");
   });
 
-  it("works without a playbook and caps a huge one", () => {
+  it("works without a playbook and preserves a long owner's policy in the worker snapshot", () => {
     const without = buildWorkerInstructions({ ...base, isLead: false, assigneeType: "executor" });
     expect(without).toContain("## Your role: executor");
-    const huge = buildWorkerInstructions({ ...base, isLead: false, assigneeType: "executor", playbook: "я".repeat(PLAYBOOK_LIMIT * 2) });
-    expect(huge.length).toBeLessThan(PLAYBOOK_LIMIT * 2);
+    const playbook = `${"Полное правило.\n".repeat(600)}Последнее правило владельца.`;
+    for (const assigneeType of ["lead", "executor", "reviewer", "assistant"] as const) {
+      const prompt = buildWorkerInstructions({ ...base, isLead: assigneeType === "lead", assigneeType, playbook });
+      expect(prompt.endsWith(playbook), assigneeType).toBe(true);
+    }
   });
 
   it("is owner-editable and resettable like any template", () => {
