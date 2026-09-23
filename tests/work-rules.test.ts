@@ -10,6 +10,27 @@ function open() {
 }
 
 describe("work rules", () => {
+  it("moves only canceled work into a new plan while retaining its rework limit", () => {
+    const db = open();
+    const s = seed(db);
+    s.store.saveWorkRules(s.bootstrap, { requestId: randomUUID(), scope: `department:${s.departmentId}`, expectedRevision: 0, rules: { reworkLimit: 1 } });
+    const source = s.job("Previous plan", s.lead);
+    const parent = s.job("New plan", s.lead);
+    const replacement = () => s.store.createJob(s.ctx, {
+      requestId: randomUUID(), bindingId: source.bindingId, departmentId: s.departmentId,
+      title: "Transferred remainder", brief: "Keep accepted evidence", acceptance: "Complete remaining criteria",
+      parentJobId: parent.id, assignedAgentId: s.developer, reworkOfJobId: source.id, priority: "normal", dueAt: null,
+    });
+    expect(replacement()).toMatchObject({ ok: false, error: { code: "invalid_rework_source" } });
+    const canceled = s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: source.id, expectedRevision: source.revision, to: "canceled" });
+    expect(canceled.ok).toBe(true);
+    const moved = replacement();
+    expect(moved).toMatchObject({ ok: true, value: { reworkOfJobId: source.id, parentJobId: parent.id } });
+    expect(replacement()).toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
+    expect(s.store.getJob(source.id)?.state).toBe("canceled");
+    db.close();
+  });
+
   it("inherits agency values into a department and keeps limits per scope", () => {
     const db = open();
     const s = seed(db);

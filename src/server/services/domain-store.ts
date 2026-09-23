@@ -416,8 +416,16 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
   function assertReworkRoundAllowed(sourceId: string | null | undefined, parentJobId: string | null, departmentId: string, bindingId: string): DomainResult<string | null> {
     if (!sourceId) return ok(null);
     const source = repos.job.get(sourceId);
-    if (!source || source.parentJobId !== parentJobId || source.departmentId !== departmentId || source.bindingId !== bindingId) {
-      return fail("invalid_rework_source", "reworkOfJobId must name work in the same department and under the same parent");
+    if (!source || source.departmentId !== departmentId || source.bindingId !== bindingId) {
+      return fail("invalid_rework_source", "reworkOfJobId must name work in the same department and binding");
+    }
+    if (source.parentJobId !== parentJobId) {
+      // Replanning may move canceled work under a new delivery plan. Keep its
+      // original lineage and budget, but never fork a worker that may still run.
+      const reviewing = db.prepare("SELECT 1 FROM agency_run_attempt WHERE job_id = ? AND state = 'awaiting_review' LIMIT 1").get(source.id);
+      if (source.state !== "canceled" || liveAttempt(source.id) || reviewing) {
+        return fail("invalid_rework_source", "moving rework under another parent requires a canceled source with no live attempts");
+      }
     }
     const lineId = source.reworkOfJobId ?? source.id;
     const count = reworkRoundCount(db, lineId);
