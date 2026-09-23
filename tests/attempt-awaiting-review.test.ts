@@ -253,7 +253,7 @@ function compileFor(seeded: Awaited<ReturnType<typeof seedRunningJob>>): Context
   return result.snapshot;
 }
 
-function publishVersion(seeded: Awaited<ReturnType<typeof seedRunningJob>>, bytes: Uint8Array) {
+export function publishVersion(seeded: Awaited<ReturnType<typeof seedRunningJob>>, bytes: Uint8Array) {
   const artifact = seeded.store.createArtifact(seeded.ctx, {
     requestId: requestId(),
     jobId: seeded.job.id,

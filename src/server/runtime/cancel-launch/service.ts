@@ -1,4 +1,4 @@
-import { fail, ok, type DomainResult } from "../../../domain";
+import { assertJobTransition, fail, ok, type DomainResult } from "../../../domain";
 import { cancelLaunchCommandSchema, type CancelLaunchRecord } from "../../../shared/rpc-contract";
 import { createRepositories } from "../../db/repositories";
 import type { SqlDatabase } from "../../db/sql";
@@ -10,6 +10,7 @@ import type { ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../st
 import { OCCUPYING_THREAD_STATUSES, type OfficialThreadStatus } from "../stop-handoff/types.js";
 import { uuidV5 } from "../launch/operation-ids.js";
 import type { InternalRunStoreReads, RunStore } from "../run-store/types.js";
+import { assertAttemptTransition } from "../run-store/states.js";
 import { findReviewerThread, markReviewerThreadDead, resolveReviewLine } from "../reviewer-thread/service.js";
 
 export const CANCEL_LAUNCH_KIND = "agency.cancelLaunch";
@@ -120,6 +121,12 @@ export function createCancelLaunchService(deps: CancelLaunchDeps) {
       const access = assertBindingAccess(ctx, snapshot.value.snapshot.binding.id);
       if (!access.ok) return access;
 
+      // Reject known-invalid transitions before the external stop, not after it.
+      // The transactional transitions below still enforce revisions after that I/O.
+      const canCancel = assertAttemptTransition(attempt.value.state, "canceled");
+      if (!canCancel.ok) return canCancel;
+      const canBlock = assertJobTransition(jobBeforeStop.state, "blocked");
+      if (!canBlock.ok) return canBlock;
       const observed = await observeExactThread(deps, input.threadId);
       if (!observed.ok) return observed;
 

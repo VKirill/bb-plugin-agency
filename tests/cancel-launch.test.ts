@@ -1,3 +1,4 @@
+import { applyVerifiedCompletionLifecycle, interpretVerifiedCompletion } from "../src/server/runtime/isolated-sdk";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openMigratedDatabase } from "../src/server/db";
 import { createCancelLaunchService } from "../src/server/runtime/cancel-launch";
 import type { OfficialThreadStatus, ThreadGetPort, ThreadListRunningPort, ThreadStopPort } from "../src/server/runtime/stop-handoff";
-import { seedRunningAttempt } from "./attempt-awaiting-review.test";
+import { publishVersion, seedRunningAttempt } from "./attempt-awaiting-review.test";
 
 const tempDirs: string[] = [];
 
@@ -98,6 +99,57 @@ describe("cancelLaunch", () => {
     expect(replay.ok && replay.value.replay).toBe(true);
     expect(replay.ok && replay.value.jobRevision).toBe(first.value.jobRevision);
     expect(stop.calls).toBe(1);
+  });
+
+  it("stops an awaiting-review worker without losing its published version or history", async () => {
+    const db = openDb();
+    const live = await seedRunningAttempt(db);
+    const version = publishVersion(live.seeded, new TextEncoder().encode("accepted criteria remain evidence"));
+    const handedIn = applyVerifiedCompletionLifecycle({
+      store: live.seeded.store, runs: live.runs, reads: live.reads, ctx: live.seeded.ctx,
+      jobId: live.attempt.jobId, launchId: live.receipt.launchId,
+      reading: interpretVerifiedCompletion({ threadStatus: "idle", publishedVerified: true, acceptedVerified: false }),
+      publishedHash: version.hash,
+    });
+    if (!handedIn.ok) throw new Error(handedIn.error.message);
+    const moved = live.reads.getAttempt(live.seeded.ctx, live.attempt.attemptId);
+    if (!moved.ok) throw new Error(moved.error.message);
+    expect(moved.value.state).toBe("awaiting_review");
+    const job = live.seeded.store.getJob(live.attempt.jobId)!;
+    expect(job.state).toBe("review");
+    const artifactsBefore = db.prepare("SELECT * FROM agency_artifact_version WHERE job_id = ?").all(job.id);
+    const historyBefore = db.prepare("SELECT id FROM agency_activity WHERE job_id = ?").all(job.id) as { id: string }[];
+    const stop = stopPort();
+    const service = createCancelLaunchService({ db, store: live.seeded.store, runs: live.runs, reads: live.reads, stop, get: getPort("idle", live.attempt.threadId!), listRunning: listPort([]) });
+    const input = { requestId: randomUUID(), jobId: job.id, attemptId: moved.value.attemptId, expectedJobRevision: job.revision,
+      expectedAttemptRevision: moved.value.revision, launchId: moved.value.launchId!, threadId: moved.value.threadId!, reason: "Owner requested migration from Claude to GPT-6" };
+    const result = await service.cancelLaunch(live.seeded.ctx, input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value).toMatchObject({ jobState: "blocked", attemptState: "canceled" });
+    expect(db.prepare("SELECT * FROM agency_artifact_version WHERE job_id = ?").all(job.id)).toEqual(artifactsBefore);
+    expect(artifactsBefore).toContainEqual(expect.objectContaining({ hash: version.hash }));
+    const historyAfter = db.prepare("SELECT id FROM agency_activity WHERE job_id = ?").all(job.id);
+    expect(historyAfter).toEqual(expect.arrayContaining(historyBefore));
+    expect((await service.cancelLaunch(live.seeded.ctx, input)).ok).toBe(true);
+    expect(stop.calls).toBe(1);
+    expect(live.seeded.store.getJob(job.id)?.state).toBe("blocked");
+  });
+
+  it.each(["done", "canceled"] as const)("rejects a %s job before stopping its thread", async (state) => {
+    const db = openDb();
+    const live = await seedRunningAttempt(db);
+    db.prepare("UPDATE agency_job SET state = ? WHERE id = ?").run(state, live.attempt.jobId);
+    const job = live.seeded.store.getJob(live.attempt.jobId)!;
+    const stop = stopPort();
+    const service = createCancelLaunchService({ db, store: live.seeded.store, runs: live.runs, reads: live.reads, stop, get: getPort("idle", live.attempt.threadId!), listRunning: listPort([]) });
+    const result = await service.cancelLaunch(live.seeded.ctx, {
+      requestId: randomUUID(), jobId: job.id, attemptId: live.attempt.attemptId, expectedJobRevision: job.revision,
+      expectedAttemptRevision: live.attempt.revision, launchId: live.attempt.launchId!, threadId: live.attempt.threadId!, reason: "invalid target",
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "illegal_transition" } });
+    expect(stop.calls).toBe(0);
+    expect(live.seeded.store.getJob(job.id)?.state).toBe(state);
   });
 
   it("does not stop the thread when expectedJobRevision is stale", async () => {

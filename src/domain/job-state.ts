@@ -7,7 +7,8 @@ export const JOB_TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = 
   running: ["review", "waiting_input", "blocked", "canceled"],
   waiting_input: ["running", "blocked", "canceled"],
   blocked: ["queued", "running", "waiting_input", "canceled"],
-  review: ["done", "running", "canceled"],
+  // A stopped review worker may need a new provider; published versions remain intact.
+  review: ["done", "running", "blocked", "canceled"],
   done: ["review"],
   canceled: [],
 };
