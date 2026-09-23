@@ -9,6 +9,7 @@ import {
   closeParentIfChildrenDone,
   sweepStaleReviewStations,
   closeStation,
+  acceptOnLine,
   type ConveyorPorts,
 } from "../src/server/runtime/conveyor";
 import { startAutoReview, type AutoReviewPorts } from "../src/server/runtime/auto-review/service";
@@ -104,6 +105,60 @@ describe("job pack", () => {
 });
 
 describe("conveyor close", () => {
+  it.each(["accept", "legacy_publication", "no_resolution", "wrong_hash", "late_input", "rework", "unfinished", "self_review", "executor", "active_qc", "revision_conflict", "foreign_parent"] as const)("resolves an advisory hold using exact independent evidence: %s", (mode) => {
+    const db = openMigratedDatabase(new Database(":memory:"));
+    const s = seed(db);
+    const main = s.job("Руководство", s.lead);
+    const work = s.job("Реализация", s.developer);
+    const review = s.job("Независимая проверка", s.reviewer);
+    db.prepare("UPDATE agency_job SET parent_job_id = ? WHERE id IN (?, ?)").run(main.id, work.id, review.id);
+    const version = publish(s, work.id);
+    intoReview(s, db, work.id);
+    s.input(review.id, work.id);
+    db.prepare("UPDATE agency_job_input_ref SET artifact_id = ?, version = ?, hash = ? WHERE target_job_id = ?")
+      .run(version.artifactId, version.version, mode === "wrong_hash" ? "ef".repeat(32) : version.hash, review.id);
+    if (mode === "late_input") db.prepare("UPDATE agency_job_input_ref SET created_at = '2099-01-01T00:00:00.000Z' WHERE target_job_id = ?").run(review.id);
+    publish(s, review.id);
+    if (mode === "legacy_publication") {
+      // The host publication metadata port historically did not emit artifact_published.
+      // Require the input to predate the report author's actual attempt instead.
+      s.attempt(review.id, "succeeded");
+      db.prepare("UPDATE agency_artifact_version SET author = ? WHERE job_id = ?").run(JSON.stringify({ kind: "run", runId: `run_${review.id}` }), review.id);
+      db.prepare("DELETE FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'").run(review.id);
+    }
+    s.store.createActivity(s.ctx, { requestId: randomUUID(), jobId: review.id, actor: { kind: "agent", agentId: s.reviewer }, kind: "comment", causationId: null, references: [], comment: mode === "rework" ? "Вердикт: доработать" : "Вердикт: принять" });
+    db.prepare("UPDATE agency_job SET state = ? WHERE id = ?").run(mode === "unfinished" ? "running" : "done", review.id);
+    if (mode === "self_review") db.prepare("UPDATE agency_job SET assigned_agent_id = ? WHERE id = ?").run(s.developer, review.id);
+    if (mode === "foreign_parent") db.prepare("UPDATE agency_job SET parent_job_id = NULL WHERE id = ?").run(review.id);
+    db.prepare("INSERT INTO agency_handin_hold (job_id, hash, remark) VALUES (?, ?, 'Preliminary evaluator rejected')").run(work.id, version.hash);
+    let priorQc: string | null = null;
+    if (mode === "active_qc") {
+      const qc = s.job("Текущая проверка", s.reviewer);
+      db.prepare("UPDATE agency_job SET state = 'running' WHERE id = ?").run(qc.id);
+      priorQc = qc.id;
+    }
+    db.prepare("INSERT INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(work.id, version.hash, priorQc, priorQc ? "queued" : "failed", new Date().toISOString());
+    const ports = closePorts(s, db);
+    ports.ctx = { ...s.ctx, actor: { kind: "agent", agentId: mode === "executor" ? s.developer : s.lead } };
+    const input = { requestId: randomUUID(), jobId: work.id, expectedRevision: s.store.getJob(work.id)!.revision + (mode === "revision_conflict" ? 1 : 0), artifactId: version.artifactId, version: version.version, hash: version.hash,
+      ...(mode === "no_resolution" ? {} : { reviewResolution: { reviewJobId: review.id, reason: "The independent report verified the exact version after the preliminary rejection." } }) };
+    const result = acceptOnLine(ports, input);
+    if (mode === "accept" || mode === "legacy_publication") {
+      expect(result.ok).toBe(true);
+      expect(s.store.getJob(work.id)?.state).toBe("done");
+      expect(db.prepare("SELECT 1 FROM agency_handin_hold WHERE job_id = ?").get(work.id)).toBeUndefined();
+      expect(db.prepare("SELECT review_job_id, outcome FROM agency_auto_review WHERE job_id = ?").get(work.id)).toEqual({ review_job_id: review.id, outcome: "resolved" });
+      expect(acceptOnLine(ports, input)).toEqual(result);
+    } else {
+      expect(result.ok).toBe(false);
+      expect(s.store.getJob(work.id)?.state).toBe("review");
+      expect(db.prepare("SELECT 1 FROM agency_handin_hold WHERE job_id = ?").get(work.id)).toBeTruthy();
+      expect(db.prepare("SELECT review_job_id FROM agency_auto_review WHERE job_id = ?").get(work.id)).toEqual({ review_job_id: priorQc });
+    }
+    db.close();
+  });
+
   it("accepts a review job into done in the same command", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);

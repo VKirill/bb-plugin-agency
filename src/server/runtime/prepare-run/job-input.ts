@@ -18,6 +18,7 @@ import { payloadWithoutRequestId, sameActor, sameCanonical } from "../../service
 import { createInternalRunStoreReads } from "../run-store";
 import { computeHandoffHash } from "../context-snapshot/compile.js";
 import type { HandoffPackage, InputArtifactRef } from "../context-snapshot/types.js";
+import { recordTrace } from "../trace/store.js";
 
 export { attachJobInputCommandSchema, attachJobInputHandoffSchema } from "../../../shared/contracts";
 export type { AttachJobInputCommand } from "../../../shared/contracts";
@@ -164,7 +165,7 @@ async function copyInputToTarget(input: {
   version: number;
   hash: string;
   bytes: Uint8Array;
-}): Promise<DomainResult<string>> {
+}): Promise<DomainResult<{ relativePath: string; reused: boolean }>> {
   if (input.bytes.byteLength > INPUT_COPY_MAX_BYTES) {
     return fail(
       "input_copy_too_large",
@@ -173,13 +174,16 @@ async function copyInputToTarget(input: {
   }
   const relativePath = inputCopyRelativePath(input.artifactId, input.version);
   const written = await input.files.writeAtomic(input.targetRoot, relativePath, input.bytes);
-  if (!written.ok) return written;
+  // Copies are shared by every job in this folder. A later (or concurrent) review
+  // may already have materialized this pinned version. Never overwrite it: only
+  // reuse an immutable collision after reading and verifying the actual bytes.
+  if (!written.ok && written.error.code !== "artifact_immutable") return written;
   const check = await input.files.read(input.targetRoot, relativePath);
   if (!check.ok) return check;
-  if (hashBytes(check.value) !== input.hash) {
+  if (check.value.byteLength !== input.bytes.byteLength || hashBytes(check.value) !== input.hash) {
     return fail("artifact_hash_mismatch", "input copy on the target machine does not match the pinned hash");
   }
-  return ok(relativePath);
+  return ok({ relativePath, reused: !written.ok });
 }
 
 function validateHandoff(
@@ -269,8 +273,14 @@ export async function attachJobInput(
       hash: opened.value.hash,
       bytes: opened.value.bytes,
     });
+    recordTrace(deps.db, {
+      jobId: target.id, step: "input.copy", outcome: copied.ok ? "succeeded" : "failed",
+      reason: copied.ok ? (copied.value.reused ? "verified_existing" : "created") : copied.error.code,
+      requestId: input.requestId, relatedJobId: source.id, artifactHash: input.hash,
+      facts: { version: input.version },
+    });
     if (!copied.ok) return copied;
-    placed = { hostId: targetBinding.hostId, relativePath: copied.value };
+    placed = { hostId: targetBinding.hostId, relativePath: copied.value.relativePath };
   }
   let handoff: ReturnType<typeof validateHandoff> extends DomainResult<infer T> ? T | undefined : never;
   if (input.handoff) {

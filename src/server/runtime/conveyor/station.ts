@@ -7,6 +7,7 @@ import type { ServiceContext } from "../../services/context.js";
 import type { AutoReviewOutcome, AutoReviewPorts, HandedInVersion } from "../auto-review/service.js";
 import { startAutoReview } from "../auto-review/service.js";
 import { latestReviewText, parseReviewVerdict } from "./verdict.js";
+import { validateReviewResolution } from "./review-resolution.js";
 
 /** How long a queued QC station may sit before the lead must repair its launch. */
 export const STALE_REVIEW_MS = 30 * 60 * 1000;
@@ -20,6 +21,7 @@ export type AcceptInput = {
   artifactId: string;
   version: number;
   hash: string;
+  reviewResolution?: { reviewJobId: string; reason: string };
 };
 
 export type ConveyorStore = {
@@ -139,7 +141,7 @@ function freshParentSummary(db: SqlDatabase, jobId: string): boolean {
   return lastWork.seq === null || (publication.seq !== null && publication.seq > lastWork.seq);
 }
 
-function stationReadyForAcceptance(ports: ClosePorts, job: Job): boolean {
+function stationReadyForAcceptance(ports: ClosePorts, job: Job, resolvedReviewId?: string): boolean {
   const hold = (reason: string, relatedJobId?: string) => {
     recordTrace(ports.db, { jobId: job.id, step: "acceptance.gate", outcome: "waiting", reason, relatedJobId, artifactHash: latestHandedInVersion(ports.db, job.id)?.hash, collapse: true });
     return false;
@@ -149,10 +151,10 @@ function stationReadyForAcceptance(ports: ClosePorts, job: Job): boolean {
   if (!isAutoReviewJob(ports.db, job.id)) {
     if (latestReviewerHoldsParent(ports, job.id)) return hold("manual_review_not_passed");
     const version = latestHandedInVersion(ports.db, job.id);
-    if (version && ports.db.prepare(`SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?`).get(job.id, version.hash)) return hold("handin_rejected");
+    if (!resolvedReviewId && version && ports.db.prepare(`SELECT 1 FROM agency_handin_hold WHERE job_id = ? AND hash = ?`).get(job.id, version.hash)) return hold("handin_rejected");
     const claim = version ? ports.db.prepare(`SELECT review_job_id FROM agency_auto_review WHERE job_id = ? AND hash = ?`)
       .get(job.id, version.hash) as { review_job_id: string | null } | undefined : undefined;
-    if (claim) {
+    if (claim && !resolvedReviewId) {
       const qc = claim.review_job_id ? ports.store.getJob(claim.review_job_id) : undefined;
       if (!qc || qc.state !== "done" || parseReviewVerdict(latestReviewText(ports.db, qc.id)) !== "accept") return hold("qc_not_passed", qc?.id);
     }
@@ -205,12 +207,28 @@ export function closeStation(ports: ClosePorts, jobId: string, seed: string): Do
  * the parent closes when this was its last open work child. No second transition is asked of anyone.
  */
 export function acceptOnLine<T extends AcceptInput>(ports: ClosePorts, input: T): DomainResult<ArtifactVersion> {
+  return ports.db.transaction(() => acceptOnLineTransaction(ports, input))();
+}
+
+function acceptOnLineTransaction<T extends AcceptInput>(ports: ClosePorts, input: T): DomainResult<ArtifactVersion> {
   const job = ports.store.getJob(input.jobId);
-  if (job && !stationReadyForAcceptance(ports, job)) {
+  if (job && input.reviewResolution) {
+    const resolution = validateReviewResolution(ports, job, input);
+    if (!resolution.ok) return resolution;
+  }
+  if (job && !stationReadyForAcceptance(ports, job, input.reviewResolution?.reviewJobId)) {
     return fail("acceptance_pending", "The result needs completed work, a fresh final report and an explicit passing review. / Нужны завершённые работы, свежий итоговый отчёт и положительное заключение проверки.");
   }
   const accepted = ports.store.acceptArtifactVersion(ports.ctx, input);
   if (accepted.ok) {
+    if (input.reviewResolution) {
+      ports.db.prepare(`INSERT INTO agency_auto_review (job_id, hash, review_job_id, outcome, created_at)
+        VALUES (?, ?, ?, 'resolved', ?) ON CONFLICT(job_id, hash) DO UPDATE SET review_job_id = excluded.review_job_id, outcome = 'resolved'`)
+        .run(input.jobId, input.hash, input.reviewResolution.reviewJobId, new Date().toISOString());
+      ports.db.prepare("DELETE FROM agency_handin_hold WHERE job_id = ? AND hash = ?").run(input.jobId, input.hash);
+      recordTrace(ports.db, { jobId: input.jobId, step: "review.resolve", outcome: "succeeded", reason: "independent_review_accepted",
+        requestId: input.requestId, relatedJobId: input.reviewResolution.reviewJobId, artifactHash: input.hash });
+    }
     discardOpenReviews(ports, input.jobId);
     closeParentIfChildrenDone(ports, input.jobId);
   }

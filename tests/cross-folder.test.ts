@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -113,6 +113,46 @@ describe("employee workplace", () => {
 });
 
 describe("input from another machine", () => {
+  it.each(["sequential", "concurrent", "corrupt", "unreadable", "write_error"] as const)("handles shared pinned inputs: %s", async (mode) => {
+    const s = seed({ projectFolders: true, fileGateway: true });
+    const mini = s.bind("proj_site", "host_mini", "env_mini");
+    const parent = s.must(s.job(s.ovh.id, null, s.lead.id));
+    const children = [0, 1].map(() => s.must(s.job(mini.id, parent.id, s.tester.id)));
+    const sourceFiles = createLocalHostFilePort("host_ovh");
+    const targetFiles = createLocalHostFilePort("host_mini");
+    const artifact = s.must(s.store.createArtifact(s.ctx, { requestId: randomUUID(), jobId: parent.id }));
+    const bytes = new TextEncoder().encode("# Shared normative input\n");
+    const hash = hashBytes(bytes);
+    const storage = createArtifactStorage({ metadata: createArtifactMetadataPort(s.db, s.ctx), files: sourceFiles, previewFiles: sourceFiles, previewRoot: s.ovh.canonicalRoot });
+    s.must(await storage.publish({ requestId: randomUUID(), artifactId: artifact.id, jobId: parent.id, hostId: "host_ovh", relativePath: "input.md", mime: "text/markdown", size: bytes.byteLength, hash, author: { kind: "system" }, bytes }));
+    const attach = (index: number, files = targetFiles) => attachJobInput({ store: s.store, db: s.db, files: sourceFiles, targetFiles: files }, s.ctx, {
+      requestId: randomUUID(), targetJobId: children[index]!.id, expectedRevision: children[index]!.revision,
+      sourceJobId: parent.id, artifactId: artifact.id, version: 1, hash,
+    });
+    if (mode === "concurrent") {
+      const results = await Promise.all([attach(0), attach(1)]);
+      expect(results.map(result => result.ok)).toEqual([true, true]);
+    } else {
+      const first = s.must(await attach(0));
+      const path = join(mini.canonicalRoot, first.relativePath);
+      if (mode === "corrupt") writeFileSync(path, "different bytes");
+      const files = mode === "unreadable" ? { ...targetFiles, read: async () => ({ ok: false as const, error: { code: "host_file_error", message: "denied" } }) }
+        : mode === "write_error" ? { ...targetFiles, writeAtomic: async () => ({ ok: false as const, error: { code: "path_escape", message: "unsafe path" } }) } : targetFiles;
+      const second = await attach(1, files);
+      if (mode === "sequential") expect(second.ok).toBe(true);
+      else {
+        expect(second.ok || second.error.code).toBe(mode === "corrupt" ? "artifact_hash_mismatch" : mode === "unreadable" ? "host_file_error" : "path_escape");
+        expect(s.db.prepare("SELECT 1 FROM agency_job_input_ref WHERE target_job_id = ?").get(children[1]!.id)).toBeUndefined();
+      }
+      expect(readFileSync(path, "utf8")).toBe(mode === "corrupt" ? "different bytes" : new TextDecoder().decode(bytes));
+    }
+    if (mode === "sequential" || mode === "concurrent") {
+      expect(s.db.prepare("SELECT reason FROM agency_trace WHERE step = 'input.copy' ORDER BY reason").all()).toEqual([{ reason: "created" }, { reason: "verified_existing" }]);
+      for (const child of children) expect((await loadJobInputsForPrepare({ store: s.store, db: s.db, files: targetFiles }, s.ctx, child.id)).ok).toBe(true);
+    }
+    s.db.close();
+  });
+
   it("copies the pinned version next to the subtask and verifies the copy at prepare", async () => {
     const s = seed({ projectFolders: true, fileGateway: true });
     const mini = s.bind("proj_site", "host_mini", "env_mini");

@@ -57,6 +57,10 @@ export const acceptArtifactVersionCommandSchema = changeCommandSchema
     artifactId: opaqueIdSchema,
     version: z.number().int().positive(),
     hash: contentHashSchema,
+    reviewResolution: z.object({
+      reviewJobId: opaqueIdSchema,
+      reason: z.string().trim().min(1).max(4000),
+    }).strict().optional(),
   })
   .strict();
 
