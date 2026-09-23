@@ -109,18 +109,22 @@ function setSendState(db: SqlDatabase, requestId: string, state: string, now: st
 }
 
 /**
- * The attempt that holds the returned version: the latest one with a thread. A delivered job
- * may already have its attempt marked succeeded; reclamation reopens it.
+ * Only the latest attempt may receive a returned version. Explicit hand-in can put the job
+ * in review before reconciliation changes its attempt from running to awaiting_review.
+ * Sending remarks to that same thread is safe and does not fabricate a completed attempt.
+ * A delivered job may have its attempt marked succeeded; reclamation reopens it.
  */
 function reviewedAttempt(db: SqlDatabase, jobId: string, delivered: boolean): { id: string; thread_id: string; launch_id: string } | undefined {
-  const states = delivered ? "'awaiting_review', 'succeeded'" : "'awaiting_review'";
-  return db
+  const states = delivered ? ["awaiting_review", "succeeded"] : ["awaiting_review", "running"];
+  const latest = db
     .prepare(
-      `SELECT id, thread_id, launch_id FROM agency_run_attempt
-       WHERE job_id = ? AND state IN (${states}) AND thread_id IS NOT NULL
+      `SELECT id, thread_id, launch_id, state FROM agency_run_attempt
+       WHERE job_id = ?
        ORDER BY attempt_no DESC LIMIT 1`,
     )
-    .get(jobId) as { id: string; thread_id: string; launch_id: string } | undefined;
+    .get(jobId) as { id: string; thread_id: string | null; launch_id: string | null; state: string } | undefined;
+  return latest?.thread_id && latest.launch_id && states.includes(latest.state)
+    ? { id: latest.id, thread_id: latest.thread_id, launch_id: latest.launch_id } : undefined;
 }
 
 function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expectedRevision: number): DomainResult<Job> {
@@ -243,7 +247,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
   }
   if (!row) {
     const attempt = reviewedAttempt(deps.db, job.id, delivered);
-    if (!attempt) return fail("rework_no_thread", "no attempt awaiting review with a live thread; relaunch the job instead");
+    if (!attempt) return fail("rework_no_thread", "latest attempt has no resumable thread; reconcile it or recover a stopped job instead");
     const hash = await deps.currentPublishedHash(job.id);
     if (!hash) return fail("rework_no_version", "the job has no verified published version to return");
     const now = new Date().toISOString();

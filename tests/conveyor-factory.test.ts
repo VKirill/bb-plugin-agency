@@ -487,13 +487,13 @@ describe("reclamation: the customer returns the delivered product as a whole", (
     };
   }
 
-  it("allows one audited lead recovery without granting the worker an override", async () => {
+  it.each(["awaiting_review", "running"])("allows one audited lead recovery for a %s attempt without respawn or a worker override", async (attemptState) => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const root = s.job("Product", s.lead);
     const work = child(s, root.id, "Fix exit status");
     handIn(s, db, work.id);
-    s.attempt(work.id, "awaiting_review");
+    s.attempt(work.id, attemptState);
     s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: work.id, threadBound: true });
     const sent: Array<{ threadId: string; text: string }> = [];
     const deps = reworkDeps(s, db, sent);
@@ -507,6 +507,8 @@ describe("reclamation: the customer returns the delivered product as a whole", (
     expect((await returnJobForRework(deps, { ...owner, caller: { threadId: "thr_lead", attemptId: "run_lead", jobId: root.id, agentId: s.lead } }, decision)).ok).toBe(true);
     expect((await returnJobForRework(deps, { ...owner, caller: { threadId: "thr_lead", attemptId: "run_lead", jobId: root.id, agentId: s.lead } }, decision)).ok).toBe(true);
     expect(sent).toHaveLength(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_run_attempt WHERE job_id = ?").get(work.id)).toEqual({ n: 1 });
+    expect(db.prepare("SELECT state FROM agency_run_attempt WHERE job_id = ?").get(work.id)).toEqual({ state: "running" });
     expect(sent[0].text).toContain(decision.recoveryDecision.cause);
     expect(s.store.listActivity(work.id).some(row => row.comment?.includes(decision.recoveryDecision.cause))).toBe(true);
     expect(deps.reworkLimit!(work)).toBe(0);
@@ -529,6 +531,25 @@ describe("reclamation: the customer returns the delivered product as a whole", (
     s.attempt(root.id, "succeeded");
     return { root, station };
   }
+
+  it("does not return a new result to an older review thread when the latest launch has failed", async () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const root = s.job("Product", s.lead); const work = child(s, root.id, "Implementation");
+    handIn(s, db, work.id); s.attempt(work.id, "awaiting_review");
+    db.pragma("foreign_keys = OFF");
+    db.prepare(`INSERT INTO agency_run_attempt (id, job_id, attempt_no, snapshot_id, digest, thread_id, launch_id, state, revision, created_at, updated_at)
+      SELECT ?, job_id, 2, snapshot_id, digest, NULL, ?, 'failed', 1, created_at, updated_at FROM agency_run_attempt WHERE job_id = ?`)
+      .run("run_new_failed", randomUUID(), work.id);
+    db.pragma("foreign_keys = ON");
+    const sent: Array<{ threadId: string; text: string }> = [];
+    const deps = { ...reworkDeps(s, db, sent), reworkLimit: undefined };
+    const owner: ServiceContext = { actor: { kind: "user", userId: "usr_owner" }, allowedBindingIds: [s.bindingId] };
+    expect(await returnJobForRework(deps, owner, { requestId: randomUUID(), jobId: work.id,
+      expectedRevision: s.store.getJob(work.id)!.revision, comment: "Fix current result" }))
+      .toMatchObject({ ok: false, error: { code: "rework_no_thread" } });
+    expect(sent).toHaveLength(0); expect(s.store.getJob(work.id)?.state).toBe("review");
+    db.close();
+  });
 
   it("lets the owner return a done root without ever having stamped a station", async () => {
     const db = openMigratedDatabase(new Database(":memory:"));
