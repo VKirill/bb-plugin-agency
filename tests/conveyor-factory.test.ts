@@ -181,6 +181,44 @@ function qcJobFor(db: Db, workJobId: string): string {
 }
 
 describe("factory conveyor: the customer gets a product, not stamps", () => {
+  it("delivers an explicitly submitted child through one QC and a fresh parent result without owner input", async () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const root = s.job("Adaptation delivery", s.lead); const work = child(s, root.id, "Implementation");
+    const start = (id: string) => {
+      db.prepare("UPDATE agency_job SET state = 'running' WHERE id = ?").run(id);
+      s.attempt(id, "running");
+      db.prepare("INSERT INTO agency_handin_protocol VALUES (?)").run(`run_${id}`);
+      s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: id, threadBound: true });
+    };
+    const submit = (id: string, text: string) => {
+      const v = publish(s, id);
+      const result = s.store.submitJobResult(s.ctx, { requestId: randomUUID(), jobId: id,
+        expectedRevision: s.store.getJob(id)!.revision, artifactId: v.artifactId, version: v.version, hash: v.hash, comment: text });
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      const changed = s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: id,
+        expectedRevision: s.store.getJob(id)!.revision, to: "review" });
+      expect(changed.ok, JSON.stringify(changed)).toBe(true);
+    };
+    start(root.id); start(work.id);
+    publish(s, root.id); comment(s, root.id, "Delivery plan published; implementation in progress");
+    expect(s.store.transitionJob(s.ctx, { requestId: randomUUID(), jobId: root.id, expectedRevision: root.revision, to: "review" }).ok).toBe(false);
+    const { ports, ready } = conveyor(s, db, { qc: true });
+    submit(work.id, "Implementation and evidence ready");
+    expect(await advanceAfterHandIn(ports, work.id)).toBe("created");
+    const qcId = qcJobFor(db, work.id); start(qcId);
+    submit(qcId, "Вердикт: принять\nТочная версия независимо проверена.");
+    expect(await advanceAfterHandIn(ports, qcId)).toBe("closed");
+    expect(s.store.getJob(work.id)?.state).toBe("done");
+    expect(s.store.getJob(root.id)?.state).toBe("running");
+    submit(root.id, "Delivered product; exact accepted child evidence and final report");
+    expect(closeStation(ports, root.id, "final-product").ok).toBe(true);
+    expect(s.store.getJob(root.id)?.state).toBe("done");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_auto_review WHERE job_id = ?").get(work.id)).toEqual({ n: 1 });
+    expect(ready).toHaveLength(1); expect(ownerInbox(s, db)).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_run_attempt").get()).toEqual({ n: 3 });
+    db.close();
+  });
+
   it("recovers a review entered without the completion callback, once per published version", async () => {
     const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
     const root = s.job("Product", s.lead); const work = child(s, root.id, "Implementation");

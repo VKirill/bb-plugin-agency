@@ -1,3 +1,4 @@
+import { decisionFreshness, lessonFeedback, progressSignal } from "./observations";
 import { rulesForDepartment } from "../rules/work-rules";
 import type { SqlDatabase } from "../db/sql";
 import type { Job } from "../../shared/contracts";
@@ -45,10 +46,10 @@ export function readLeadState(db: SqlDatabase, job: Job, offset: number, limit: 
     LEFT JOIN agency_handin_protocol p ON p.attempt_id = a.id
     LEFT JOIN agency_result_submission s ON s.attempt_id = a.id WHERE a.job_id = ? ORDER BY a.attempt_no DESC LIMIT 1`).get(job.id) as
     { id: string; explicit: string | null; hash: string | null } | undefined;
-  return { job, decision, decisions, nextDecisionBeforeRevision: decisionHistory.length > 10 ? decisions.at(-1)!.revision : null, lessonCandidates: autonomousLearning ? lessonCandidates : [], lessonCandidateCount: autonomousLearning ? candidates.n : 0, decisionRevision: decision?.revision ?? 0, children,
+  return { job, decision, decisions, decisionFreshness: decisionFreshness(db, job.id, decision?.activityId), lessonFeedback: lessonFeedback(db, job.id), progressSignal: progressSignal(db, job.id), nextDecisionBeforeRevision: decisionHistory.length > 10 ? decisions.at(-1)!.revision : null, lessonCandidates: autonomousLearning ? lessonCandidates : [], lessonCandidateCount: autonomousLearning ? candidates.n : 0, decisionRevision: decision?.revision ?? 0, children,
     childCounts: Object.fromEntries(counts.map(row => [row.state, row.n])), nextOffset: offset + children.length < total ? offset + children.length : null,
     publications, handIn: { protocol: attempt?.explicit ? "explicit" as const : "legacy" as const,
       dependenciesReady: parentHandInReady(db, job.id), submittedHash: attempt?.hash ?? null },
-    guidance: "The job brief and acceptance are authoritative. Read child details/evidence as needed. Record a decision when the route changes; wait only on a real dependency. Progress and planning are not final submission. Lesson candidates are observations: inspect their source, establish cause/correction/verification/applicability before accepting a useful lesson. More candidates: knowledge list filtered by department/status proposal.",
+    guidance: "The job brief and acceptance are authoritative. decisionFreshness=new_facts asks you to reconsider listed changes, not rewrite every decision. progressSignal is advisory: inspect the cited traces before intervening. lessonFeedback contains reported assessments, not causal proof; revisit harmful/not_helpful lessons and record evidence with knowledge feedback after actual use. Read child details/evidence as needed. Record a decision when the route changes; wait only on a real dependency. Progress and planning are not final submission. Lesson candidates are observations: inspect their source, establish cause/correction/verification/applicability before accepting a useful lesson. More candidates: knowledge list filtered by department/status proposal.",
   };
 }

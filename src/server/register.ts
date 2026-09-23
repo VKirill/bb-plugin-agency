@@ -1,3 +1,4 @@
+import { sweepProgressSignals } from "./lead-control/progress-watch";
 import { ensureRecoveryTriage } from "./runtime/recovery/escalation";
 import { assertRelaunchAllowed } from "./runtime/rework/lineage.js";
 import { ensureLaunchIssue, readLaunchIssue, resolveLaunchIssue } from "./runtime/launch-queue/issues";
@@ -1962,7 +1963,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!activity) return;
     enqueueParentWake(db, job, activity, now);
     const hasParentTarget = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? LIMIT 1").get(activity.id);
-    if (!hasParentTarget && ["rework_limit_reached", "loop_blocked", "review_creation_failed", "review_handoff_rejected"].includes(code)) {
+    if (!hasParentTarget && ["progress_stalled", "rework_limit_reached", "loop_blocked", "review_creation_failed", "review_handoff_rejected"].includes(code)) {
       const triage = ensureRecoveryTriage(db, store, access.value.ctx, job, activity, agencyLanguage() === "en");
       if (triage && ["backlog", "queued"].includes(triage.state)) queueJobForLaunch(triage, uuidV5(LAUNCH_QUEUE_NAMESPACE, `recovery-queue:${triage.id}`));
       if (triage) return;
@@ -2177,6 +2178,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (queueBusy) return;
     queueBusy = true;
     try {
+      sweepProgressSignals(db, store.getJob, notifyQueueLead);
       for (const incident of pendingReviewIncidents(db, new Date().toISOString())) {
         const job = store.getJob(incident.jobId);
         if (job) notifyQueueLead(job, incident.code);

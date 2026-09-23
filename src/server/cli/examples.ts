@@ -9,6 +9,7 @@ export const EXAMPLE_CATALOG_SKILL_ID =
 /** Полные валидируемые примеры. Policy — содержимое, не label. */
 export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   getLeadState: { jobId: "job_aaaaaaaaaaaa" },
+  recordLessonFeedback: { requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", knowledgeId: "kno_aaaaaaaaaaaa", expectedRevision: 1, outcome: "helped", evidence: ["artifact/version/hash: regression passes after applying the lesson"], comment: "Applied the documented correction; verified the affected entrypoints." },
   recordLeadDecision: { requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", expectedRevision: 0, decision: { unknowns: ["Installed SDK support"], bottleneck: "SDK behavior unverified", action: "inspect", rationale: "Read installed declarations before implementation", nextCheck: "Record exact supported API signatures", evidence: ["Current repository package.json"] } },
   submitJobResult: { requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", expectedRevision: 3, artifactId: "artifact_aaaaaaaa", version: 1, hash: "a".repeat(64), comment: "Result and checks are in the published report." },
   listWorkspace: { bindingId: "binding_aaaaaaaa", claimedBbProjectId: "proj_trusted" },

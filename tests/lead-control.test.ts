@@ -141,3 +141,39 @@ describe("lead decisions and live state", () => {
     expect(readLeadState(db, state.job, 2, 2).children).toHaveLength(1);
   });
 });
+
+describe("decision freshness and lesson outcomes", () => {
+  it("marks new child facts, ignores chatter and keeps the original decision intact", () => {
+    const { db, s, job, ctx } = setup(true);
+    const child = s.job("Child", s.developer);
+    db.prepare("UPDATE agency_job SET parent_job_id = ? WHERE id = ?").run(job.id, child.id);
+    s.store.recordLeadDecision(ctx, { requestId: randomUUID(), jobId: job.id, expectedRevision: 0, decision });
+    s.store.createActivity(s.ctx, { requestId: randomUUID(), jobId: child.id, actor: { kind: "system" }, kind: "comment", references: [], causationId: null, comment: "Still working" });
+    expect(readLeadState(db, job, 0, 30).decisionFreshness.status).toBe("current");
+    s.store.createActivity(s.ctx, { requestId: randomUUID(), jobId: child.id, actor: { kind: "system" }, kind: "artifact_published", references: [], causationId: null });
+    const state = leadStateSchema.parse(readLeadState(db, job, 0, 30));
+    expect(state.decisionFreshness).toMatchObject({ status: "new_facts", count: 1, changes: [{ jobId: child.id }] });
+    expect(state.decision?.decision).toEqual(decision);
+    s.store.recordLeadDecision(ctx, { requestId: randomUUID(), jobId: job.id, expectedRevision: 1, decision: { ...decision, action: "delegate" } });
+    expect(readLeadState(db, job, 0, 30).decisionFreshness.status).toBe("current");
+  });
+  it("records evidence against exact lesson revisions, rejects foreign scope and deduplicates retries", () => {
+    const { db, s, job, ctx } = setup();
+    const saved = saveKnowledge(db, { expectedRevision: 0, title: "Check both entrypoints", body: "Check single and batch saves", kind: "lesson", source: "AG-42", scopeKind: "department", scopeId: s.departmentId }, { proposedBy: "agency:lesson" }, new Date().toISOString());
+    if (!saved.ok) throw new Error(saved.error.message);
+    const cmd = { requestId: randomUUID(), jobId: job.id, knowledgeId: saved.value.id, expectedRevision: saved.value.revision, outcome: "helped" as const, evidence: ["Exact artifact hash and targeted single/batch regression both pass"], comment: "Applied the lesson to the two entrypoints" };
+    expect(s.store.recordLessonFeedback(ctx, { ...cmd, requestId: randomUUID(), expectedRevision: 99 })).toMatchObject({ ok: false, error: { code: "revision_conflict" } });
+    expect(s.store.recordLessonFeedback(ctx, { ...cmd, evidence: [] }).ok).toBe(false);
+    expect(s.store.recordLessonFeedback({ ...ctx, caller: { ...ctx.caller!, jobId: "job_other" } }, cmd).ok).toBe(false);
+    const result = s.store.recordLessonFeedback(ctx, cmd); expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(s.store.recordLessonFeedback(ctx, cmd)).toEqual(result);
+    const state = leadStateSchema.parse(readLeadState(db, job, 0, 30));
+    expect(state.lessonFeedback).toHaveLength(1); expect(state.lessonFeedback[0]).toMatchObject({ outcome: "helped", evidence: cmd.evidence });
+    expect(s.store.recordLessonFeedback(ctx, { ...cmd, requestId: randomUUID(), outcome: "not_helpful", comment: "Later evidence contradicts the original claim" }).ok).toBe(true);
+    expect(readLeadState(db, job, 0, 30).lessonFeedback).toHaveLength(1);
+    expect(readLeadState(db, job, 0, 30).lessonFeedback[0]?.outcome).toBe("not_helpful");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_lesson_feedback").get()).toEqual({ n: 2 });
+    db.prepare("UPDATE agency_knowledge SET scope_id = 'dep_other' WHERE id = ?").run(saved.value.id);
+    expect(s.store.recordLessonFeedback(ctx, { ...cmd, requestId: randomUUID() })).toMatchObject({ ok: false, error: { code: "forbidden_lesson" } });
+  });
+});

@@ -42,7 +42,7 @@ whose workplace is a Mac mini tests a site in a real browser.
 
 ## Lead decisions and final submission
 
-`bb agency job state --input-json '{"jobId":"<id>"}'` returns the full goal, child states, publications, decision history and provisional lessons. Leads record a changed route with `job decide`; decisions retain evidence and their own CAS revision. The short role policy delegates procedural details to the Agency skill.
+`bb agency job state --input-json '{"jobId":"<id>"}'` returns the full goal, child states, publications, decision history and provisional lessons. Leads record a changed route with `job decide`; decisions retain evidence and their own CAS revision. The short role policy delegates procedural details to the Agency skill. `decisionFreshness` lists new facts since the last decision. Three distinct repeated API failures in the current attempt notify the responsible lead, without canceling the worker; readiness polls and retries of the same request do not count. `knowledge feedback` records evidence about an exact department lesson revision; `lessonFeedback` exposes the latest reported assessment per job/revision, not a usefulness score inferred from reads.
 
 New launches submit an exact published `artifactId/version/hash` with `job submit`. Progress comments and plan publication do not trigger review. Rework invalidates the submission; a parent needs finished work children and a fresh final publication. Existing attempts keep their previous protocol until explicit submission, so an upgrade does not force a restart. Generated lesson summaries remain proposals until curated; unrelated lessons are retrieved on demand.
 

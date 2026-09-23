@@ -1,4 +1,4 @@
-import { leadStateQuerySchema, leadStateSchema, recordLeadDecisionSchema, leadDecisionRecordSchema, submitJobResultSchema } from "./contracts/lead-control";
+import { recordLessonFeedbackSchema, leadStateQuerySchema, leadStateSchema, recordLeadDecisionSchema, leadDecisionRecordSchema, submitJobResultSchema } from "./contracts/lead-control";
 import { traceQuerySchema, traceViewSchema } from "./contracts/trace";
 import { TEMPLATE_KEYS } from "./templates";
 import { saveWorkRulesCommandSchema, workRulesScopeSchema, workRulesViewSchema } from "./contracts/work-rules";
@@ -1471,6 +1471,7 @@ export const rpcContract = defineRpcContract({
   listBbCatalog: { input: z.null(), output: domainResultSchema(bbCatalogSchema) },
   listCapabilityCatalog: { input: capabilityCatalogInputSchema, output: domainResultSchema(capabilityCatalogSchema) },
   getLeadState: { input: leadStateQuerySchema, output: domainResultSchema(leadStateSchema) },
+  recordLessonFeedback: { input: recordLessonFeedbackSchema, output: domainResultSchema(activitySchema) },
   recordLeadDecision: { input: recordLeadDecisionSchema, output: domainResultSchema(leadDecisionRecordSchema) },
   submitJobResult: { input: submitJobResultSchema, output: domainResultSchema(activitySchema) },
   getJob: { input: getJobInputSchema, output: domainResultSchema(jobDetailSchema) },

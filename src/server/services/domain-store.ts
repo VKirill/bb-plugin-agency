@@ -1,4 +1,4 @@
-import { recordLeadDecisionSchema, submitJobResultSchema, type RecordLeadDecision, type SubmitJobResult } from "../../shared/contracts/lead-control";
+import { recordLessonFeedbackSchema, type RecordLessonFeedback, recordLeadDecisionSchema, submitJobResultSchema, type RecordLeadDecision, type SubmitJobResult } from "../../shared/contracts/lead-control";
 import { readLeadDecision } from "../lead-control/state";
 import { reworkRoundCount } from "../runtime/rework/lineage.js";
 import { knowledgeBlock } from "../knowledge/store";
@@ -1996,6 +1996,28 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     })();
   };
 
+  const recordLessonFeedback = (ctx: ServiceContext, input: RecordLessonFeedback): DomainResult<Activity> => {
+    const parsed = recordLessonFeedbackSchema.safeParse(input);
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const scoped = controlAccess(ctx, input.jobId, false);
+      if (!scoped.ok) return scoped;
+      const actorCtx = ctx.caller?.agentId ? { ...ctx, actor: { kind: "agent" as const, agentId: ctx.caller.agentId } } : ctx;
+      return remember(actorCtx, { requestId: input.requestId, kind: "recordLessonFeedback", payload: parsed.data, scopeBindingIds: [scoped.value.binding.id] }, () => {
+        const lesson = db.prepare("SELECT kind, scope_kind, scope_id, revision FROM agency_knowledge WHERE id = ?").get(input.knowledgeId) as
+          { kind: string; scope_kind: string; scope_id: string | null; revision: number } | undefined;
+        if (!lesson || lesson.kind !== "lesson" || lesson.scope_kind !== "department" || lesson.scope_id !== scoped.value.job.departmentId)
+          return fail("forbidden_lesson", "Feedback requires a lesson from this job's department");
+        if (lesson.revision !== input.expectedRevision) return fail("revision_conflict", "Read the exact lesson revision before assessing it");
+        const activity = appendActivity(actorCtx, input.jobId, "lesson_feedback", [{ type: "knowledge", id: input.knowledgeId }], null,
+          `${input.outcome}: ${parsed.data.comment}`);
+        db.prepare(`INSERT INTO agency_lesson_feedback(activity_id,job_id,knowledge_id,revision,outcome,evidence_json,comment)
+          VALUES (?,?,?,?,?,?,?)`).run(activity.id, input.jobId, input.knowledgeId, input.expectedRevision, input.outcome, JSON.stringify(parsed.data.evidence), parsed.data.comment);
+        return ok(activity);
+      });
+    })();
+  };
+
   const submitJobResult = (ctx: ServiceContext, input: SubmitJobResult): DomainResult<Activity> => {
     const parsed = submitJobResultSchema.safeParse(input);
     if (!parsed.success) return fail("invalid_command", parsed.error.message);
@@ -2028,6 +2050,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
 
   return {
     recordLeadDecision,
+    recordLessonFeedback,
     submitJobResult,
     createPolicyVersion,
     provisionAgent,

@@ -1,3 +1,4 @@
+import { newOpaqueId } from "../../db/ids";
 import { fail, ok, type DomainResult } from "../../../domain";
 import { hashBytes } from "../../../host/guarded-fs.js";
 import { inputCopyRelativePath } from "../../../host/safe-path.js";
@@ -12,7 +13,7 @@ import { createRepositories } from "../../db/repositories.js";
 import type { SqlDatabase } from "../../db/sql";
 import { parseJson, toJson } from "../../db/sql";
 import { createArtifactMetadataPort } from "../../services/artifact-metadata.js";
-import { assertBindingAccess, nowUtc, type ServiceContext } from "../../services/context.js";
+import { actorToActivity, assertBindingAccess, nowUtc, type ServiceContext } from "../../services/context.js";
 import type { DomainStore } from "../../services";
 import { payloadWithoutRequestId, sameActor, sameCanonical } from "../../services/request-identity.js";
 import { createInternalRunStoreReads } from "../run-store";
@@ -343,6 +344,11 @@ export async function attachJobInput(
           toJson(handoff.questions),
         );
     }
+    if (!existing) createRepositories(deps.db).activity.insert({
+      id: newOpaqueId("activity"), jobId: input.targetJobId, kind: "job_input_attached",
+      actor: actorToActivity(ctx.caller?.agentId ? { kind: "agent", agentId: ctx.caller.agentId } : ctx.actor),
+      causationId: null, timestamp: nowUtc(ctx), references: [{ type: "artifact", id: input.artifactId }],
+    });
     const sourceIds = deps.db
       .prepare(`SELECT DISTINCT source_job_id FROM agency_job_input_ref WHERE target_job_id = ?`)
       .all(input.targetJobId) as Array<{ source_job_id: string }>;

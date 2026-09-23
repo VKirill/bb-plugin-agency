@@ -577,7 +577,7 @@ function insertCanceledHead(db: SqlDatabase, parentJobId: string, snapshotId: st
 
 
 describe("launch issues reach the lead before a state transition", () => {
-  it.each([["review", "rework_limit_reached"], ["blocked", "rework_limit_reached"], ["review", "review_creation_failed"], ["review", "review_handoff_rejected"]])("delivers a recovery incident while the source job is %s (%s)", async (state, code) => {
+  it.each([["running", "progress_stalled"], ["review", "rework_limit_reached"], ["blocked", "rework_limit_reached"], ["review", "review_creation_failed"], ["review", "review_handoff_rejected"]])("delivers a recovery incident while the source job is %s (%s)", async (state, code) => {
     const db = openDb(); const family = await seedFamily(db); const store = family.live.seeded.store; const ctx = family.live.seeded.ctx;
     db.prepare("UPDATE agency_job SET state = ? WHERE id = ?").run(state, family.child.id);
     const job = store.getJob(family.child.id)!;

@@ -1,3 +1,4 @@
+import { newOpaqueId, createRepositories } from "../db";
 import { readLeadState } from "../lead-control/state";
 import { dependencyLinks, readNextStep, removeJobDependency, saveNextStep } from "../flow/service";
 import { agencyLanguage } from "../i18n/language";
@@ -5,7 +6,7 @@ import { jobGoals } from "../organization/goals";
 import { departmentParents, openEscalations } from "../organization/hierarchy";
 import { createProjectSections } from "./project-sections";
 import { listLaunchQueue } from "../runtime/launch-queue/service";
-import { nowUtc } from "../services/context";
+import { actorToActivity, nowUtc } from "../services/context";
 import { currentAgencyRules, listAgencyRulesVersions, listTemplates, saveAgencyRules, saveTemplate } from "../templates/store";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { STAGE1_CONTRACT_VERSION, type BoardPolicy } from "../../shared/contracts";
@@ -57,6 +58,7 @@ type DomainMethod =
   | "listBbCatalog"
   | "listCapabilityCatalog"
   | "getLeadState"
+  | "recordLessonFeedback"
   | "recordLeadDecision"
   | "submitJobResult"
   | "getJob"
@@ -264,6 +266,7 @@ export function createDomainRpc(deps: {
         return fail("forbidden_job_control", "Read the state of your assigned job; child details use getJob");
       return ok(readLeadState(db, scoped.value.job, input.offset, input.limit, input.beforeDecisionRevision));
     }),
+    recordLessonFeedback: (input) => withAccess((access) => mutated(store.recordLessonFeedback(access.ctx, input))),
     recordLeadDecision: (input) => withAccess((access) => mutated(store.recordLeadDecision(access.ctx, input))),
     submitJobResult: (input) => withAccess((access) => mutated(store.submitJobResult(access.ctx, input))),
 
@@ -295,7 +298,15 @@ export function createDomainRpc(deps: {
       withAccess((access) => {
         const scoped = store.scopedJob(access.ctx, input.jobId);
         if (!scoped.ok) return scoped;
-        return mutated(ok({ removed: removeJobDependency(db, input.jobId, input.dependsOnJobId) }));
+        const removed = db.transaction(() => {
+          const removed = removeJobDependency(db, input.jobId, input.dependsOnJobId);
+          if (removed) createRepositories(db).activity.insert({ id: newOpaqueId("activity"), jobId: input.jobId,
+            kind: "job_dependency_removed", actor: actorToActivity(access.ctx.caller?.agentId ? { kind: "agent", agentId: access.ctx.caller.agentId } : access.ctx.actor),
+            causationId: null, timestamp: nowUtc(access.ctx), references: [{ type: "job", id: input.dependsOnJobId }],
+          });
+          return removed;
+        })();
+        return mutated(ok({ removed }));
       }),
 
     setJobNextStep: (input) =>

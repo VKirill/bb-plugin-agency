@@ -20,6 +20,7 @@ export const AGENCY_SKILL_COMMANDS = [
   "bb agency project bind|get|link-department",
   "bb agency job create|get|state|decide|submit|update|assign|transition|report-needs-input|answer-needs-input",
   "bb agency artifact create|publish|open|accept|versions",
+  "bb agency knowledge list|get|save|status|feedback",
   "bb agency status [--json]",
   "bb agency notify <project-id> <event-id> <topic> <reference> [--json]",
 ] as const;

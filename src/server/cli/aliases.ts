@@ -38,6 +38,7 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     if (rest[0] === "agency-save") return "saveAgencyRules";
   }
   if (head === "knowledge" && rest.length === 1) {
+    if (rest[0] === "feedback") return "recordLessonFeedback";
     if (rest[0] === "list") return "listKnowledge";
     if (rest[0] === "get") return "getKnowledge";
     if (rest[0] === "save") return "saveKnowledge";
