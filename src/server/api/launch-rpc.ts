@@ -339,6 +339,8 @@ export function createIsolatedLaunchRpc(deps: {
             }
             const prepared = await prepare.prepare(ctx, publicInput);
             if (!prepared.ok) return prepared;
+            // Pin the protocol before a new thread can act; existing running attempts stay legacy.
+            deps.db.prepare("INSERT OR IGNORE INTO agency_handin_protocol(attempt_id) VALUES (?)").run(prepared.value.reserved.attempt.attemptId);
             const launched = await buildCoordinator().launchPreparedRun(ctx, {
               requestId,
               snapshotId: prepared.value.reserved.snapshotId,

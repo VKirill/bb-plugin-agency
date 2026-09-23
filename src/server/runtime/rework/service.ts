@@ -85,7 +85,7 @@ export function reworkText(jobKey: string, comment: string, returnedHash: string
       "Remarks:",
       comment.trim(),
       "",
-      `Fix the result, update the report .agency/jobs/${jobKey}/report.md, publish a new version (bb agency artifact publish), leave a summary comment and end the turn. The previous version ${returnedHash.slice(0, 8)} will not go to review again. If you disagree with a remark, answer with a comment and report-needs-input.`,
+      `Fix the result, update the report .agency/jobs/${jobKey}/report.md, publish a new version (bb agency artifact publish), submit the exact version with bb agency job submit (fresh job expectedRevision, artifactId, version, hash, comment) and end the turn. The previous version ${returnedHash.slice(0, 8)} will not go to review again. If you disagree with a remark, answer with a comment and report-needs-input.`,
       reworkToken(requestId),
     ].join("\n");
   }
@@ -95,7 +95,7 @@ export function reworkText(jobKey: string, comment: string, returnedHash: string
     "Замечания:",
     comment.trim(),
     "",
-    `Исправьте результат, обновите отчёт .agency/jobs/${jobKey}/report.md, опубликуйте новую версию (bb agency artifact publish), оставьте итоговый комментарий и завершите ход. Прежняя версия ${returnedHash.slice(0, 8)} на проверку больше не пойдёт. Не согласны с замечанием — ответьте комментарием и report-needs-input.`,
+    `Исправьте результат, обновите отчёт .agency/jobs/${jobKey}/report.md, опубликуйте новую версию (bb agency artifact publish), сдайте точную версию через bb agency job submit (свежая expectedRevision задачи, artifactId, version, hash, comment) и завершите ход. Прежняя версия ${returnedHash.slice(0, 8)} на проверку больше не пойдёт. Не согласны с замечанием — ответьте комментарием и report-needs-input.`,
     reworkToken(requestId),
   ].join("\n");
 }
@@ -173,6 +173,8 @@ function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expe
       comment: `${job.state === "done" ? "Рекламация: заказчик вернул выданный продукт" : "Возврат на доработку"}:\n\n${row.comment}`,
     });
     if (!commented.ok) return commented;
+    // Rework invalidates the previous hand-in even when timestamps share a millisecond.
+    deps.db.prepare("DELETE FROM agency_result_submission WHERE attempt_id = ?").run(row.attempt_id);
     setSendState(deps.db, row.request_id, "confirmed", new Date().toISOString());
     resolveLaunchIssue(deps.db, job.id);
     recordTrace(deps.db, { jobId: job.id, step: "rework.return", outcome: "succeeded", reason: row.comment.startsWith("Recovery decision") ? "lead_recovery" : "ordinary_return", requestId: row.request_id, attemptId: row.attempt_id, threadId: row.thread_id, artifactHash: row.returned_hash });

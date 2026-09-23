@@ -171,9 +171,11 @@ describe("parent wake", () => {
     await flushParentWakes({ db, send, now: new Date().toISOString() });
     expect(send.calls).toHaveLength(1);
     expect(send.calls[0]?.threadId).toBe(family.live.attempt.threadId);
-    expect(send.calls[0]?.text).toBe(formatParentWakeText({ key: child.key, state: "blocked" }, rows[0]!.activity_id, "en"));
+    expect(send.calls[0]?.text).toContain(formatParentWakeText({ key: child.key, state: "blocked" }, rows[0]!.activity_id, "en"));
     expect(send.calls[0]?.text).toContain(parentWakeToken(rows[0]!.activity_id));
     expect(send.calls[0]?.text).toContain("not an acceptance");
+    expect(send.calls[0]?.text).toContain("bb agency job state");
+    expect(send.calls[0]?.text).toContain("Update job decide only if the route changes");
     expect(send.calls[0]?.text).not.toMatch(/\baccepted\b|artifact contents/i);
     await flushParentWakes({ db, send, now: new Date().toISOString() });
     expect(send.calls).toHaveLength(1);

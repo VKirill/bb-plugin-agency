@@ -19,10 +19,9 @@ export function freshParentSummary(db: SqlDatabase, jobId: string): boolean {
 }
 
 /**
- * A hand-in is a published version plus a closing comment from the employee:
- * the lead reads the comment, not the thread. A job does not go to review while
- * the working attempt has no such comment since it started or since the last
- * return for rework. The intake assessment is not a closing comment.
+ * New launches require an explicit submission of an exact version. Existing
+ * attempts retain their legacy closing-comment protocol until they opt in.
+ * Ordinary progress/intake comments cannot submit an explicit-protocol attempt.
  */
 export function handInCommentMissing(db: SqlDatabase, jobId: string): boolean {
   const attempt = db
@@ -34,6 +33,14 @@ export function handInCommentMissing(db: SqlDatabase, jobId: string): boolean {
     )
     .get(jobId) as { id: string; created_at: string; agent_id: string | null } | undefined;
   if (!attempt) return false;
+  if (db.prepare("SELECT 1 FROM agency_handin_protocol WHERE attempt_id = ?").get(attempt.id)) {
+    const submitted = db.prepare(`SELECT s.artifact_id, s.version, s.hash, a.timestamp FROM agency_result_submission s
+      JOIN agency_activity a ON a.id = s.activity_id WHERE s.attempt_id = ?`).get(attempt.id) as { artifact_id: string; version: number; hash: string; timestamp: string } | undefined;
+    const latest = db.prepare("SELECT artifact_id, version, hash FROM agency_artifact_version WHERE job_id = ? ORDER BY rowid DESC LIMIT 1").get(jobId) as { artifact_id: string; version: number; hash: string } | undefined;
+    const returned = db.prepare("SELECT MAX(created_at) AS at FROM agency_rework WHERE job_id = ? AND attempt_id = ?").get(jobId, attempt.id) as { at: string | null };
+    return !submitted || submitted.hash !== latest?.hash || submitted.artifact_id !== latest?.artifact_id || submitted.version !== latest?.version || Boolean(returned.at && submitted.timestamp < returned.at);
+  }
+
   const rework = db
     .prepare(`SELECT MAX(created_at) AS at FROM agency_rework WHERE job_id = ? AND attempt_id = ?`)
     .get(jobId, attempt.id) as { at: string | null };

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SqlDatabase } from "../../db/sql";
 import { recordTrace, traceCode } from "./store";
 
-const OPERATIONS = new Set(["createJob", "updateJob", "transitionJob", "createArtifact", "publishArtifactVersion", "attachJobInput", "addJobDependency", "removeJobDependency", "setJobNextStep", "reportNeedsInput", "answerNeedsInput", "acceptArtifactVersion", "prepareLaunch", "reconcileLaunch", "interpretWorkerCompletion", "cancelLaunch", "returnJobForRework", "getIsolationReadiness"]);
+const OPERATIONS = new Set(["recordLeadDecision", "submitJobResult", "createJob", "updateJob", "transitionJob", "createArtifact", "publishArtifactVersion", "attachJobInput", "addJobDependency", "removeJobDependency", "setJobNextStep", "reportNeedsInput", "answerNeedsInput", "acceptArtifactVersion", "prepareLaunch", "reconcileLaunch", "interpretWorkerCompletion", "cancelLaunch", "returnJobForRework", "getIsolationReadiness"]);
 function obj(value: unknown): Record<string, unknown> { return value && typeof value === "object" ? value as Record<string, unknown> : {}; }
 
 /** Wrap existing handlers without changing arguments, results or thrown errors. No input/result bodies are recorded. */

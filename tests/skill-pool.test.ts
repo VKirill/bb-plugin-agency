@@ -60,25 +60,31 @@ describe("knowledge focused on one job", () => {
   it("shows the picked records and hides the rest behind a command", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
-    const write = (title: string, importance = 40) =>
+    const write = (title: string, importance = 40, kind: "lesson" | "procedure" = "lesson") =>
       saveKnowledge(
         db,
-        { expectedRevision: 0, title, summary: `${title}.`, body: "Тело.", kind: "lesson", importance, source: "Тест", scopeKind: "department", scopeId: s.departmentId },
+        { expectedRevision: 0, title, summary: `${title}.`, body: `Полный текст: ${title}`, kind, importance, source: "Тест", scopeKind: "department", scopeId: s.departmentId },
         { proposedBy: null },
         NOW,
       );
     const picked = write("Про аудит сайта");
     write("Про пост в канал");
     write("Про график расхода");
-    const important = write("Правило релиза", 95);
+    const important = write("Правило релиза", 95, "procedure");
     if (!picked.ok || !important.ok) throw new Error("fixture");
 
+    write("Неподходящий важный урок", 99);
     const focused = knowledgeBlock(db, "department", s.departmentId, new Set([picked.value.id]));
-    expect(focused.text).toContain("Про аудит сайта");
+    expect(focused.text).toContain("Полный текст: Про аудит сайта");
+    expect(focused.text).not.toContain("Неподходящий важный урок");
+    const empty = s.store.knowledgeForLaunch(s.departmentId, s.bindingId, []);
+    expect(JSON.stringify(empty)).not.toContain("Про аудит сайта");
+    expect(JSON.stringify(empty)).not.toContain("Неподходящий важный урок");
+    expect(JSON.stringify(empty)).toContain("Правило релиза");
     // Важная запись остаётся всегда: она действует независимо от задачи.
     expect(focused.text).toContain("Правило релиза");
     expect(focused.text).not.toContain("Про пост в канал");
-    expect(focused.text).toContain("Показаны записи под эту задачу: 2 из 4");
+    expect(focused.text).toContain("Показаны записи под эту задачу: 2 из 5");
     // В снимок попадает ровно то, что сотрудник увидел.
     expect(focused.ids).toHaveLength(2);
 

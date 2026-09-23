@@ -1,3 +1,4 @@
+import { LEAD_CONTROL_MIGRATION } from "../lead-control/state";
 import { RECOVERY_TRIAGE_MIGRATION } from "../runtime/recovery/escalation";
 import { RECOVERY_MIGRATION } from "../runtime/recovery/permit";
 import { LAUNCH_ISSUE_MIGRATION } from "../runtime/launch-queue/issues";
@@ -745,6 +746,7 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   LAUNCH_ISSUE_MIGRATION,
   RECOVERY_MIGRATION,
   RECOVERY_TRIAGE_MIGRATION,
+  LEAD_CONTROL_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

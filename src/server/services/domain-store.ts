@@ -1,3 +1,5 @@
+import { recordLeadDecisionSchema, submitJobResultSchema, type RecordLeadDecision, type SubmitJobResult } from "../../shared/contracts/lead-control";
+import { readLeadDecision } from "../lead-control/state";
 import { reworkRoundCount } from "../runtime/rework/lineage.js";
 import { knowledgeBlock } from "../knowledge/store";
 import { getPassport } from "../projects/passport.js";
@@ -1714,6 +1716,12 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
       }, () => {
         const revision = matchRevision(scoped.value.job.revision, parsed.data);
         if (!revision.ok) return revision;
+        if (parsed.data.to === "review" && scoped.value.job.state !== "done") {
+          const explicit = db.prepare(`SELECT p.attempt_id FROM agency_handin_protocol p JOIN agency_run_attempt a ON a.id = p.attempt_id
+            WHERE a.job_id = ? AND a.attempt_no = (SELECT MAX(attempt_no) FROM agency_run_attempt WHERE job_id = ?)`).get(input.jobId, input.jobId);
+          if (explicit && (handInCommentMissing(db, input.jobId) || !parentHandInReady(db, input.jobId)))
+            return fail("final_submission_required", "Publish and explicitly submit the final result after working children finish");
+        }
         const stored = transitionContext(scoped.value.job);
         if (!stored.ok) return stored;
         if ((parsed.data.to === "queued" || parsed.data.to === "running") && stored.value && stored.value.openBlockers === true) {
@@ -1950,7 +1958,77 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     })();
   };
 
+  function controlAccess(ctx: ServiceContext, jobId: string, leadOnly: boolean) {
+    const scoped = scopedJob(ctx, jobId);
+    if (!scoped.ok) return scoped;
+    const job = scoped.value.job;
+    if (ctx.caller) {
+      const current = db.prepare("SELECT id FROM agency_run_attempt WHERE job_id = ? ORDER BY attempt_no DESC LIMIT 1").get(jobId) as { id: string } | undefined;
+      if (ctx.caller.jobId !== jobId || ctx.caller.agentId !== job.assignedAgentId || current?.id !== ctx.caller.attemptId)
+        return fail("forbidden_job_control", "Only the current assigned worker may control this job");
+    } else if (ctx.actor.kind === "agent" && ctx.actor.agentId !== job.assignedAgentId) {
+      return fail("forbidden_job_control", "Only the assigned employee may control this job");
+    }
+    if (leadOnly && memberRole(job.departmentId, job.assignedAgentId) !== "lead")
+      return fail("lead_required", "The job must be assigned to the department lead");
+    return scoped;
+  }
+
+  const recordLeadDecision = (ctx: ServiceContext, input: RecordLeadDecision) => {
+    const parsed = recordLeadDecisionSchema.safeParse(input);
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const scoped = controlAccess(ctx, input.jobId, true);
+      if (!scoped.ok) return scoped;
+      const actorCtx = ctx.caller?.agentId ? { ...ctx, actor: { kind: "agent" as const, agentId: ctx.caller.agentId } } : ctx;
+      return remember(actorCtx, { requestId: input.requestId, kind: "recordLeadDecision", payload: parsed.data, scopeBindingIds: [scoped.value.binding.id] }, () => {
+        const previous = readLeadDecision(db, input.jobId);
+        if ((previous?.revision ?? 0) !== input.expectedRevision) return fail("revision_conflict", "Read job state before updating its decision");
+        if (["done", "canceled"].includes(scoped.value.job.state)) return fail("illegal_job_state", "Closed jobs do not take new decisions");
+        const d = parsed.data.decision;
+        const activity = appendActivity(actorCtx, input.jobId, "lead_decision", [{ type: "decision_action", id: d.action }], null,
+          `${d.action}: ${d.bottleneck}\n\n${d.rationale}\n\nNext check: ${d.nextCheck}`);
+        const revision = input.expectedRevision + 1;
+        db.prepare(`INSERT INTO agency_lead_decision(job_id, revision, body_json, activity_id) VALUES (?, ?, ?, ?)`)
+          .run(input.jobId, revision, JSON.stringify(d), activity.id);
+        return ok({ revision, decision: d, activityId: activity.id });
+      });
+    })();
+  };
+
+  const submitJobResult = (ctx: ServiceContext, input: SubmitJobResult): DomainResult<Activity> => {
+    const parsed = submitJobResultSchema.safeParse(input);
+    if (!parsed.success) return fail("invalid_command", parsed.error.message);
+    return db.transaction(() => {
+      const scoped = controlAccess(ctx, input.jobId, false);
+      if (!scoped.ok) return scoped;
+      const actorCtx = ctx.caller?.agentId ? { ...ctx, actor: { kind: "agent" as const, agentId: ctx.caller.agentId } } : ctx;
+      return remember(actorCtx, { requestId: input.requestId, kind: "submitJobResult", payload: parsed.data, scopeBindingIds: [scoped.value.binding.id] }, () => {
+        const job = scoped.value.job;
+        if (job.revision !== input.expectedRevision) return fail("revision_conflict", "Job changed; reread before final submission");
+        if (job.state !== "running") return fail("illegal_job_state", "Final submission requires running work");
+        if (!parentHandInReady(db, job.id)) return fail("unfinished_work", "Working children must finish and the final result must be published afterwards");
+        const attempt = db.prepare("SELECT id, state FROM agency_run_attempt WHERE job_id = ? ORDER BY attempt_no DESC LIMIT 1").get(job.id) as { id: string; state: string } | undefined;
+        if (!attempt || attempt.state !== "running") return fail("active_worker_required", "Final submission requires the current running attempt");
+        const current = db.prepare("SELECT artifact_id, version, hash FROM agency_artifact_version WHERE job_id = ? ORDER BY rowid DESC LIMIT 1").get(job.id) as { artifact_id: string; version: number; hash: string } | undefined;
+        if (!current || current.artifact_id !== input.artifactId || current.version !== input.version || current.hash !== input.hash)
+          return fail("stale_submission", "Submit the exact latest published artifact/version/hash of this job");
+        if (reworkBlocksReview(db, job.id, input.hash)) return fail("stale_submission", "The returned version is not a new final result");
+        const activity = appendActivity(actorCtx, job.id, "comment", [
+          { type: "artifact", id: input.artifactId }, { type: "final_submission", id: input.hash },
+        ], null, input.comment);
+        db.prepare("INSERT OR IGNORE INTO agency_handin_protocol(attempt_id) VALUES (?)").run(attempt.id);
+        db.prepare(`INSERT INTO agency_result_submission(attempt_id, artifact_id, version, hash, activity_id) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(attempt_id) DO UPDATE SET artifact_id=excluded.artifact_id, version=excluded.version, hash=excluded.hash, activity_id=excluded.activity_id`)
+          .run(attempt.id, input.artifactId, input.version, input.hash, activity.id);
+        return ok(activity);
+      });
+    })();
+  };
+
   return {
+    recordLeadDecision,
+    submitJobResult,
     createPolicyVersion,
     provisionAgent,
     createAgentVersion,
@@ -2031,7 +2109,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     },
     knowledgeForLaunch: (departmentId: string, bindingId: string, focusIds?: readonly string[] | null, sectionId?: string | null) => {
       // Фокус подсказки: в промпт идут отобранные записи, остальные — строкой «ещё N, команда».
-      const focus = focusIds && focusIds.length ? new Set(focusIds) : null;
+      const focus = focusIds != null ? new Set(focusIds) : null;
       const agency = knowledgeBlock(db, "agency", null, focus);
       const project = knowledgeBlock(db, "project", bindingId, focus);
       const department = knowledgeBlock(db, "department", departmentId, focus);

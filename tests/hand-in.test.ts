@@ -79,7 +79,7 @@ describe("hand-in closing comment", () => {
     expect(await remindIncompleteWorker(ports, row, reading)).toBe("waiting");
     now = "2026-09-17T10:01:00.000Z";
     expect(await remindIncompleteWorker(ports, row, reading)).toBe("sent");
-    expect(sent[0]).toContain("there is no closing comment for the lead");
+    expect(sent[0]).toContain("there is no explicit final submission");
     expect(s.store.getJob(job.id)?.state).not.toBe("review");
   });
 });

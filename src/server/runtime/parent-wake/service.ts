@@ -376,7 +376,7 @@ export async function flushParentWakes(deps: {
             readLaunchIssue(deps.db, row.child_job_id)?.activity_id === row.activity_id
               ? (JSON.parse(readLaunchIssue(deps.db, row.child_job_id)!.activity_json) as Activity).comment
               : loopWakeNote(latestLoopMark(deps.db, rootJobId(deps.db, row.parent_job_id)), "en"),
-          ),
+          ) + `\nRead current goal and decision: bb agency job state --input-json '{"jobId":"${row.parent_job_id}"}'. Update job decide only if the route changes.`,
         });
       } else {
         const presence = await deps.send.recoverContinuation(

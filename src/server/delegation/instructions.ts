@@ -299,22 +299,11 @@ export function workLanguageLine(lang: AgencyLanguage = agencyLanguage()): strin
 function leadRuleLines(rules: WorkerContext["rules"]): string[] {
   if (!rules) return [];
   return [
-    '- At the second similar failure, use bb agency job diagnose --input-json with jobId; compare actual previous verdicts, trace reasons and visible attempt messages (attemptId/beforeSeq). Do not wait for a third failure to investigate. This read access is limited to your assigned work tree. Distinguish code defect, environment failure, missing context and contradictory acceptance criteria.',
-    '- Freeze acceptance criteria before implementation. Keep a ledger in the task of criterion → accepted artifact/hash → evidence. On rework, preserve passed unaffected criteria and review the changed code plus related regression risks. Repeat broad checks when code dependencies, environment, evidence validity or project rules require them; explain why. New wishes become a separate task, not a moving gate for this delivery. Resolve conflicting reviewer requirements once before returning work.',
-    `- After the third unsuccessful pass (or the lower department limit of ${rules.reworkLimit} rework rounds), automatic repetition stops and responsibility passes to you, the department lead. Read attempts, reviewer evidence and history; diagnose the cause before another pass.`,
-    '- You may repair department instructions, job context, authorized access configuration and plugins/conveyor code. Give code repairs a separate tracked job, regression check and independent review; do not lower acceptance, delete failure history, disable guards or expand your own privileges. Ask the owner only when additional authority, credentials or changed requirements are actually necessary.',
-    '- After verifying the fix, immediately resume the original job with bb agency job recover --input-json: {requestId,jobId,expectedRevision,comment,recoveryDecision:{cause,correction,verification}}. Cite files, artifact hashes, diagnostic output or checks in verification. This permits ONE continuation and preserves all earlier failures. A reviewed result stays in its worker thread; a stopped job returns to the normal launch queue. Record a reusable verified lesson in department knowledge.',
-    "- Continue a reviewed result with job return: it delivers the correction into the existing worker context. Cancel and launch is for a real replacement or recovery, not for delivering comments; new worker threads consume the same rework budget. Before a replacement, update the current brief with what remains and attach the exact inputs. Job comments are included as attributed recent history, not evidence of completed checks.",
-    "- A loop mark (same_loop, env, contract) blocks ordinary retries. Diagnose it and repair the cause in a separate department repair job if needed. A verified recovery decision by the responsible lead permits one continuation of the original job; do not create replacement copies of the failed result.",
-    rules.minorDefectsWithoutRound
-      ? "- Minor defects do not open a new round: list them in the final report and assemble the result."
-      : "- Every open defect, minor ones included, gets a rework subtask and another review.",
-    rules.reviewRequired
-      ? "- Independent review is required: a reviewer checks every implementation."
-      : "- Independent review is optional: check small work yourself against its criteria, hand larger work to a reviewer.",
-    ...(rules.autoReview
-      ? ["- Auto review is on: when an executor hands in, the Agency creates and queues the review subtask with the version attached (comment \"Автопроверка: создана AG-N\"). Do not create that review yourself; wait for the verdict."]
-      : []),
+    `- Independent review ${rules.reviewRequired ? "is required" : "is optional for small work"}; ${rules.minorDefectsWithoutRound ? "minor remarks alone do not require another round" : "open defects require rework"}.`,
+    "- Auto review is " + (rules.autoReview ? "on: the Agency creates QC; do not duplicate it." : "off: arrange review when required."),
+    `- At the second similar failure use job diagnose. After the third unsuccessful pass (or the lower rework limit ${rules.reworkLimit}), repair the cause before continuing.`,
+    "- Verified recovery: bb agency job recover with recoveryDecision:{cause,correction,verification}. Keep failures and valid acceptance evidence. Never reset a budget with copies or accept incomplete work.",
+    "- Read the Agency recovery procedure when needed. Department configuration and inputs may be repaired within authority; code repairs need tracked implementation and verification.",
   ];
 }
 
@@ -342,18 +331,14 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     const tail = [
       "",
       "How to work:",
-      `0. Intake first: if the job history already has intake_size, intake_risk and intake_decision, do not rewrite them unless you disagree. Otherwise \`bb agency job comment\` on jobId ${worker.jobId} with a short reason and references intake_size (S|M|L), intake_risk (low|medium|high), intake_decision (accept|split|clarify|return). Then staff the chain: S+low → assistant, cheapest/low-reasoning model, no extra review (a button colour). M → executor; extra review only if the department requires it. L or high risk → executor plus independent review. clarify → report-needs-input (questions bounce to the client chat). Mixed product → split, not return. A pile of jobs: intake each; keep own; foreign → child or return.`,
-      `1. Split the job into subtasks with a checkable result: \`bb agency job create\` with parentJobId=${worker.jobId}, the departmentId and the member's assignedAgentId. The server assigns the key. Work of another department is a subtask in that department for its lead.`,
-      "   Give implementation subtasks a `contract`: readFirst (what to read before starting), interfaces (signatures and invariants to keep), mayChange (only the files this subtask owns), mustNotTouch, checks (the commands it must pass). It is frozen at launch. The subtask's bindingId is this job's folder unless the job layer lists other project folders or employee workplaces.",
-      "   Two subtasks that may change the same files do not run at once: the Agency holds the later one in the launch queue until the first is done. Give each subtask its own files, or order them with `job depend`.",
-      "2. Implementation and rework go to executors, review to reviewers. Pass inputs with `bb agency job attach-input`. Launch with `bb agency launch readiness`, then `launch prepare`.",
-      "   Order: `bb agency job depend` (jobId waits for dependsOnJobId). Creating an assigned subtask already puts it in the launch queue; a waiting one starts by itself when its dependencies are done. Work that must follow another department's accepted result: `bb agency job next-step` on the earlier job.",
-      "3. When a work subtask (another department's too) moves to review, waiting_input, blocked, done or canceled, the Agency messages this thread. Automatic QC children do not. Inspect the whole remaining plan and resolve actionable blockers before waiting. End your turn only when work is genuinely delegated or an external dependency is pending and no useful independent action remains. Do not poll in an empty loop.",
-      "4. Check each subtask against its acceptance criteria. A defect means a rework subtask and another independent review, not a fix by your own hands. Accept (`bb agency artifact accept`) only versions of subtasks you assigned; the server blocks accepting your own work.",
+      `0. Read bb agency job state --input-json '{"jobId":"${worker.jobId}"}' at intake and meaningful events. It contains the full goal, latest decision, child counts, publications and delivery protocol; use nextOffset for more children. Inspect child evidence with getJob.`,
+      "1. Record intake_size/intake_risk/intake_decision once through job comment. S+low → assistant; larger work → executor; high risk → independent review. Mixed product → split into children in accepting departments. clarify means a real owner decision (questions bounce to the client chat).",
+      `2. Delegate with job create, parentJobId=${worker.jobId}, departmentId and assignedAgentId. Give concrete readFirst/mayChange/mustNotTouch/interfaces/checks, attach exact input versions. Sequence shared files with job depend. Assigned work enters the queue automatically; do not race it with manual prepare.`,
+      "3. When a child changes state, the Agency messages this thread. Read current state and resolve actionable blockers before waiting. Use job decide for a changed route: unknowns, bottleneck, action, rationale, evidence and nextCheck; expectedRevision is decisionRevision. Do not write decisions for every tool call.",
+      "4. Implementation/rework go to executors, independent review to reviewers. Return reviewed work with job return in the same context. Use bb agency launch cancel only for actual replacement. Accept exact child versions, never your own result.",
       ...leadRuleLines(worker.rules),
-      "5. Finish with a summary report .agency/jobs/<main job key>/report.md published as a version and a final job comment. Do not accept your own result: acceptance belongs to the owner. Comments are Markdown: first line the outcome, details as a list, no run_/thr_/job_ ids unless needed.",
-      "6. A job outside the department's scope (see Accepts / Does not accept in the department process): do not implement it. Mixed product → children in accepting departments, not a Return of the root. Return + blocked only when no department fits.",
-      "A subtask returned to you as blocked with \"Return\" (or \"Возврат\"): reassign it by role, move it to the right department or cancel it; stop a stuck attempt with `bb agency launch cancel`.",
+      "5. Finish with a summary report after work children finish. Publish the final version, then bb agency job submit with fresh job expectedRevision, artifactId, version, hash and comment. Plans and progress use job comment; they are not submissions. Read skills/agency references for command details.",
+      "6. A job outside the department's scope: route it to a fitting department. Ask the owner only for new authority, spending, changed scope or a genuinely missing requirement; no useful next action and a real external dependency justify waiting. Do not poll in an empty loop.",
       workLanguageLine(),
     ];
     return withPlaybook(worker, [...head, ...list, ...tail]);
@@ -362,8 +347,8 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     "- Job comments are Markdown: first line the outcome, details as a list (`\\n` line breaks in JSON), technical ids only when needed. Long material goes to the report.",
     "- Do not create new Agency jobs and do not hand this work on: splitting work is the lead's job.",
     "- A question for the owner or conflicting instructions: `bb agency job report-needs-input`, then end your turn. The questions go to the chat that commissioned the job, not the Agency card.",
-    "- Handing in means a published version and a final job comment. Without the final comment after publishing, the job does not go to review.",
-    `- Ending a turn without a published version or a final comment brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
+    "- Handing in means a published version and explicit bb agency job submit with jobId, expectedRevision, artifactId, version, hash and comment. Ordinary comments and plans never submit the result.",
+    `- Ending a turn without a published version or explicit submission brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
     `- The Agency watches the attempt: ${worker.rules?.watchStallMinutes ?? 30} min without new events or ${worker.rules?.watchCeilingHours ?? 2} h of continuous work sends the job to the lead as blocked. Split long work into stages and note them in comments.`,
     "- If the job has an execution contract, start with readFirst, keep interfaces as they are, change only what mayChange lists, leave mustNotTouch alone, run every check and list them with their output in the final comment. Going outside it is a question to the lead, not a decision.",
     "- Work you could not finish is reported as such: say which acceptance criteria are not met and what is missing. A promise to do it later is not a result.",
@@ -375,7 +360,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       `Job "${worker.title}" of the "${worker.departmentName}" department. You prepare material for a colleague; the decisions are theirs.`,
       "- Read and collect only what the brief names. Every fact carries a reference (path:line, URL, clause, date); what you did not find is said plainly.",
       "- Do not decide what to do next and do not create jobs: that belongs to the lead and to the employee you help.",
-      "- Hand in a short digest as a version and a final comment. Your work goes to a colleague, so it needs no independent review.",
+      "- Hand in a short digest as a version and explicit job submit. Your work goes to a colleague, so it needs no independent review.",
       ...common,
     ]);
   }
@@ -388,7 +373,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
       "- On rework, identify the changed artifact/hash and remaining failed criteria first. Reuse valid independent evidence for unaffected criteria; check the diff and related regression risks. Repeat a full scenario only when the change, environment or project rules justify it, and state why. A new preference is not a blocker: report it separately. Contradictory criteria go to the lead before another implementation round.",
       ...(worker.rules?.minorDefectsWithoutRound ? ["- In this department minor defects do not open a new round: the verdict is \"accept with remarks\" when only minor defects remain."] : []),
       "- The job turns out to be a review of your own work, or an implementation: do not take it. `bb agency job comment` \"Return: reason\", then `bb agency job transition` to blocked and end your turn.",
-      "- Hand in: verdict report .agency/jobs/<key>/report.md (verdict, criteria table, defects, commands and output) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` with the verdict → end your turn. Do not accept the result: the lead or the owner decides.",
+      "- Hand in: verdict report .agency/jobs/<key>/report.md (verdict, criteria table, defects, commands and output) → `bb agency artifact create` and `artifact publish` → `bb agency job submit` with the verdict → end your turn. Do not accept the result: the lead or the owner decides.",
       ...common,
     ]);
   }
@@ -396,7 +381,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     `## Your role: executor of ${worker.jobKey}`,
     `Job "${worker.title}" of the "${worker.departmentName}" department. Do the work yourself within the brief.`,
     "- First compare the job with your job description. Not your kind of work, or required inputs are missing: do not start. `bb agency job comment` \"Return: reason; who fits; what is missing\", then `bb agency job transition` to blocked and end your turn. The lead is notified.",
-    "- Hand in: report .agency/jobs/<key>/report.md (outcome, what was done and where, how it was checked, what was not done) → `bb agency artifact create` and `artifact publish` → final `bb agency job comment` for the lead with a link to the version → end your turn. Saying \"done\" is not acceptance.",
+    "- Hand in: report .agency/jobs/<key>/report.md (outcome, what was done and where, how it was checked, what was not done) → `bb agency artifact create` and `artifact publish` → `bb agency job submit` for the lead with a link to the version → end your turn. Saying \"done\" is not acceptance.",
     ...common,
   ]);
 }

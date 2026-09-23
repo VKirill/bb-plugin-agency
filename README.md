@@ -40,6 +40,12 @@ hands in a version, a reviewer checks it and the owner accepts it; the Agency
 creates and launches the next step for another department by itself; an employee
 whose workplace is a Mac mini tests a site in a real browser.
 
+## Lead decisions and final submission
+
+`bb agency job state --input-json '{"jobId":"<id>"}'` returns the full goal, child states, publications, decision history and provisional lessons. Leads record a changed route with `job decide`; decisions retain evidence and their own CAS revision. The short role policy delegates procedural details to the Agency skill.
+
+New launches submit an exact published `artifactId/version/hash` with `job submit`. Progress comments and plan publication do not trigger review. Rework invalidates the submission; a parent needs finished work children and a fresh final publication. Existing attempts keep their previous protocol until explicit submission, so an upgrade does not force a restart. Generated lesson summaries remain proposals until curated; unrelated lessons are retrieved on demand.
+
 ## Starter departments
 
 The kit installs standing departments with a charter, a lead, executors, a reviewer

@@ -1,3 +1,4 @@
+import { leadStateQuerySchema, recordLeadDecisionSchema, submitJobResultSchema } from "../../shared/contracts/lead-control";
 import { traceQuerySchema } from "../../shared/contracts/trace";
 import { jobDiagnosticsQuerySchema } from "../../shared/contracts/diagnostics";
 import { installStarterKitInputSchema, recordLifecycleInputSchema } from "../../shared/rpc-contract";
@@ -70,6 +71,9 @@ import {
 const emptyObjectSchema = z.object({}).strict();
 
 export const CLI_OPERATIONS = {
+  getLeadState: { input: leadStateQuerySchema, summary: "Цель, решение, дети и готовность сдачи; children имеют nextOffset" },
+  recordLeadDecision: { input: recordLeadDecisionSchema, summary: "Решение руководителя: неизвестное, причина, действие и следующая проверка; CAS по decisionRevision" },
+  submitJobResult: { input: submitJobResultSchema, summary: "Явно сдать точную опубликованную версию; expectedRevision задачи, artifactId/version/hash/comment" },
   getSessionPolicy: { input: getSessionPolicyInputSchema, summary: "Режим обычных чатов: проект, папка, этот тред" },
   saveSessionPolicy: { input: saveSessionPolicyInputSchema, summary: "Задать режим чатов проекта, папки, этого треда или черновика нового чата" },
   listWorkspace: { input: listWorkspaceInputSchema, summary: "Снимок workspace, включая полный PolicyVersion" },

@@ -2,16 +2,9 @@ import { ok, type DomainResult } from "../../domain";
 import type { SqlDatabase } from "../db/sql";
 import { listKnowledge, saveKnowledge, setKnowledgeStatus, type KnowledgeItem } from "./store";
 
-/**
- * Урок после приёмки: как прошла главная задача и что из этого стоит помнить отделу.
- *
- * Запись собирает само Агентство из фактов задачи — круги доработки, замечания, сроки. При
- * включённом правиле «Отдел учится сам» она сразу принимается в знания отдела, а владелец
- * получает сообщение с правом отменить; иначе ждёт его решения предложением.
- *
- * Чтобы память не превращалась в свалку, у неё есть рамки: бюджет записей на отдел
- * (`trimDepartmentMemory`, вытесняет сначала непрочитанное) и срок жизни авто-урока
- * (`expireLessons`). Закреплённые владельцем записи не вытесняются и не устаревают.
+/** Acceptance produces observations, not automatically a verified causal rule.
+ * The department lead curates useful candidates via the normal knowledge API.
+ * Accepted memory is bounded by trimDepartmentMemory and expireLessons.
  */
 
 export const LESSON_AUTHOR = "agency:lesson";
@@ -66,10 +59,8 @@ export function draftLesson(db: SqlDatabase, jobId: string, now: string): Lesson
     facts,
     ...(remarks.length ? ["", "Из-за чего возвращали:", ...remarks.map((remark) => `- ${remark}`)] : []),
     "",
-    "## Что запомнить",
-    rounds.n > 0
-      ? "Замечания выше повторяться не должны: перед сдачей проверяйте их отдельным пунктом самопроверки."
-      : "Работа прошла без доработок — опишите, что именно помогло, чтобы повторить это в следующий раз.",
+    "## Кандидат в урок — проверить руководителю",
+    "Причина, исправление, фактическая проверка и область применимости ещё не установлены. Статистика задачи не доказывает причинный вывод и не создаёт нового обязательного правила.",
     "",
     "_Собрано Агентством из фактов задачи. Поправьте вывод своими словами или уберите запись, если она не нужна._",
   ].join("\n");
@@ -92,7 +83,7 @@ export function lessonExists(db: SqlDatabase, jobKey: string): boolean {
 }
 
 export type LessonOptions = {
-  /** Отдел учится сам: запись принимается без владельца, он получает право вето. */
+  /** Совместимость настроек: автоматические наблюдения всегда требуют проверки руководителем, даже при autoLearn. */
   autoLearn?: boolean;
   /** Сколько принятых записей держит отдел: лишние уходят в архив, закреплённые остаются. */
   memoryLimit?: number;
@@ -159,12 +150,10 @@ export function proposeLessonForJob(
     now,
   );
   if (!saved.ok) return saved;
-  if (!options.autoLearn) return ok({ proposed: saved.value });
-  // Отдел учится сам: запись принимается сразу, владелец получает сообщение с правом отменить.
-  const accepted = setKnowledgeStatus(db, { id: saved.value.id, expectedRevision: saved.value.revision, status: "accepted" }, now);
-  if (!accepted.ok) return ok({ proposed: saved.value });
-  const archived = options.memoryLimit ? trimDepartmentMemory(db, draft.departmentId, options.memoryLimit, now) : [];
-  return ok({ proposed: accepted.value, archived });
+  // This template contains observations, not a verified causal lesson. A lead may
+  // curate and accept it through the normal knowledge API; a keep/importance
+  // verdict alone is not evidence that the proposed rule works.
+  return ok({ proposed: saved.value });
 }
 
 /**

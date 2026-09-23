@@ -263,7 +263,7 @@ export function knowledgeBlock(
   const shown: KnowledgeItem[] = [];
   let used = 0;
   // Под задачу в промпт идёт отобранное: остальное сотрудник берёт списком, если оно ему нужно.
-  const chosen = focus ? items.filter((item) => focus.has(item.id) || item.pinned || item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE) : items;
+  const chosen = focus ? items.filter((item) => focus.has(item.id) || item.pinned || (item.kind !== "lesson" && item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE)) : items;
   for (const item of chosen) {
     const line = `- [${item.kind}] ${item.title} — ${item.summary} (${item.id})`;
     if (used + line.length + 1 > KNOWLEDGE_INDEX_LIMIT) break;
@@ -282,7 +282,7 @@ export function knowledgeBlock(
     : [];
   const full: string[] = [];
   for (const item of shown) {
-    const whole = item.pinned || item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE;
+    const whole = item.pinned || (item.kind !== "lesson" && item.importance >= KNOWLEDGE_FULL_TEXT_IMPORTANCE) || (item.kind === "lesson" && Boolean(focus?.has(item.id)));
     const part = `### ${item.title}\nИсточник: ${item.source}\n${item.body}`;
     if (whole && used + part.length <= KNOWLEDGE_LEVEL_LIMIT) {
       full.push(part);

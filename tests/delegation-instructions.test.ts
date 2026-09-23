@@ -280,12 +280,15 @@ describe("instructions inside Agency job threads", () => {
   it("keeps the roster, recovery protocol and closing instructions with full department rules", () => {
     const text = buildWorkerInstructions({
       jobId: "job_root0001", jobKey: "AG-2201", title: "Калькулятор", departmentName: "Программисты",
-      isLead: true, assigneeType: "lead", members,
+      isLead: true, assigneeType: "lead", members: [...members, ...Array.from({ length: 40 }, (_, i) => ({ agentId: `agt_extra${i}`, name: `Executor ${i}`, role: "Developer", lead: false, type: "executor" as const }))],
       rules: { reworkLimit: 2, minorDefectsWithoutRound: true, reviewRequired: true, autoReview: true },
     });
     expect(text.length).toBeGreaterThan(INSTRUCTIONS_LIMIT);
     expect(text).toContain("agt_dev00001");
     expect(text).toContain("agt_qa000001");
+    expect(text).toContain("agt_extra39");
+    expect(text).toContain("job state");
+    expect(text).toContain("job submit");
     expect(text).toContain("After the third unsuccessful pass");
     expect(text).toContain("recoveryDecision:{cause,correction,verification}");
     expect(text).toContain("Auto review is on");

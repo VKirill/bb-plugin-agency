@@ -102,6 +102,8 @@ const WRITE_OPERATIONS = new Set<CliRoutedOperation>([
   "claimActionIntent",
   "approveActionIntent",
   "completeActionIntent",
+  "recordLeadDecision",
+  "submitJobResult",
   "createJobComment",
 ]);
 

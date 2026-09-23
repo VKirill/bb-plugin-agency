@@ -82,14 +82,14 @@ describe("lesson after acceptance", () => {
     expect(listKnowledge(db, { status: "accepted" })).toHaveLength(0);
   });
 
-  it("lets the department keep the lesson itself when the rule says so", () => {
+  it("keeps generated observations provisional even with auto learning enabled", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);
     const main = s.job("Сама запомнила", s.developer);
     const written = proposeLessonForJob(db, main.id, NOW, { autoLearn: true, memoryLimit: 40 });
-    // Владелец не нужен: запись сразу в работе, за ним остаётся вето.
-    expect(written.ok && written.value.proposed?.status).toBe("accepted");
-    expect(listKnowledge(db, { status: "accepted" })).toHaveLength(1);
+    // Статистика не доказывает причинный урок: его проверяет руководитель, не обязательно владелец.
+    expect(written.ok && written.value.proposed?.status).toBe("proposal");
+    expect(listKnowledge(db, { status: "accepted" })).toHaveLength(0);
   });
 
   it("keeps the department's memory inside its budget, pinned records first", () => {

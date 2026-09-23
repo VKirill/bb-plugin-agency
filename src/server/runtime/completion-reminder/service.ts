@@ -73,7 +73,7 @@ export function completionReminderText(jobKey: string, attemptId: string, count:
       "To hand in the work:",
       `1. Report .agency/jobs/${jobKey}/report.md: outcome, what was done and where, how it was checked, what is not done.`,
       "2. bb agency artifact create → bb agency artifact publish: a version of the report (and key result files).",
-      "3. bb agency job comment: a two or three sentence summary for the lead with a link to the version.",
+      "3. bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): a two or three sentence summary for the lead with a link to the version.",
       "4. End the turn.",
       "Not your work or inputs are missing — return the job: comment «Return: …» and job transition to blocked. A question for the owner — job report-needs-input.",
       `After ${COMPLETION_REMINDER_LIMIT} reminders without a result the job moves to «needs decision».`,
@@ -85,7 +85,7 @@ export function completionReminderText(jobKey: string, attemptId: string, count:
     "Чтобы сдать работу:",
     `1. Отчёт .agency/jobs/${jobKey}/report.md: итог, что сделано и где, чем проверено, что не сделано.`,
     "2. bb agency artifact create → bb agency artifact publish: версия отчёта (и ключевых файлов результата).",
-    "3. bb agency job comment: итог для руководителя в двух-трёх фразах со ссылкой на версию.",
+    "3. bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): итог для руководителя в двух-трёх фразах со ссылкой на версию.",
     "4. Завершите ход.",
     "Работа не ваша или не хватает входов — верните задачу: комментарий «Возврат: …» и job transition в blocked. Вопрос владельцу — job report-needs-input.",
     `После ${COMPLETION_REMINDER_LIMIT} напоминаний без результата задача перейдёт в «Ожидает решения».`,
@@ -96,16 +96,16 @@ export function completionReminderText(jobKey: string, attemptId: string, count:
 export function handInCommentReminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage = agencyLanguage(), limit: number = COMPLETION_REMINDER_LIMIT): string {
   if (lang === "en") {
     return [
-      `Agency: the result version of ${jobKey} is published, but there is no closing comment for the lead (reminder ${count} of ${limit}).`,
-      "bb agency job comment: the outcome in two or three sentences — what was done, how it was checked, what is not done — with a link to the version. Then end the turn.",
-      "The job goes to review only after the comment.",
+      `Agency: the result version of ${jobKey} is published, but there is no explicit final submission (reminder ${count} of ${limit}).`,
+      "bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): the outcome in two or three sentences — what was done, how it was checked, what is not done — with a link to the version. Then end the turn.",
+      "The job goes to review only after final submission.",
       `agency.completionReminder:${attemptId}:${count}`,
     ].join("\n");
   }
   return [
-    `Агентство: версия результата ${jobKey} опубликована, но нет итогового комментария руководителю (напоминание ${count} из ${limit}).`,
-    "bb agency job comment: итог в двух-трёх фразах — что сделано, чем проверено, что не сделано — со ссылкой на версию. Затем завершите ход.",
-    "На проверку задача уйдёт только после комментария.",
+    `Агентство: версия результата ${jobKey} опубликована, но нет явной итоговой сдачи (напоминание ${count} из ${limit}).`,
+    "bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): итог в двух-трёх фразах — что сделано, чем проверено, что не сделано — со ссылкой на версию. Затем завершите ход.",
+    "На проверку задача уйдёт только после итоговой сдачи.",
     `agency.completionReminder:${attemptId}:${count}`,
   ].join("\n");
 }

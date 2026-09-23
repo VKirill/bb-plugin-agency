@@ -1,3 +1,4 @@
+import { readLeadState } from "../lead-control/state";
 import { dependencyLinks, readNextStep, removeJobDependency, saveNextStep } from "../flow/service";
 import { agencyLanguage } from "../i18n/language";
 import { jobGoals } from "../organization/goals";
@@ -55,6 +56,9 @@ type DomainMethod =
   | "listWorkspace"
   | "listBbCatalog"
   | "listCapabilityCatalog"
+  | "getLeadState"
+  | "recordLeadDecision"
+  | "submitJobResult"
   | "getJob"
   | "addJobDependency"
   | "removeJobDependency"
@@ -252,6 +256,16 @@ export function createDomainRpc(deps: {
       }),
 
     listCapabilityCatalog: (input) => withAccess(() => loadCapabilityCatalog(bb, input, db)),
+
+    getLeadState: (input) => withAccess((access) => {
+      const scoped = store.scopedJob(access.ctx, input.jobId);
+      if (!scoped.ok) return scoped;
+      if (access.ctx.caller && access.ctx.caller.jobId !== input.jobId)
+        return fail("forbidden_job_control", "Read the state of your assigned job; child details use getJob");
+      return ok(readLeadState(db, scoped.value.job, input.offset, input.limit, input.beforeDecisionRevision));
+    }),
+    recordLeadDecision: (input) => withAccess((access) => mutated(store.recordLeadDecision(access.ctx, input))),
+    submitJobResult: (input) => withAccess((access) => mutated(store.submitJobResult(access.ctx, input))),
 
     getJob: (input) =>
       withAccess((access) => {

@@ -70,7 +70,7 @@ const COPY = {
     finishLines: (key: string) => [
       `- Отчёт \`${attemptPackDir(key)}/report.md\`.`,
       "- `bb agency artifact create`, затем `artifact publish` (см. `cli.md`).",
-      "- Итоговый `bb agency job comment` и конец хода.",
+      "- Явная сдача `bb agency job submit` с jobId, expectedRevision, artifactId, version, hash, comment; затем конец хода.",
       "- Свой результат не принимай. Станцию закрывает конвейер.",
       "- `report-needs-input` только если не хватает сырья: секреты, деньги, необратимое действие владельца.",
     ],
@@ -110,7 +110,7 @@ const COPY = {
     finishLines: (key: string) => [
       `- Write the report at \`${attemptPackDir(key)}/report.md\`.`,
       "- `bb agency artifact create` then `artifact publish` (see `cli.md`).",
-      "- Leave a closing `bb agency job comment` and end the turn.",
+      "- Submit explicitly with `bb agency job submit` (jobId, expectedRevision, artifactId, version, hash, comment), then end the turn.",
       "- Do not accept your own result. The conveyor closes the station.",
       "- `report-needs-input` only for missing materials: secrets, money, irreversible owner action.",
     ],
@@ -131,9 +131,9 @@ const COPY = {
 
 /** Commands of the role card, by membership role. An unknown role gets the narrowest card. */
 export function roleCliCommands(memberRole: string | null): string[] {
-  const hand = ["bb agency job comment", "bb agency artifact create", "bb agency artifact publish"];
+  const hand = ["bb agency job submit", "bb agency job state", "bb agency job comment", "bb agency artifact create", "bb agency artifact publish"];
   if (memberRole === "lead") {
-    return [...hand, "bb agency job report-needs-input", "bb agency job return", "bb agency job create", "bb agency job attach-input"];
+    return [...hand, "bb agency job decide", "bb agency job report-needs-input", "bb agency job return", "bb agency job create", "bb agency job attach-input"];
   }
   // `job return` sends a closed product back for rework: a lead's call, not an executor's.
   if (memberRole === "executor") return [...hand, "bb agency job report-needs-input"];
@@ -144,6 +144,9 @@ export function roleCliCommands(memberRole: string | null): string[] {
 function cliCard(input: AttemptPackInput): string {
   const copy = COPY[input.lang];
   const payload: Record<string, string> = {
+    "bb agency job state": `--input-json '{"jobId":"${input.job.id}"}'`,
+    "bb agency job submit": `--input-json '{"requestId":"<uuid>","jobId":"${input.job.id}","expectedRevision":<fresh job revision>,"artifactId":"<id>","version":<published version>,"hash":"<sha256>","comment":"..."}'`,
+    "bb agency job decide": `--input-json '{"requestId":"<uuid>","jobId":"${input.job.id}","expectedRevision":<decisionRevision from job state>,"decision":{"unknowns":[],"bottleneck":"...","action":"inspect","rationale":"...","evidence":[],"nextCheck":"..."}}'`,
     "bb agency job comment": `--input-json '{"requestId":"<uuid>","jobId":"${input.job.id}","comment":"..."}'`,
     "bb agency artifact create": `--input-json '{"requestId":"<uuid>","jobId":"${input.job.id}"}'`,
   };
