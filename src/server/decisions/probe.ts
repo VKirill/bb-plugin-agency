@@ -1,3 +1,4 @@
+import { askLaunchEffort, type EffortResult } from "./launch-effort";
 import { askBriefingDetailed, BRIEFING_POINT } from "./briefing";
 import { askHandInGate, HAND_IN_GATE_POINT, type HandInGateResult } from "./hand-in-gate";
 import { askIntakeDetailed, INTAKE_POINT, type IntakeProposal } from "./intake";
@@ -34,6 +35,7 @@ const SOLID_COMMENT =
   "Опубликована версия 1: цвет кнопки совпадает с макетом на широкой и узкой карточке. npm test зелёный. Другие экраны не менялись.";
 
 export type DecisionProbeResult = {
+  effort: EffortResult;
   intake: IntakeProposal | null;
   intakeTrace: { reason: string; answers: string; ms: number };
   junk: HandInGateResult | null;
@@ -63,7 +65,13 @@ export async function probeDecisionPoints(
     },
     deps,
   );
+  const effort = await askLaunchEffort(live, {
+    title: "Full-plan reasoning probe",
+    brief: "Preserve all existing behavior and document evidence.\n".repeat(80) + "FINAL STEP: design a concurrent database migration with crash recovery, idempotency and rollback; analyze race conditions across services.",
+    acceptance: "Evidence\n".repeat(80) + "Prove no data loss under concurrent writes and process crashes.",
+  }, ["low", "medium", "high", "xhigh", "max"], deps);
   return {
+    effort,
     intake: asked.proposal,
     intakeTrace: { reason: asked.reason, answers: asked.answers, ms: asked.ms },
     junk,

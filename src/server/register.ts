@@ -494,7 +494,7 @@ export function registerAgency(bb: BbPluginApi) {
               : { providerId: provider.id, signal: AbortSignal.timeout(12_000) },
           );
           for (const model of options.models) {
-            models.push({ providerId: provider.id, model: model.model, isDefault: model.isDefault, displayName: model.displayName });
+            models.push({ providerId: provider.id, model: model.model, isDefault: model.isDefault, displayName: model.displayName, supportedReasoningEfforts: model.supportedReasoningEfforts });
           }
         } catch {
           // One CLI without a catalog must not hide the models of the others.
@@ -535,8 +535,8 @@ export function registerAgency(bb: BbPluginApi) {
     comment: (job, text) => void systemComment(job, text),
     // Подсказка к запуску: оценщик выбирает навыки и записи памяти под конкретную работу, а из
     // библиотеки отдела открывает недостающее — на один запуск и с записью в журнал. У писателя
-    // и помощника тот же вызов выбирает low/medium/high только для этой попытки.
-    briefing: async ({ job, skills, catalog }) => {
+    // и помощника отдельный запрос по полному плану выбирает поддерживаемый effort этой попытки.
+    briefing: async ({ job, skills, catalog, target, hostId }) => {
       const settings = getDecisionSettings(db);
       const access = resolveRpcAccess(db);
       const stored = store.getJobByKey(job.key);
@@ -557,12 +557,14 @@ export function registerAgency(bb: BbPluginApi) {
       const own = new Set(skills.map((skill) => skill.id));
       const poolIds = new Set(listSkillPool(db, job.departmentId));
       const pool = catalog.filter((skill) => poolIds.has(skill.id) && !own.has(skill.id));
+      const supported = askEffort ? (await modelCatalog(hostId)).find((model) => model.providerId === target.providerId && model.model === target.model)?.supportedReasoningEfforts?.map((level) => level.reasoningEffort) : undefined;
       const asked = await askBriefingDetailed(settings, {
         job,
         skills,
         pool,
         lessons: listKnowledge(db, { scopeKind: "department", scopeId: job.departmentId, status: "accepted" }).sort(knowledgeOrder),
         askEffort,
+        supportedEfforts: supported,
       });
       await intake;
       const grantNames = asked.briefing?.granted.map((row) => row.skill.name).join("|") ?? "";
@@ -581,6 +583,15 @@ export function registerAgency(bb: BbPluginApi) {
           new Date().toISOString(),
         );
         if (briefRow) bb.log.info(decisionLogLine(briefRow));
+      }
+      if (asked.effortTrace) {
+        const effort = asked.effortTrace;
+        const row = appendDecisionLog(db, {
+          point: "launch-effort", jobKey: job.key, outcome: effort.reason,
+          detail: `chars=${effort.planChars} sha256=${effort.planHash} effective=${effort.effort ?? target.reasoningEffort ?? "provider_default"} source=${effort.effort ? "jev" : "profile"}`,
+          answers: effort.answers, ms: effort.ms,
+        }, new Date().toISOString());
+        if (row) bb.log.info(decisionLogLine(row));
       }
       const result = asked.briefing;
       const effortLine = asked.effort
@@ -1014,6 +1025,7 @@ export function registerAgency(bb: BbPluginApi) {
       const probed = await probeDecisionPoints(settings);
       const now = new Date().toISOString();
       const rows = [
+        { point: "launch-effort", jobKey: "probe-effort", outcome: probed.effort.reason, detail: `chars=${probed.effort.planChars} sha256=${probed.effort.planHash}`, answers: probed.effort.answers, ms: probed.effort.ms },
         {
           point: "intake",
           jobKey: "probe-intake",

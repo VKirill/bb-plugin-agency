@@ -2,6 +2,8 @@ import { decisionPoint, type DecisionQuestion, type DecisionSettings } from "../
 import type { KnowledgeItem } from "../knowledge/store";
 import { askDecisions, confident } from "./client";
 import { formatDecisionAnswers } from "./log";
+import { askLaunchEffort, type EffortResult, type LaunchPlan } from "./launch-effort";
+import type { ReasoningEffort } from "../../shared/contracts/versions";
 
 /**
  * Подсказка к запуску: что поднять под эту работу.
@@ -46,19 +48,18 @@ export const BRIEFING_TEXT_LIMIT = 1_400;
 
 export type BriefingSkill = { id: string; name: string; description?: string };
 
-export const LAUNCH_EFFORTS = ["low", "medium", "high"] as const;
-export type LaunchEffort = (typeof LAUNCH_EFFORTS)[number];
-const EFFORT_ID = "effort";
+export type LaunchEffort = ReasoningEffort;
 
 export type BriefingInput = {
-  job: { key: string; title: string; brief: string; acceptance: string };
+  job: LaunchPlan & { key: string };
   /** Навыки сотрудника: они уедут в запуск в любом случае. */
   skills: readonly BriefingSkill[];
   /** Библиотека отдела за вычетом профиля: это можно открыть под задание. */
   pool?: readonly BriefingSkill[];
   lessons: readonly KnowledgeItem[];
-  /** Writer/assistant launches: pick low/medium/high for this attempt only. */
+  /** Effort uses a separate request containing only the complete work plan. */
   askEffort?: boolean;
+  supportedEfforts?: readonly string[];
 };
 
 export type Briefing = {
@@ -72,14 +73,14 @@ export type Briefing = {
 
 /** Имя навыка ничего не говорит: «drmax» — это аудит сайта, и без строки из SKILL.md это не угадать. */
 function skillLine(prefix: string, skill: BriefingSkill, index: number): string {
-  return `${prefix}${index}: ${skill.name}${skill.description ? ` — ${skill.description.slice(0, 200)}` : ""}`;
+  return `${prefix}${index}: ${skill.name}${skill.description ? ` — ${skill.description}` : ""}`;
 }
 
 function state(input: BriefingInput, skills: readonly BriefingSkill[], pool: readonly BriefingSkill[], lessons: readonly KnowledgeItem[]): string {
   const lines = [
     `Работа ${input.job.key}: ${input.job.title}`,
-    `Что нужно сделать: ${input.job.brief.slice(0, 1_500)}`,
-    `Критерий приёмки: ${input.job.acceptance.slice(0, 500)}`,
+    `Что нужно сделать: ${input.job.brief}`,
+    `Критерий приёмки: ${input.job.acceptance}`,
   ];
   if (skills.length) {
     lines.push("", "Навыки, которые у исполнителя уже есть:");
@@ -100,7 +101,6 @@ function questions(
   skills: readonly BriefingSkill[],
   pool: readonly BriefingSkill[],
   lessons: readonly KnowledgeItem[],
-  askEffort: boolean,
 ): DecisionQuestion[] {
   return [
     ...skills.map((skill, index) => ({ id: `s${index}`, kind: "bool" as const, prompt: `Нужен ли навык «${skill.name}» для этой работы?` })),
@@ -111,22 +111,6 @@ function questions(
       prompt: `Поможет ли навык «${skill.name}» сделать эту работу качественнее — так, что без него результат заметно хуже?`,
     })),
     ...lessons.map((lesson, index) => ({ id: `k${index}`, kind: "bool" as const, prompt: `Поможет ли в этой работе запись «${lesson.title}»?` })),
-    ...(askEffort
-      ? [
-          {
-            id: EFFORT_ID,
-            kind: "choice" as const,
-            prompt:
-              "Какой уровень рассуждения нужен исполнителю на этой сдаче? Не меняй профиль: только этот запуск. low — короткая правка или шаблон. medium — обычный текст или типичная работа. high — спорный, длинный или рискованный результат.",
-            choices: LAUNCH_EFFORTS,
-            descriptions: {
-              low: "Short edit, template, mechanical collect. Fast and cheap.",
-              medium: "Typical writing or implementation of a clear brief.",
-              high: "Long, contested, or high-stakes work that needs careful reasoning.",
-            },
-          },
-        ]
-      : []),
   ];
 }
 
@@ -149,6 +133,7 @@ function text(skills: readonly BriefingSkill[], granted: readonly BriefingSkill[
 export type BriefingAskResult = {
   briefing: Briefing | null;
   effort: LaunchEffort | null;
+  effortTrace?: EffortResult;
   reason: "hint" | "disabled" | "empty" | "failed" | "silent";
   answers: string;
   ms: number;
@@ -175,18 +160,11 @@ function trace(
   };
 }
 
-function readEffort(answers: Parameters<typeof confident>[0], threshold: number): LaunchEffort | null {
-  const answer = confident(answers, EFFORT_ID, threshold);
-  return typeof answer?.value === "string" && (LAUNCH_EFFORTS as readonly string[]).includes(answer.value)
-    ? (answer.value as LaunchEffort)
-    : null;
-}
-
 /**
  * Полный исход подсказки, в том числе молчание: иначе в журнале «оценщик не предложил навыки»
  * неотличимо от «оценщика не звали» и от пустой библиотеки.
  */
-export async function askBriefingDetailed(
+async function askSkillBriefingDetailed(
   settings: DecisionSettings,
   input: BriefingInput,
   deps: { fetch?: typeof fetch; key?: string } = {},
@@ -195,15 +173,14 @@ export async function askBriefingDetailed(
   const pool = (input.pool ?? []).slice(0, POOL_LIMIT);
   const lessons = input.lessons.slice(0, LESSON_LIMIT);
   const candidates = { skills: skills.length, pool: pool.length, lessons: lessons.length };
-  const askEffort = Boolean(input.askEffort);
   if (!settings.enabled || !settings.points.includes(BRIEFING_POINT)) return trace("disabled", { candidates });
   const point = decisionPoint(BRIEFING_POINT);
   if (!point) return trace("disabled", { candidates });
-  if (!skills.length && !pool.length && !lessons.length && !askEffort) return trace("empty", { candidates });
+  if (!skills.length && !pool.length && !lessons.length) return trace("empty", { candidates });
 
   const outcome = await askDecisions(
     settings,
-    { state: state(input, skills, pool, lessons), questions: questions(skills, pool, lessons, askEffort) },
+    { state: state(input, skills, pool, lessons), questions: questions(skills, pool, lessons) },
     deps,
   );
   if (!outcome.ok) {
@@ -212,7 +189,6 @@ export async function askBriefingDetailed(
   }
 
   const answers = formatDecisionAnswers(outcome.answers);
-  const effort = askEffort ? readEffort(outcome.answers, point.threshold) : null;
   const signal = <T>(all: readonly T[], picked: readonly T[]): T[] => {
     if (!picked.length) return [];
     if (all.length >= NOISE_MIN && picked.length > all.length * NOISE_RATIO) return [];
@@ -226,7 +202,7 @@ export async function askBriefingDetailed(
     .slice(0, GRANT_LIMIT)
     .map((row) => ({ skill: row.skill, confidence: row.answer?.confidence ?? GRANT_THRESHOLD }));
   if (!pickedSkills.length && !pickedLessons.length && !granted.length) {
-    return trace("silent", { answers, ms: outcome.ms, candidates, effort });
+    return trace("silent", { answers, ms: outcome.ms, candidates });
   }
   const briefing: Briefing = {
     text: text(pickedSkills, granted.map((row) => row.skill), pickedLessons),
@@ -235,7 +211,27 @@ export async function askBriefingDetailed(
     lessons: pickedLessons,
     ms: outcome.ms,
   };
-  return trace("hint", { briefing, answers, ms: outcome.ms, candidates, effort });
+  return trace("hint", { briefing, answers, ms: outcome.ms, candidates });
+}
+
+/** Skill selection and effort are independent: skills/lessons never enter the effort state. */
+export async function askBriefingDetailed(
+  settings: DecisionSettings,
+  input: BriefingInput,
+  deps: { fetch?: typeof fetch; key?: string } = {},
+): Promise<BriefingAskResult> {
+  const [hint, effortTrace] = await Promise.all([
+    askSkillBriefingDetailed(settings, input, deps),
+    input.askEffort ? askLaunchEffort(settings, input.job, input.supportedEfforts, deps) : Promise.resolve(null),
+  ]);
+  if (!effortTrace) return hint;
+  return {
+    ...hint,
+    reason: hint.reason === "empty" ? "silent" : hint.reason,
+    effort: effortTrace.effort, effortTrace,
+    answers: [hint.answers, effortTrace.answers].filter(Boolean).join(","),
+    ms: Math.max(hint.ms, effortTrace.ms),
+  };
 }
 
 /**

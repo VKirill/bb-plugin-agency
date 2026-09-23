@@ -1,9 +1,12 @@
+import { askLaunchEffort } from "../src/server/decisions/launch-effort";
+import { DEFAULT_DECISION_SETTINGS } from "../src/shared/decisions";
+import { spawnArgsFromContract } from "../src/server/runtime/isolated-sdk/spawn-args";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLocalHostFilePort } from "../src/host";
 import type { HostFilePort } from "../src/host/file-port";
 import {
@@ -629,6 +632,39 @@ describe("prepare-run", () => {
     expect(prepared.ok).toBe(false);
     if (prepared.ok) throw new Error("expected missing skill file");
     expect(prepared.error.code).toBe("skill_package_incomplete");
+    opened.close();
+  });
+
+  it.each(["medium", "high", "xhigh"] as const)("carries Jev %s through prepare and the explicit spawn contract", async (effort) => {
+    const opened = openFileDb();
+    const root = bindingRoot();
+    writeUtf8(root, ".bb/AGENTS.md", PLUGINS_AGENTS);
+    const seeded = await seedProject(opened.db, root);
+    const role = vi.spyOn(seeded.store, "memberRole").mockReturnValue("executor");
+    const prepared = await createPrepareRun({
+      store: seeded.store, files: createLocalHostFilePort("host_mini"), catalog: catalogFor(seeded),
+      runs: createRunStore(opened.db), server: serverBinding([".bb/AGENTS.md"]),
+      briefing: async ({ job, target, hostId }) => {
+        expect(target.model).toBe("gpt-5.6");
+        expect(hostId).toBe("host_mini");
+        const result = await askLaunchEffort({ ...DEFAULT_DECISION_SETTINGS, enabled: true, points: ["launch-briefing"] }, job, ["medium", "high", "xhigh"], {
+          key: "test", fetch: vi.fn(async () => new Response(JSON.stringify({ answers: { effort: { choice: effort, confidence: 0.99 } } }))),
+        });
+        return { text: "", reasoningEffort: result.effort ?? undefined };
+      },
+    }).prepare(seeded.ctx, publicInput(seeded));
+    role.mockRestore();
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    const snapshot = prepared.value.snapshot;
+    expect(snapshot.execution?.reasoningLevel).toBe(effort);
+    const spawn = spawnArgsFromContract({
+      snapshotId: "snp_aaaaaaaaaaaaaaaaaaaaaaaa", digest: snapshot.digest, attemptId: "run_aaaaaaaaaaaaaaaaaaaaaaaa",
+      launchId: "11111111-1111-4111-8111-111111111111", providerId: "codex", model: "gpt-5.6", skillIds: [AGENCY_SKILL], mcpIds: [],
+      hostId: "host_mini", canonicalRoot: root, environmentId: "env_1", bbProjectId: "proj_trusted",
+    }, snapshot, seeded.job.id);
+    expect(spawn.ok).toBe(true);
+    if (spawn.ok) expect(spawn.value).toMatchObject({ model: "gpt-5.6", reasoningLevel: effort, executionInputSources: { reasoningLevel: "explicit" } });
     opened.close();
   });
 

@@ -58,12 +58,14 @@ export type PrepareRunDeps = {
   roleInstructions?: (jobId: string) => string | null;
   /** Подсказка оценщика к этой работе: навыки и записи памяти под задачу. Молчит — запуск как раньше. */
   briefing?: (input: {
-    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string; assignedAgentId: string };
+    job: Pick<Job, "key" | "title" | "brief" | "acceptance" | "contract" | "departmentId"> & { assignedAgentId: string };
+    target: Pick<AgentVersion, "providerId" | "model" | "reasoningEffort">;
+    hostId: string;
     /** Навыки сотрудника: они уедут в запуск в любом случае. */
     skills: readonly { id: string; name: string; description?: string }[];
     /** Весь каталог машины: из него берётся библиотека отдела. */
     catalog: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[]; reasoningEffort?: "low" | "medium" | "high" } | null>;
+  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[]; reasoningEffort?: AgentVersion["reasoningEffort"] } | null>;
   /** Agent tools of installed, running plugins; fails for a plugin that is missing or off. */
   pluginTools?: (pluginIds: readonly string[]) => Promise<DomainResult<{ pluginId: string; toolNames: string[] }[]>>;
   /** Overlay the pair this launch runs on (primary or an owner-set reserve) without rewriting the stored profile. */
@@ -200,7 +202,9 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       // в тот же запуск, а не в следующий. Молчит — набор остаётся ровно профильным.
       const briefing = deps.briefing
         ? await deps.briefing({
-            job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, departmentId: job.departmentId, assignedAgentId: job.assignedAgentId ?? "" },
+            job: { key: job.key, title: job.title, brief: job.brief, acceptance: job.acceptance, contract: job.contract, departmentId: job.departmentId, assignedAgentId: job.assignedAgentId ?? "" },
+            target: agentVersion,
+            hostId: binding.hostId,
             // The evaluator is asked about method skills only. Core and helper skills (the agency
             // skill itself) ride in every launch: asking about them spends the question and, on a
             // short profile, drowns the hint in its own noise rule.

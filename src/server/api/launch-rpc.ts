@@ -168,11 +168,7 @@ export function createIsolatedLaunchRpc(deps: {
   /** Concurrency and budget limits from the work rules; warnings do not stop the launch. */
   checkLimits?: (job: Job) => Promise<DomainResult<{ warnings: string[] }>>;
   /** Подсказка оценщика к запуску: навыки и записи памяти под задачу. Не задана — запуск как раньше. */
-  briefing?: (input: {
-    job: { key: string; title: string; brief: string; acceptance: string; departmentId: string; assignedAgentId: string };
-    skills: readonly { id: string; name: string; description?: string }[];
-    catalog: readonly { id: string; name: string; description?: string }[];
-  }) => Promise<{ text: string; addSkillIds?: readonly string[]; lessonIds?: readonly string[]; reasoningEffort?: "low" | "medium" | "high" } | null>;
+  briefing?: import("../runtime/prepare-run/prepare").PrepareRunDeps["briefing"];
   /** Installed BB plugins: tools of the plugins an employee profile selects. */
   plugins?: PluginDirectory;
   /** Job history line: a launch that went to a reserve says which model did not start. */

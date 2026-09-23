@@ -468,8 +468,8 @@ export const EN_SETTINGS: Record<string, string> = {
     "Before a lesson enters the department memory: whether to keep it, what kind it is, whether the text holds a secret or a status of the day, whether it repeats an existing record. A refusal or a found secret stops the write; kind and importance arrive as a suggestion.",
   "Подсказка к запуску":
     "Launch briefing",
-  "Перед запуском: какие методические навыки сотрудника поднять, что открыть из библиотеки отдела, какие записи памяти отнести к делу, и какой уровень рассуждения (low / medium / high) дать исполнителю или помощнику на эту попытку. Молчание и пустой список пишутся в журнал. Бриф и регламент выше подсказки. Профиль сотрудника не переписывается.":
-    "Before a launch: which of the employee's method skills to raise, what to open from the department library, which memory records belong to the job, and which reasoning effort (low / medium / high) the executor or assistant should use on this attempt. Silence and an empty list are written to the log. The brief and the charter stay above the hint. The employee profile is not rewritten.",
+  "Перед запуском: подбор навыков и памяти отдела. Отдельно по полному заданию и критериям, без служебных инструкций, выбирается уровень рассуждения исполнителя или помощника из поддерживаемых выбранной моделью. Решение и причина возврата к уровню профиля пишутся в журнал. Профиль сотрудника не переписывается.":
+    "Before a launch: select skills and department memory. Separately, use the full job plan and acceptance criteria, without operational instructions, to choose executor or assistant reasoning from the selected model's supported levels. Log the decision and any fallback to the profile. The employee profile is not rewritten.",
   "Привратник паспорта":
     "Passport gatekeeper",
   "Перед тем как новая редакция паспорта проекта заменит прежнюю: нет ли в ней секрета, не состояние ли это дня и отличается ли она от прежней по существу. Секрет и состояние дня отменяют замену, совпадение с прежней — просто пропускает её.":

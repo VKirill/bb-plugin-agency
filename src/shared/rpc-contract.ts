@@ -428,6 +428,7 @@ export const decisionTestSchema = z.union([
 
 export const decisionProbeSchema = z
   .object({
+    effort: z.object({ effort: z.string().nullable(), reason: z.string(), answers: z.string(), ms: z.number(), planHash: z.string(), planChars: z.number() }).strict().optional(),
     intake: z
       .object({
         size: z.enum(["S", "M", "L"]),

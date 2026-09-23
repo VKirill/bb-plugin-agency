@@ -14,6 +14,7 @@ export type CatalogModel = {
   model: string;
   isDefault: boolean;
   displayName?: string;
+  supportedReasoningEfforts?: readonly { reasoningEffort: string }[];
 };
 
 export type ModelWish = { providerId: string; model: string };

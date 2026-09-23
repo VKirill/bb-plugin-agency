@@ -370,7 +370,7 @@ describe("the launch briefing", () => {
   it("picks writer effort even when there are no skills to raise", async () => {
     const asked = await askBriefingDetailed(
       ready,
-      { job, skills: [], lessons: [], askEffort: true },
+      { job, skills: [], lessons: [], askEffort: true, supportedEfforts: ["low", "medium", "high", "xhigh"] },
       {
         key: "k",
         fetch: (async () => chatReply({ effort: { value: "high", confidence: 0.88 } })) as unknown as typeof fetch,
@@ -385,7 +385,7 @@ describe("the launch briefing", () => {
   it("leaves the stored effort when the model is unsure", async () => {
     const asked = await askBriefingDetailed(
       ready,
-      { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [], askEffort: true },
+      { job, skills: [{ id: "s1", name: "ru-text" }], lessons: [], askEffort: true, supportedEfforts: ["low", "medium", "high", "xhigh"] },
       {
         key: "k",
         fetch: (async () =>
@@ -570,6 +570,7 @@ describe("decision log", () => {
           decision: { value: "accept", confidence: 0.9 },
         });
       }
+      if (text.includes("Full-plan reasoning probe")) return chatReply({ effort: { value: "xhigh", confidence: 0.95 } });
       if (text.includes("типа готово")) {
         return chatReply({
           complete: { value: false, confidence: 0.9 },
@@ -595,12 +596,13 @@ describe("decision log", () => {
     );
     expect(probed.intake).toMatchObject({ size: "S", decision: "accept" });
     expect(probed.intakeTrace.reason).toBe("proposal");
+    expect(probed.effort).toMatchObject({ effort: "xhigh", reason: "selected" });
     expect(probed.junk?.action).toBe("rework");
     expect(probed.solid?.action).toBe("proceed");
     expect(probed.briefing.reason).toBe("hint");
     expect(probed.briefing.skills).toEqual(["ru-text"]);
     expect(probed.briefing.granted).toEqual(["telegram-rich-messages"]);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });
 

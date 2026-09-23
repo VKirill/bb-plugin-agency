@@ -90,9 +90,7 @@ two are used and Grok is not named. Usage-limit reserves on a new profile are
 filled from the other connected families of the same class. An existing team:
 Settings → Machines → Employee models → Move to available models.
 
-The launch briefing can pick **low / medium / high** reasoning for an executor or
-assistant on that attempt only. The stored profile stays as the owner set it
-(writers default to medium).
+Before an executor or assistant starts, a separate Jev request evaluates the **complete job plan** (title, brief, acceptance and execution contract), without truncation or loaded instructions. It chooses from the selected model’s supported reasoning levels, including **xhigh / max** where available, and passes the choice explicitly to BB. Skill and memory selection use a separate request. Errors, missing model capabilities and confidence below 60% preserve the profile setting; `launch-effort` logs the reason, effective effort and plan hash/length. The employee profile and selected model do not change.
 
 ## Architecture
 
