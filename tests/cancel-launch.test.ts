@@ -56,6 +56,40 @@ function listPort(ids: readonly string[]): ThreadListRunningPort {
 }
 
 describe("cancelLaunch", () => {
+  it.each([false, true])("stops a watchdog-blocked worker with post-stop CAS (race=%s)", async (race) => {
+    const db = openDb();
+    const live = await seedRunningAttempt(db);
+    const running = live.seeded.store.getJob(live.attempt.jobId)!;
+    const blocked = live.seeded.store.transitionJob(live.seeded.ctx, {
+      requestId: randomUUID(), jobId: running.id, expectedRevision: running.revision, to: "blocked",
+    });
+    if (!blocked.ok) throw new Error(blocked.error.message);
+    const job = blocked.value;
+    const stop = stopPort();
+    if (race && stop.supported) stop.stop = async () => {
+      stop.calls += 1;
+      db.prepare("UPDATE agency_job SET revision = revision + 1 WHERE id = ?").run(job.id);
+      return { ok: true };
+    };
+    const service = createCancelLaunchService({ db, store: live.seeded.store, runs: live.runs, reads: live.reads,
+      stop, get: getPort("idle", live.attempt.threadId!), listRunning: listPort([]) });
+    const input = { requestId: randomUUID(), jobId: job.id, attemptId: live.attempt.attemptId,
+      expectedJobRevision: job.revision, expectedAttemptRevision: live.attempt.revision,
+      launchId: live.attempt.launchId!, threadId: live.attempt.threadId!, reason: "safe handoff after watchdog ceiling" };
+    const result = await service.cancelLaunch(live.seeded.ctx, input);
+    expect(stop.calls).toBe(1);
+    const attempt = live.reads.getAttempt(live.seeded.ctx, live.attempt.attemptId);
+    if (race) {
+      expect(result).toMatchObject({ ok: false, error: { code: "revision_conflict" } });
+      expect(attempt.ok && attempt.value.state).toBe("running");
+    } else {
+      expect(result).toMatchObject({ ok: true, value: { jobState: "blocked", jobRevision: job.revision, attemptState: "canceled" } });
+      expect(attempt.ok && attempt.value.state).toBe("canceled");
+      expect((await service.cancelLaunch(live.seeded.ctx, input))).toMatchObject({ ok: true, value: { replay: true } });
+      expect(stop.calls).toBe(1);
+    }
+  });
+
   it("cancels the attempt, blocks the same job, and replays without a second stop", async () => {
     const db = openDb();
     const live = await seedRunningAttempt(db);

@@ -125,14 +125,22 @@ export function createCancelLaunchService(deps: CancelLaunchDeps) {
       // The transactional transitions below still enforce revisions after that I/O.
       const canCancel = assertAttemptTransition(attempt.value.state, "canceled");
       if (!canCancel.ok) return canCancel;
-      const canBlock = assertJobTransition(jobBeforeStop.state, "blocked");
-      if (!canBlock.ok) return canBlock;
+      if (jobBeforeStop.state !== "blocked") {
+        const canBlock = assertJobTransition(jobBeforeStop.state, "blocked");
+        if (!canBlock.ok) return canBlock;
+      }
       const observed = await observeExactThread(deps, input.threadId);
       if (!observed.ok) return observed;
 
       return commitDomainTransaction(deps.db, () => {
         const again = repos.request.get(input.requestId);
         if (again) return again.result as DomainResult<CancelLaunchRecord>;
+        // A watchdog may already have blocked the job while its worker kept running.
+        // Stopping it must retain that state, with the same CAS protection after I/O.
+        const currentJob = deps.store.getJob(input.jobId);
+        if (!currentJob || currentJob.revision !== input.expectedJobRevision) {
+          return fail("revision_conflict", "job revision changed while stopping the thread");
+        }
         const canceled = deps.runs.transitionAttempt(ctx, {
           requestId: uuidV5(input.requestId, "agency.cancelLaunch.attempt"),
           attemptId: input.attemptId,
@@ -140,7 +148,7 @@ export function createCancelLaunchService(deps: CancelLaunchDeps) {
           to: "canceled",
         });
         if (!canceled.ok) return canceled;
-        const job = deps.store.transitionJob(ctx, {
+        const job = currentJob.state === "blocked" ? ok(currentJob) : deps.store.transitionJob(ctx, {
           requestId: uuidV5(input.requestId, "agency.cancelLaunch.job"),
           jobId: input.jobId,
           expectedRevision: input.expectedJobRevision,
