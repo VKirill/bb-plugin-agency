@@ -240,8 +240,8 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
   if (reworkAt && Date.parse(reworkAt) <= nowMs && (!record.rework_at || Date.parse(reworkAt) > Date.parse(record.rework_at))) {
     const previousActiveSince = record.active_since;
     record.rework_at = reworkAt;
-    record.active_since = status && ACTIVE_STATUSES.has(status) ? reworkAt : null;
-    record.status_since = reworkAt;
+    record.active_since = status && ACTIVE_STATUSES.has(status) ? latest([stored?.active_since, reworkAt]) : null;
+    record.status_since = latest([stored?.status_since, reworkAt]);
     record.progress_at = latest([record.progress_at, reworkAt]);
     record.warned_at = null;
     record.outcome = null;

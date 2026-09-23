@@ -242,6 +242,24 @@ describe("run watch", () => {
     h.db.close();
   });
 
+  it("does not count an observed idle interval when adopting an older confirmed phase on upgrade", () => {
+    const h = harness();
+    superviseRun(h.ports, h.row, active);
+    h.tick(30 * 60_000);
+    superviseRun(h.ports, h.row, { ...active, threadStatus: "idle" });
+    h.tick(90 * 60_000);
+    superviseRun(h.ports, h.row, active);
+    h.db.prepare(`INSERT INTO agency_rework
+      (request_id,job_id,attempt_id,thread_id,returned_hash,comment,send_state,created_at,updated_at)
+      VALUES ('priorReturn',?,'run_attempt0001','thr_worker0001','hash','repair','confirmed',
+      '2026-09-16T10:30:00.000Z','2026-09-16T10:30:00.000Z')`).run(job.id);
+    h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("ok");
+    expect(h.db.prepare("SELECT active_since FROM agency_run_watch").get())
+      .toEqual({ active_since: "2026-09-16T12:00:00.000Z" });
+    h.db.close();
+  });
+
   it("repairs a pre-upgrade stale ceiling only with a newer confirmed return; plain running reset cannot bypass it", () => {
     const h = harness({ getJob: () => ({ ...job, state: "running" }) });
     superviseRun(h.ports, h.row, active);
