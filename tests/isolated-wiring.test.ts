@@ -133,6 +133,8 @@ describe("isolated wiring", () => {
     // BB titles the hidden thread from the first line, so it names the job.
     expect(prompt.split("\n")[0]).toBe("AG-1: T");
     expect(prompt).toContain(".agency/jobs/AG-1/TASK.md");
+    expect(prompt).toContain("bb agency job submit");
+    expect(prompt).not.toContain("leave a closing job comment");
     expect(prompt).not.toContain("## Agency rules (agency)");
     expect(prompt).not.toContain("## Job (job)");
     expect(prompt).not.toContain("(platform)");

@@ -209,8 +209,8 @@ export function reviewFollowUpToken(attemptId: string): string {
 export function composeReviewFollowUp(input: ReviewFollowUpInput, lang: AgencyLanguage = agencyLanguage()): string {
   const handIn =
     lang === "en"
-      ? `Hand in: write ${input.packDir}/report.md, publish it as the job's artifact, leave a closing job comment and end the turn. Do not wait for the owner to accept this station.`
-      : `Сдача: напишите ${input.packDir}/report.md, опубликуйте его версией задачи, оставьте итоговый комментарий и завершите ход. Не ждите, пока владелец примет станцию.`;
+      ? `Hand in: write ${input.packDir}/report.md, publish it as the job's artifact, submit that exact version with bb agency job submit (fresh job expectedRevision, artifactId, version, hash, comment) and end the turn. Do not wait for the owner to accept this station.`
+      : `Сдача: напишите ${input.packDir}/report.md, опубликуйте его версией задачи, сдайте точную версию через bb agency job submit (свежая expectedRevision задачи, artifactId, version, hash, comment) и завершите ход. Не ждите, пока владелец примет станцию.`;
   const versionLine = input.version
     ? lang === "en"
       ? `Input version: v${input.version.version}, hash ${input.version.hash}.`

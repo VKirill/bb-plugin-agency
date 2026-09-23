@@ -20,7 +20,7 @@ export function composeWorkerPrompt(snapshot: Pick<ContextSnapshot, "job" | "age
     `${snapshot.job.key}: ${snapshot.job.title}`,
     `You are an Agency employee${role ? `: ${role}` : ""}.`,
     `Your job pack is in ${dir}/. Read ${dir}/${PACK_ENTRY} and the files it lists before the first edit, then do that job. The pack is the assignment: do not call job get for your own brief.`,
-    `Hand in: write ${dir}/report.md, publish it as the job's artifact, leave a closing job comment and end the turn. Do not wait for the owner to accept this station.`,
+    `Hand in: write ${dir}/report.md, publish it as the job's artifact, submit that exact version with bb agency job submit (fresh job expectedRevision, artifactId, version, hash, comment) and end the turn. Do not wait for the owner to accept this station.`,
   ].join("\n\n");
 }
 

@@ -205,6 +205,7 @@ describe("composeReviewFollowUp", () => {
     expect(text).toContain(packDir);
     expect(text).toContain("agency.review-followup:att_follow01");
     expect(text).toContain(`${packDir}/report.md`);
+    expect(text).toContain("bb agency job submit");
     const en = composeReviewFollowUp(
       {
         job: {
@@ -223,5 +224,6 @@ describe("composeReviewFollowUp", () => {
     expect(en.split("\n").at(-1)).toBe("agency.review-followup:att_follow01");
     expect(en).toContain(hash);
     expect(en).toContain(packDir);
+    expect(en).toContain("bb agency job submit");
   });
 });

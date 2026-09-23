@@ -45,7 +45,7 @@ export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedIn
     return {
       title,
       brief: `Independent review of version v${version.version} of ${job.key} «${job.title}» against its acceptance criteria. The version is attached as input: open it by hash, do not trust working files.\nDo not fix the result: describe defects (criterion → place → how to reproduce → severity). On rework, retain valid evidence for passed unaffected criteria; check the changed code and related regressions. Explain any full scenario rerun. Do not introduce new wishes as blockers; resolve contradictory criteria with the lead.`,
-      acceptance: `The review report is published as a version. First line of both the report and closing job comment: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
+      acceptance: `The review report is published as a version. First line of both the report and the job submit comment: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
     };
   }
   return {
