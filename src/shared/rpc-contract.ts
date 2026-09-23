@@ -1,3 +1,5 @@
+import { recoveryDecisionSchema } from "./contracts/recovery";
+export { recoveryDecisionSchema, type RecoveryDecision } from "./contracts/recovery";
 import { recordLessonFeedbackSchema, leadStateQuerySchema, leadStateSchema, recordLeadDecisionSchema, leadDecisionRecordSchema, submitJobResultSchema } from "./contracts/lead-control";
 import { traceQuerySchema, traceViewSchema } from "./contracts/trace";
 import { TEMPLATE_KEYS } from "./templates";
@@ -1172,12 +1174,6 @@ export type InstalledPluginRecord = z.infer<typeof installedPluginSchema>;
 export type PluginDirectoryView = z.infer<typeof pluginDirectorySchema>;
 export type WebhookSourceView = z.infer<typeof webhookSourceViewSchema>;
 
-export const recoveryDecisionSchema = z.object({
-  cause: z.string().trim().min(10).max(2000),
-  correction: z.string().trim().min(10).max(2000),
-  verification: z.string().trim().min(10).max(2000),
-}).strict();
-export type RecoveryDecision = z.infer<typeof recoveryDecisionSchema>;
 export const recoverJobCommandSchema = z.object({
   requestId: requestIdSchema,
   jobId: opaqueIdSchema,

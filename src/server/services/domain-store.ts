@@ -1,3 +1,5 @@
+import { assertRecoveryAuthority, recoveryText } from "../runtime/recovery/authorization";
+import { recoveryBasis } from "../runtime/recovery/permit";
 import { recordLessonFeedbackSchema, type RecordLessonFeedback, recordLeadDecisionSchema, submitJobResultSchema, type RecordLeadDecision, type SubmitJobResult } from "../../shared/contracts/lead-control";
 import { readLeadDecision } from "../lead-control/state";
 import { reworkRoundCount } from "../runtime/rework/lineage.js";
@@ -415,24 +417,40 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
   }
 
   /** Count explicitly linked rework of the same result, never unrelated siblings. */
-  function assertReworkRoundAllowed(sourceId: string | null | undefined, parentJobId: string | null, departmentId: string, bindingId: string): DomainResult<string | null> {
-    if (!sourceId) return ok(null);
+  function assertReworkRoundAllowed(sourceId: string | null | undefined, parentJobId: string | null, departmentId: string, bindingId: string, ctx: ServiceContext, recovery: CreateJobCommand["reworkRecovery"], assignedAgentId: string | null): DomainResult<string | null> {
+    if (!sourceId) return recovery ? fail("invalid_rework_source", "reworkRecovery requires reworkOfJobId") : ok(null);
     const source = repos.job.get(sourceId);
     if (!source || source.departmentId !== departmentId || source.bindingId !== bindingId) {
       return fail("invalid_rework_source", "reworkOfJobId must name work in the same department and binding");
     }
+    if (recovery) {
+      const authority = assertRecoveryAuthority(db, ctx, source);
+      if (!authority.ok) return authority;
+      const actorId = ctx.caller?.agentId ?? (ctx.actor.kind === "agent" ? ctx.actor.agentId : null);
+      if (actorId && actorId === assignedAgentId) return fail("recovery_lead_only", "A lead cannot authorize their own continuation");
+      if (source.revision !== recovery.expectedSourceRevision) return fail("revision_conflict", "Read the current rework source before authorizing a continuation");
+      if (!["done", "canceled", "blocked"].includes(source.state) || liveAttempt(source.id) ||
+        db.prepare("SELECT 1 FROM agency_run_attempt WHERE job_id = ? AND state = 'awaiting_review'").get(source.id))
+        return fail("active_attempt_exists", "Follow the existing source worker or review instead of creating a replacement");
+      const line = source.reworkOfJobId ?? source.id;
+      if (db.prepare(`SELECT 1 FROM agency_run_attempt a JOIN agency_job j ON j.id = a.job_id
+        WHERE (j.id = ? OR j.rework_of_job_id = ?) AND a.state IN ('prepared','launching','running','waiting_input','unknown','awaiting_review')`).get(line, line))
+        return fail("active_attempt_exists", "This result lineage still has a live worker or review; reconcile it first");
+      if (db.prepare("SELECT 1 FROM agency_job WHERE (id = ? OR rework_of_job_id = ?) AND id <> ? AND state NOT IN ('done','canceled')").get(line, line, source.id))
+        return fail("active_rework_exists", "This result already has an open continuation; recover that job");
+    }
     if (source.parentJobId !== parentJobId) {
-      // Replanning may move canceled work under a new delivery plan. Keep its
-      // original lineage and budget, but never fork a worker that may still run.
+      // A verified recovery may also continue an accepted result under a new plan.
+      // Preserve its original state and budget; never fork a live worker.
       const reviewing = db.prepare("SELECT 1 FROM agency_run_attempt WHERE job_id = ? AND state = 'awaiting_review' LIMIT 1").get(source.id);
-      if (source.state !== "canceled" || liveAttempt(source.id) || reviewing) {
-        return fail("invalid_rework_source", "moving rework under another parent requires a canceled source with no live attempts");
+      if ((source.state !== "canceled" && !(recovery && source.state === "done")) || liveAttempt(source.id) || reviewing) {
+        return fail("invalid_rework_source", "moving rework under another parent requires a stopped canceled source or explicit recovery of a delivered source");
       }
     }
     const lineId = source.reworkOfJobId ?? source.id;
     const count = reworkRoundCount(db, lineId);
     const limit = Math.min(2, rulesForDepartment(db, departmentId).reworkLimit);
-    if (count >= limit) return fail("rework_limit_reached", `${count} rework round(s) already on this result, department limit ${limit}. Resolve the cause before another round.`);
+    if (count >= limit && !recovery) return fail("rework_limit_reached", `${count} rework round(s) already on this result, department limit ${limit}. Resolve the cause before another round.`);
     return ok(lineId);
   }
 
@@ -1408,6 +1426,8 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
             : ok(null);
         if (!picked.ok) return picked;
         const assignedAgentId = picked.value;
+        const round = assertReworkRoundAllowed(parsed.data.reworkOfJobId, parsed.data.parentJobId, parsed.data.departmentId, parsed.data.bindingId, ctx, parsed.data.reworkRecovery, assignedAgentId);
+        if (!round.ok) return round;
         if (parsed.data.parentJobId) {
           const parent = requireJob(parsed.data.parentJobId);
           if (!parent.ok) return parent;
@@ -1422,7 +1442,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
           const root = rootJobId(parent.value.id);
           const source = parsed.data.reworkOfJobId ? repos.job.get(parsed.data.reworkOfJobId) : null;
           const mark = source ? latestLoopMark(db, root, source.reworkOfJobId ?? source.id) : null;
-          if (loopEffect(mark) === "block") {
+          if (loopEffect(mark) === "block" && !parsed.data.reworkRecovery) {
             announceLoopBlock(db, root);
             return fail(
               "loop_blocked",
@@ -1444,8 +1464,6 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         if (!helperWork.ok) return helperWork;
         const helperCaller = assertCallerMayDelegate(ctx);
         if (!helperCaller.ok) return helperCaller;
-        const round = assertReworkRoundAllowed(parsed.data.reworkOfJobId, parsed.data.parentJobId, parsed.data.departmentId, parsed.data.bindingId);
-        if (!round.ok) return round;
         if (parsed.data.originThreadId && !isOriginThreadId(parsed.data.originThreadId)) {
           return fail("invalid_command", "originThreadId must be a BB thread id");
         }
@@ -1493,6 +1511,13 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
         }
         repos.facts.insert(job.id);
         appendActivity(ctx, job.id, "job_created", [{ type: "job", id: job.id }]);
+        if (parsed.data.reworkRecovery) {
+          const basis = recoveryBasis(db, job.id);
+          db.prepare("INSERT INTO agency_recovery (request_id,job_id,payload,actor,round_count,mark_id,launch_failures,created_at) VALUES (?,?,?,?,?,?,?,?)")
+            .run(parsed.data.requestId, job.id, JSON.stringify(parsed.data), JSON.stringify(ctx.caller ?? ctx.actor), basis.rounds, basis.markId, basis.launchFailures, nowUtc(ctx));
+          appendActivity(ctx, job.id, "comment", [{ type: "job", id: parsed.data.reworkOfJobId! }], null,
+            `${recoveryText(parsed.data.reworkRecovery)}\nSource revision: ${parsed.data.reworkRecovery.expectedSourceRevision}; lineage rounds retained: ${basis.rounds}`);
+        }
         const spec = inspectSpecGate(db, job, rulesForDepartment(db, job.departmentId));
         if (
           spec.result.required &&

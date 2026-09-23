@@ -1,3 +1,4 @@
+import { recoveryDecisionSchema } from "./recovery";
 import { z } from "zod";
 import { displayNameSchema, jobKeySchema, opaqueIdSchema, utcInstantSchema } from "./ids";
 import { jobTeamAgentIdsSchema } from "./job-team";
@@ -154,6 +155,8 @@ export const createJobCommandSchema = createCommandSchema
     workKind: workKindSchema.nullable().optional(),
     /** Explicit rework lineage; unrelated next-stage tasks do not consume rework rounds. */
     reworkOfJobId: opaqueIdSchema.nullable().optional(),
+    /** One explicitly authorized continuation, preserving the source result and its budget. */
+    reworkRecovery: recoveryDecisionSchema.extend({ expectedSourceRevision: z.number().int().positive() }).strict().optional(),
     assignedAgentId: opaqueIdSchema.nullable().default(null),
     reviewerAgentIds: jobTeamAgentIdsSchema.optional(),
     observerAgentIds: jobTeamAgentIdsSchema.optional(),
