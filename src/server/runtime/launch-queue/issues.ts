@@ -2,14 +2,18 @@ import type { Activity, Job } from "../../../shared/contracts";
 import type { DomainResult } from "../../../domain";
 import type { SqlDatabase } from "../../db/sql";
 import { recordTrace } from "../trace/store";
+import { recoveryHistory } from "../recovery/history";
 
 export const LAUNCH_ISSUE_MIGRATION = `CREATE TABLE agency_launch_issue (
   job_id TEXT PRIMARY KEY REFERENCES agency_job(id) ON DELETE CASCADE, revision INTEGER NOT NULL,
   code TEXT NOT NULL, activity_id TEXT NOT NULL, activity_json TEXT NOT NULL, created_at TEXT NOT NULL
 );`;
-export const LEAD_ACTION_CODES = new Set(["spec_required", "owns_overlap", "catalog_skill_hash_mismatch", "loop_blocked", "rework_limit_reached"]);
+export const LEAD_ACTION_CODES = new Set(["spec_required", "owns_overlap", "catalog_skill_hash_mismatch", "loop_blocked", "rework_limit_reached", "review_creation_failed", "review_handoff_rejected"]);
 
 export function launchIssueText(jobKey: string, code: string, en: boolean): string {
+  if (code === "review_creation_failed" || code === "review_handoff_rejected") return en
+    ? `${jobKey}: review needs the department lead (${code}). Run job diagnose, compare previous verdicts and attempt messages. Repair the handoff; do not restart accepted work or create duplicate QC. If an independent review already accepted the exact version, use artifact accept with reviewResolution. Otherwise arrange one independent review after fixing its inputs. Preserve accepted criteria; new wishes need a separate task, conflicting criteria need one lead decision. Record cause, completed verification and a reusable lesson.`
+    : `${jobKey}: проверка требует руководителя отдела (${code}). Выполните job diagnose, сравните прошлые вердикты и сообщения попыток. Исправьте передачу результата; не перезапускайте принятую работу и не создавайте дубли ОТК. Если независимая проверка уже приняла точную версию, используйте artifact accept с reviewResolution. Иначе назначьте одну проверку после исправления входов. Сохраняйте принятые критерии; новые пожелания — отдельная задача, противоречия критериев — одно решение руководителя. Запишите причину, выполненную проверку и подтверждённый урок.`;
   const action = code === "rework_limit_reached" || code === "loop_blocked"
     ? en ? "Automatic repetition is stopped. Read the attempts, reviewer remarks and recent history. Diagnose the root cause; repair the brief, instructions, inputs, access configuration or implementation within authorized scope. Conveyor/plugin defects may be fixed as a separate repair job with regression checks and independent review. Then call job recover on THIS job with recoveryDecision {cause, correction, verification}, citing concrete verified evidence. This authorizes one continuation, not a budget reset. Save the verified lesson in department knowledge."
       : "Автоматические повторы остановлены. Прочитайте попытки, замечания проверяющего и историю. Найдите причину; исправьте задание, инструкции, входы, настройки доступа или реализацию в пределах полномочий. Дефект конвейера/плагина можно исправить отдельной задачей с регрессионной проверкой и независимым ревью. Затем вызовите job recover для ЭТОЙ задачи с recoveryDecision {cause, correction, verification} и конкретными проверенными доказательствами. Это разрешение на одно продолжение, а не сброс лимита. Сохраните подтверждённый урок в знаниях отдела."
@@ -54,7 +58,8 @@ export function ensureLaunchIssue(db: SqlDatabase, job: Job, code: string, now: 
   const previous = readLaunchIssue(db, job.id);
   if (previous?.code === code && previous.revision === job.revision) return JSON.parse(previous.activity_json) as Activity;
   return db.transaction(() => {
-    const result = create(launchIssueText(job.key, code, en) + inputPointers(db, job, en));
+    const history = ["loop_blocked", "rework_limit_reached", "review_creation_failed", "review_handoff_rejected"].includes(code) ? `\n\n${recoveryHistory(db, job.id)}` : "";
+    const result = create((launchIssueText(job.key, code, en) + inputPointers(db, job, en) + history).slice(0, 7900));
     if (!result.ok) { recordTrace(db, { jobId: job.id, step: "lead.issue", outcome: "failed", reason: result.error.code }); return null; }
     db.prepare(`INSERT OR REPLACE INTO agency_launch_issue (job_id, revision, code, activity_id, activity_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(job.id, job.revision, code, result.value.id, JSON.stringify(result.value), now);

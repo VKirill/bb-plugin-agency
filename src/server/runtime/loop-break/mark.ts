@@ -42,8 +42,8 @@ export function loopWakeNote(mark: LoopMark | null, lang: "en" | "ru"): string |
   const bits = [mark.relation, mark.cause].filter(Boolean).join("/");
   if (loopEffect(mark) === "block") {
     return lang === "en"
-      ? `Loop mark ${bits}: do not open another station and do not retry the same thread. Ask the owner with report-needs-input.`
-      : `Стоп круга ${bits}: новую станцию не открывать и в тот же тред не повторять. Спросите владельца через report-needs-input.`;
+      ? `Loop mark ${bits}: the department lead must diagnose the history with job diagnose, fix the cause, then authorize one verified recovery. Ask the owner only for missing authority or changed requirements.`
+      : `Стоп круга ${bits}: руководитель отдела разбирает историю через job diagnose, исправляет причину и разрешает одно проверенное восстановление. Владелец нужен только для недостающих полномочий или изменения требований.`;
   }
   return lang === "en"
     ? `Loop mark ${bits}: a new round is allowed.`

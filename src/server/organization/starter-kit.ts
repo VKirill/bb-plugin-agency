@@ -220,6 +220,8 @@ export type StarterKitPorts = {
   saveDepartmentProfile: (input: { requestId: string; expectedRevision: number; departmentId: string; name: string; leadAgentId: string; process: { instructions: string; acceptance: string; reviewPolicy: { required: boolean } } }) => DomainResult<unknown>;
   /** Branch departments: linked to their parent when both of them are installed. */
   setDepartmentParent?: (input: { departmentId: string; parentDepartmentId: string }) => DomainResult<unknown>;
+  /** Applies only to newly installed development kits; existing departments keep their settings. */
+  configureDevelopmentRules?: (departmentId: string) => DomainResult<unknown>;
 };
 
 /** The department installed from a starter key, if it is still there. */
@@ -330,6 +332,10 @@ export function installStarterKit(ports: StarterKitPorts, input: { keys: string[
         role: agent.roleType,
         ...(helps ? { helpsAgentId: helps } : {}),
       });
+    }
+    if (["development", "dev-conveyor"].includes(key) && ports.configureDevelopmentRules) {
+      const configured = ports.configureDevelopmentRules(department.value.department.id);
+      if (!configured.ok) return configured;
     }
     outcome.installed.push({
       key,

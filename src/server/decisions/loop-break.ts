@@ -50,7 +50,7 @@ export function loopBreakState(input: { key: string; title: string; acceptance: 
   return [
     `Линия ${input.key}: ${input.title}`,
     `Критерии продукта: ${clip(input.acceptance, 800)}`,
-    `Уже было: ${clip(input.prior, 800) || "нет"}`,
+    `Уже было (сравни фактические замечания; изменение требования не выдавай за новый дефект кода): ${clip(input.prior, 9000) || "нет"}`,
     `Новый вердикт: ${clip(input.defects, 1_200)}`,
   ].join("\n");
 }

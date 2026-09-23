@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveAlias } from "../src/server/cli/aliases";
 import { CLI_EXAMPLES } from "../src/server/cli/examples";
 import { CLI_OPERATIONS } from "../src/server/cli/operations";
@@ -48,6 +48,18 @@ function setup() {
 }
 
 describe("starter kit", () => {
+  it("configures bounded minor-defect acceptance only on a new development department", () => {
+    const t = setup();
+    const configureDevelopmentRules = vi.fn(() => ({ ok: true as const, value: null }));
+    const ports = { ...t.ports, configureDevelopmentRules };
+    const installed = installStarterKit(ports, { keys: ["development", "writing"], language: "en" }, true);
+    expect(installed.ok).toBe(true);
+    expect(configureDevelopmentRules).toHaveBeenCalledTimes(1);
+    installStarterKit(ports, { keys: ["development"], language: "en" }, true);
+    expect(configureDevelopmentRules).toHaveBeenCalledTimes(1);
+    t.db.close();
+  });
+
   it("has a lead and routable charters in both languages in every department", () => {
     // The owner's office comes first: it is the address for work no other department takes.
     expect(STARTER_KIT.map((item) => item.key)).toEqual([

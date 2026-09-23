@@ -396,6 +396,7 @@ export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
   getDecisionSettings: {},
   testDecisionModel: {},
   listTrace: { jobId: "AG-177", descendants: true, limit: 50 },
+  getJobDiagnostics: { jobId: "AG-177", limit: 50 },
   listDecisionLog: { limit: 40 },
   probeDecisionPoints: {},
   saveDecisionSettings: { expectedRevision: 0, enabled: true, endpointKind: "openrouter", model: "typesafe/jev-1.13", keySource: "env-catalog", keyName: "OPENROUTER_API_KEY", points: ["memory-gate"] },

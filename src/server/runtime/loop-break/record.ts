@@ -1,4 +1,6 @@
 import { latestReviewText } from "../conveyor/verdict.js";
+import { recoveryHistory } from "../recovery/history.js";
+import { loopEffect } from "./mark.js";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
 import { askLoopBreak, LOOP_BREAK_POINT, loopBreakState } from "../../decisions/loop-break.js";
@@ -19,7 +21,7 @@ import {
  * again. No attempt id, a disabled point, or a failed call writes nothing:
  * the line keeps its rework limit and does not gain a block.
  */
-export async function noteReworkLoop(db: SqlDatabase, job: Job, now = new Date().toISOString()): Promise<void> {
+export async function noteReworkLoop(db: SqlDatabase, job: Job, now = new Date().toISOString(), notifyLead?: (workJobId: string) => void): Promise<void> {
   const settings = getDecisionSettings(db);
   const comment = latestReviewText(db, job.id);
   if (!comment) return;
@@ -46,7 +48,7 @@ export async function noteReworkLoop(db: SqlDatabase, job: Job, now = new Date()
       key: rootJob.key,
       title: rootJob.title,
       acceptance: rootJob.acceptance,
-      prior: prior ? `${prior.relation ?? "unknown"}/${prior.cause ?? "unknown"}` : "",
+      prior: [prior ? `${prior.relation ?? "unknown"}/${prior.cause ?? "unknown"}` : "", source ? recoveryHistory(db, source.id, job.id) : ""].join("\n"),
       defects: comment,
     }),
   );
@@ -75,4 +77,5 @@ export async function noteReworkLoop(db: SqlDatabase, job: Job, now = new Date()
     cause: asked.cause,
     createdAt: now,
   });
+  if (source && loopEffect(asked) === "block") notifyLead?.(source.id);
 }

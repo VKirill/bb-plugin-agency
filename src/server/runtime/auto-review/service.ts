@@ -44,13 +44,13 @@ export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedIn
   if (lang === "en") {
     return {
       title,
-      brief: `Independent review of version v${version.version} of ${job.key} «${job.title}» against its acceptance criteria. The version is attached as input: open it by hash, do not trust working files.\nDo not fix the result: describe defects (criterion → place → how to reproduce → severity).`,
+      brief: `Independent review of version v${version.version} of ${job.key} «${job.title}» against its acceptance criteria. The version is attached as input: open it by hash, do not trust working files.\nDo not fix the result: describe defects (criterion → place → how to reproduce → severity). On rework, retain valid evidence for passed unaffected criteria; check the changed code and related regressions. Explain any full scenario rerun. Do not introduce new wishes as blockers; resolve contradictory criteria with the lead.`,
       acceptance: `The review report is published as a version. First line of both the report and closing job comment: Verdict: accept or Verdict: rework. Then every acceptance criterion of ${job.key} marked passed / failed / not checked with the command or place.`,
     };
   }
   return {
     title,
-    brief: `Независимая проверка версии v${version.version} результата ${job.key} «${job.title}» по её критериям приёмки. Версия приложена входом: открывайте её по hash, рабочим файлам на слово не верьте.\nРезультат не правьте: описывайте дефекты (критерий → место → как воспроизвести → серьёзность).`,
+    brief: `Независимая проверка версии v${version.version} результата ${job.key} «${job.title}» по её критериям приёмки. Версия приложена входом: открывайте её по hash, рабочим файлам на слово не верьте.\nРезультат не правьте: описывайте дефекты (критерий → место → как воспроизвести → серьёзность). При доработке сохраняйте действительные доказательства по принятым незатронутым критериям; проверьте изменения и связанные регрессии. Обоснуйте полный повтор сценария. Новые пожелания не становятся блокерами; противоречие критериев сначала разрешает руководитель.`,
     acceptance: `Заключение опубликовано версией. Первая строка отчёта и итогового комментария задачи: Вердикт: принять или Вердикт: доработать. Затем каждый критерий приёмки ${job.key} — пройден / не пройден / не проверен с командой или местом.`,
   };
 }

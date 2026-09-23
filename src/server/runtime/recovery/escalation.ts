@@ -22,9 +22,9 @@ export function ensureRecoveryTriage(db: SqlDatabase, store: DomainStore, ctx: S
     bindingId: job.bindingId, departmentId: job.departmentId, parentJobId: null,
     assignedAgentId: department.lead_agent_id, priority: "high", dueAt: null,
     title: en ? `Resolve the blocker in ${job.key}` : `Устранить блокировку ${job.key}`,
-    brief: `${activity.comment}\n\nOriginal job: ${job.key} (${job.id}). Read getJob and listJobAttempts; preserve this job and its evidence. You are receiving this incident because no active parent thread could receive it. Do not create a replacement of the original result. Diagnose and repair the cause, then use job recover with the current expectedRevision.`,
-    acceptance: en ? "Cause and repair recorded with verified evidence; original job resumed through job recover; reusable lesson saved after verification. Review code repairs independently."
-      : "Причина и исправление записаны с проверенными доказательствами; исходная задача возобновлена через job recover; подтверждённый урок сохранён. Изменения кода проверены независимо.",
+    brief: `${activity.comment}\n\nOriginal job: ${job.key} (${job.id}). Read job diagnose, getJob and listJobAttempts; preserve this job and its accepted evidence. You are receiving this incident because no active parent thread could receive it. Do not create a replacement of the original result. Diagnose and repair the cause. Use job recover only when another implementation pass is necessary, with completed verification and current expectedRevision. An existing positive independent review of the exact version can resolve a stale hold via artifact accept with reviewResolution.`,
+    acceptance: en ? "Cause and repair recorded with verified evidence; original job either accepted through valid independent review or resumed for the remaining defects; reusable lesson saved after verification. Review code repairs independently."
+      : "Причина и исправление записаны с проверенными доказательствами; исходная задача принята по действительному независимому заключению либо возобновлена для оставшихся дефектов; подтверждённый урок сохранён. Изменения кода проверены независимо.",
   });
   if (!created.ok) {
     recordTrace(db, { jobId: job.id, step: "lead.recovery", outcome: "failed", reason: created.error.code });

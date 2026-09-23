@@ -14,8 +14,8 @@ export function announceLoopBlock(db: SqlDatabase, rootId: string, now = new Dat
   const key = job?.key ?? rootId;
   const text =
     agencyLanguage() === "en"
-      ? `${key}: loop stop (${bits}). The server will not open another station and will not retry the same thread. A later new_evidence mark lifts it. Otherwise close the line.`
-      : `${key}: стоп круга (${bits}). Сервер не откроет новую станцию и не повторит тот же тред. Снимает это только более поздняя метка new_evidence. Иначе закройте линию.`;
+      ? `${key}: loop stop (${bits}). The department lead must diagnose and repair the cause before another pass. A verified job recover authorizes one continuation; later new evidence can also lift the mark.`
+      : `${key}: стоп круга (${bits}). Руководитель отдела должен разобрать и устранить причину до повтора. Проверенный job recover разрешает одно продолжение; новая улика также может снять метку.`;
   recordOwnerMessage(
     db,
     { text, level: "warning", jobId: rootId, dedupeKey: `loop-blocked:${rootId}:${bits}` },

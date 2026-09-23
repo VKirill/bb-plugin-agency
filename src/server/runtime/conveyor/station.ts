@@ -440,7 +440,10 @@ export async function advanceAfterHandIn(ports: ConveyorPorts, jobId: string): P
   }
   const outcome: AutoReviewOutcome = await startAutoReview(ports.autoReview, jobId);
   if (outcome === "created" || outcome === "pending") return outcome;
-  if (outcome === "failed") return "pending";
+  if (outcome === "failed") {
+    if (job) ports.notifyLead?.(job, "review_creation_failed");
+    return "pending";
+  }
   if (job && !job.parentJobId && latestReviewerHoldsParent(ports, job.id)) {
     const en = agencyLanguage() === "en";
     ports.comment(

@@ -1,8 +1,11 @@
 import { ensureRecoveryTriage } from "./runtime/recovery/escalation";
 import { assertRelaunchAllowed } from "./runtime/rework/lineage.js";
-import { ensureLaunchIssue, readLaunchIssue } from "./runtime/launch-queue/issues";
+import { ensureLaunchIssue, readLaunchIssue, resolveLaunchIssue } from "./runtime/launch-queue/issues";
 import { traceHandlers } from "./runtime/trace/handlers";
 import { configureTrace, listTrace, recordTrace } from "./runtime/trace/store";
+import { getJobDiagnostics } from "./runtime/recovery/diagnostics";
+import { pendingReviewIncidents } from "./runtime/recovery/review-incidents";
+import type { jobDiagnosticsQuerySchema } from "../shared/contracts/diagnostics";
 import type { TraceQuery } from "../shared/contracts/trace";
 import { backupsDirFor, createBackup, listBackups, restoreBackup } from "./backup/service";
 import { scanSandboxEscapes } from "./runtime/sandbox-escape/service";
@@ -778,6 +781,12 @@ export function registerAgency(bb: BbPluginApi) {
     addMembership: (input) => store.addMembership(ctx, input),
     saveAgentProfile: (input) => store.saveAgentProfile(ctx, input as Parameters<typeof store.saveAgentProfile>[1]),
     saveDepartmentProfile: (input) => store.saveDepartmentProfile(ctx, input),
+    configureDevelopmentRules: (departmentId) => {
+      const scope = `department:${departmentId}`;
+      const current = workRulesView(db, scope);
+      return store.saveWorkRules(ctx, { requestId: randomUUID(), expectedRevision: current.revision,
+        scope, rules: { ...current.stored, minorDefectsWithoutRound: true } });
+    },
   });
   const kitLanguage = (language?: "ru" | "en") => language ?? agencyLanguage();
   /** CLIs BB knows on the machine of an active project; null when the catalog is unavailable. */
@@ -987,6 +996,11 @@ export function registerAgency(bb: BbPluginApi) {
       const access = ownerOnly();
       if (!access.ok) return access;
       return { ok: true as const, value: listTrace(db, input) };
+    },
+    getJobDiagnostics: async (input: import("zod").infer<typeof jobDiagnosticsQuerySchema>) => {
+      const access = readOnly();
+      if (!access.ok) return access;
+      return getJobDiagnostics(db, access.value.ctx, input, args => bb.sdk.threads.events.list(args));
     },
     listDecisionLog: async (input: { limit?: number }) => {
       const access = ownerOnly();
@@ -1782,6 +1796,7 @@ export function registerAgency(bb: BbPluginApi) {
     | "saveDecisionSettings"
     | "testDecisionModel"
     | "listTrace"
+    | "getJobDiagnostics"
     | "listDecisionLog"
     | "probeDecisionPoints"
     | "listBudgets"
@@ -1933,7 +1948,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!activity) return;
     enqueueParentWake(db, job, activity, now);
     const hasParentTarget = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? LIMIT 1").get(activity.id);
-    if (!hasParentTarget && ["rework_limit_reached", "loop_blocked"].includes(code)) {
+    if (!hasParentTarget && ["rework_limit_reached", "loop_blocked", "review_creation_failed", "review_handoff_rejected"].includes(code)) {
       const triage = ensureRecoveryTriage(db, store, access.value.ctx, job, activity, agencyLanguage() === "en");
       if (triage && ["backlog", "queued"].includes(triage.state)) queueJobForLaunch(triage, uuidV5(LAUNCH_QUEUE_NAMESPACE, `recovery-queue:${triage.id}`));
       if (triage) return;
@@ -1945,8 +1960,8 @@ export function registerAgency(bb: BbPluginApi) {
     const issue = readLaunchIssue(db, job.id);
     if (!delivered && issue && Date.parse(now) - Date.parse(issue.created_at) >= 10 * 60_000) {
       void sendOwnerMessage({ jobId: job.id, level: "warning", dedupeKey: `lead-unreachable:${activity.id}`,
-        text: agencyLanguage() === "en" ? `${job.key}: launch repair (${code}) has not reached the lead for 10 minutes. Restore the lead's execution; the job remains queued.`
-          : `${job.key}: поручение исправить запуск (${code}) не доставлено руководителю за 10 минут. Нужно восстановить работу руководителя; задача остаётся в очереди.` }, "launch-queue");
+        text: agencyLanguage() === "en" ? `${job.key}: repair incident (${code}) has not reached the lead for 10 minutes. Restore the lead's execution; current job state: ${job.state}.`
+          : `${job.key}: поручение устранить сбой (${code}) не доставлено руководителю за 10 минут. Нужно восстановить работу руководителя; текущее состояние задачи: ${job.state}.` }, "launch-queue");
     }
   };
   const conveyorPorts = (): ConveyorPorts | null => {
@@ -1999,7 +2014,10 @@ export function registerAgency(bb: BbPluginApi) {
         if (asked?.action !== "rework") return null;
         return { action: "rework" as const, remark: asked.remark };
       },
-      classifyLoop: (job) => noteReworkLoop(db, job),
+      classifyLoop: (job) => noteReworkLoop(db, job, undefined, workJobId => {
+        const work = store.getJob(workJobId);
+        if (work) notifyQueueLead(work, "loop_blocked");
+      }),
       returnForRework: async (job, comment) =>
         returnJobForRework(
           {
@@ -2145,8 +2163,16 @@ export function registerAgency(bb: BbPluginApi) {
     if (queueBusy) return;
     queueBusy = true;
     try {
-      for (const issue of db.prepare("SELECT job_id, code FROM agency_launch_issue WHERE code IN ('rework_limit_reached','loop_blocked')").all() as Array<{ job_id: string; code: string }>) {
+      for (const incident of pendingReviewIncidents(db, new Date().toISOString())) {
+        const job = store.getJob(incident.jobId);
+        if (job) notifyQueueLead(job, incident.code);
+      }
+      for (const issue of db.prepare("SELECT job_id, code FROM agency_launch_issue WHERE code IN ('rework_limit_reached','loop_blocked','review_creation_failed','review_handoff_rejected')").all() as Array<{ job_id: string; code: string }>) {
         const held = store.getJob(issue.job_id);
+        if (held && ["review_creation_failed", "review_handoff_rejected"].includes(issue.code) && ["done", "canceled", "running"].includes(held.state)) {
+          resolveLaunchIssue(db, held.id);
+          continue;
+        }
         if (held && ["blocked", "review", "queued", "backlog"].includes(held.state)) notifyQueueLead(held, issue.code);
       }
       // Reconciliation may leave a failed job outside the launch queue. Escalate there too.
