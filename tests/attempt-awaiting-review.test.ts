@@ -791,6 +791,26 @@ describe("awaiting_review lifecycle", () => {
     }
   });
 
+  it("records another hand-in after the same attempt returned to work", async () => {
+    const opened = openFileDb();
+    try {
+      const live = await seedRunningAttempt(opened.db);
+      const version = publishVersion(live.seeded, new TextEncoder().encode("hand-in"));
+      const apply = () => applyVerifiedCompletionLifecycle({ store: live.seeded.store, runs: live.runs, reads: live.reads,
+        ctx: live.seeded.ctx, jobId: live.seeded.job.id, launchId: live.receipt.launchId,
+        reading: interpretVerifiedCompletion({ threadStatus: "idle", publishedVerified: true, acceptedVerified: false }), publishedHash: version.hash });
+      expect(apply()).toMatchObject({ ok: true, value: { attemptState: "awaiting_review" } });
+      const first = live.reads.getAttempt(live.seeded.ctx, live.attempt.attemptId);
+      if (!first.ok) throw new Error(first.error.message);
+      expect(live.runs.transitionAttempt(live.seeded.ctx, { requestId: requestId(), attemptId: first.value.attemptId,
+        expectedRevision: first.value.revision, to: "running" }).ok).toBe(true);
+      expect(apply()).toMatchObject({ ok: true, value: { attemptState: "awaiting_review", attemptReviewApplied: true } });
+      const second = live.reads.getAttempt(live.seeded.ctx, live.attempt.attemptId);
+      expect(second.ok && second.value.revision).toBe(first.value.revision + 2);
+      expect(apply()).toMatchObject({ ok: true, value: { attemptReviewApplied: false } });
+    } finally { opened.close(); }
+  });
+
   it("finishes an accepted job whose worker became idle after acceptance", async () => {
     const opened = openFileDb();
     try {

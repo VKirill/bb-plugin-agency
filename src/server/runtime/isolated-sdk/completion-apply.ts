@@ -160,7 +160,9 @@ export function applyAwaitingReviewToAttempt(deps: {
     return ok({ attempt, changed: false });
   }
   const next = deps.runs.transitionAttempt(deps.ctx, {
-    requestId: uuidV5(deps.launchId, "agency.attempt.awaiting_review"),
+    // The same attempt can return to work. Each hand-in needs its own CAS key;
+    // a launch-wide key replays an earlier revision or conflicts forever.
+    requestId: uuidV5(deps.launchId, `agency.attempt.awaiting_review:${attempt.revision}:${deps.publishedHash}`),
     attemptId: attempt.attemptId,
     expectedRevision: attempt.revision,
     to: "awaiting_review",
