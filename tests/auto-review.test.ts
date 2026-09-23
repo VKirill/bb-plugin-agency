@@ -55,6 +55,42 @@ function setup(options: { enabled?: boolean; attach?: "ok" | "fail" } = {}) {
 }
 
 describe("executor → reviewer chain", () => {
+  it("keeps a lead-arranged predeploy/final reviewer and asks for exact final resolution without adopting its old verdict", async () => {
+    const t = setup(); const reviewer = t.s.job("Single predeploy and final review", t.s.reviewer);
+    t.db.prepare("UPDATE agency_job SET parent_job_id = ?, state = 'running' WHERE id = ?").run(t.main.id, reviewer.id);
+    t.s.input(reviewer.id, t.work.id);
+    const count = t.db.prepare("SELECT COUNT(*) AS n FROM agency_job").get();
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("manual");
+    expect(t.queued).toEqual([]); expect(t.attached).toEqual([reviewer.id]);
+    expect(t.db.prepare("SELECT COUNT(*) AS n FROM agency_job").get()).toEqual(count);
+    expect(t.db.prepare("SELECT outcome, review_job_id FROM agency_auto_review WHERE job_id = ?").get(t.work.id)).toEqual({ outcome: "manual", review_job_id: null });
+    expect(t.comments[0]).toContain(reviewer.key); expect(t.comments[0]).toContain("reviewResolution");
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("pending"); expect(t.comments).toHaveLength(1);
+    expect(t.s.store.getJob(reviewer.id)?.state).toBe("running");
+    t.db.close();
+  });
+  it.each(["canceled", "done", "unrelated_parent", "other_work"])("does not reserve a reviewer from %s", async (scope) => {
+    const t = setup(); const reviewer = t.s.job("Other review", t.s.reviewer);
+    t.db.prepare("UPDATE agency_job SET parent_job_id = ?, state = ? WHERE id = ?")
+      .run(scope === "unrelated_parent" ? null : t.main.id, ["canceled", "done"].includes(scope) ? scope : "running", reviewer.id);
+    t.s.input(reviewer.id, scope === "other_work" ? t.main.id : t.work.id);
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("created");
+    expect(t.queued).toHaveLength(1); expect(t.queued[0]).not.toBe(reviewer.id);
+    t.db.close();
+  });
+  it("does not choose between two overlapping reviews or create a third", async () => {
+    const t = setup();
+    for (const name of ["Review A", "Review B"]) {
+      const reviewer = t.s.job(name, t.s.reviewer);
+      t.db.prepare("UPDATE agency_job SET parent_job_id = ?, state = 'running' WHERE id = ?").run(t.main.id, reviewer.id);
+      t.s.input(reviewer.id, t.work.id);
+    }
+    expect(await startAutoReview(t.ports, t.work.id)).toBe("manual");
+    expect(t.queued).toEqual([]); expect(t.attached).toEqual([]);
+    expect(t.db.prepare("SELECT COUNT(*) AS n FROM agency_job").get()).toEqual({ n: 4 });
+    t.db.close();
+  });
+
   it("creates one review next to the handed-in work, assigns a reviewer and queues it", async () => {
     const t = setup();
     expect(await startAutoReview(t.ports, t.work.id)).toBe("created");

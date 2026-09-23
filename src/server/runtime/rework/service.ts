@@ -170,7 +170,7 @@ function applyReturn(deps: ReworkDeps, ctx: ServiceContext, row: ReworkRow, expe
       kind: "comment",
       causationId: null,
       references: [],
-      comment: `${job.state === "done" ? "Рекламация: заказчик вернул выданный продукт" : "Возврат на доработку"}:\n\n${row.comment}`,
+      comment: `${job.state === "done" && !job.parentJobId ? "Рекламация: заказчик вернул выданный продукт" : "Возврат на доработку"}:\n\n${row.comment}`,
     });
     if (!commented.ok) return commented;
     // Rework invalidates the previous hand-in even when timestamps share a millisecond.
@@ -219,7 +219,16 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
     return fail("loop_blocked", "loop mark blocks another pass; the responsible lead must repair the cause and use job recover with verified evidence");
   }
   const delivered = job.state === "done";
-  if (delivered) {
+  const rootJob = deps.store.getJob(root);
+  const internalReview = delivered && Boolean(job.parentJobId) && rootJob && !["done", "canceled"].includes(rootJob.state)
+    && Boolean(deps.db.prepare("SELECT 1 FROM agency_membership WHERE department_id = ? AND agent_id = ? AND role = 'reviewer'")
+      .get(job.departmentId, job.assignedAgentId));
+  if (internalReview) {
+    const authority = assertRecoveryAuthority(deps.db, ctx, job);
+    if (!authority.ok) return authority;
+    if (ctx.caller && rootJobId(deps.db, ctx.caller.jobId) !== root)
+      return fail("recovery_lead_only", "Only the lead responsible for this open product may return its internal review");
+  } else if (delivered) {
     if (ctx.caller) return fail("reclamation_owner_only", `${job.key} is delivered; only the customer returns a delivered product`);
     if (job.parentJobId) {
       return fail(
@@ -236,7 +245,7 @@ export async function returnJobForRework(deps: ReworkDeps, ctx: ServiceContext, 
 
   let row = existing;
   // The department limit bounds rounds inside the line; a reclamation is the customer's call.
-  if (!row && deps.reworkLimit && !delivered) {
+  if (!row && deps.reworkLimit && (!delivered || internalReview)) {
     const limit = Math.min(2, deps.reworkLimit(job));
     const done = reworkRoundCount(deps.db, job.reworkOfJobId ?? job.id) + failedLaunchCount(deps.db, job.id);
     if (done >= limit && !input.recoveryDecision) {

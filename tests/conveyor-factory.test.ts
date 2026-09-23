@@ -554,6 +554,33 @@ describe("reclamation: the customer returns the delivered product as a whole", (
     db.close();
   });
 
+  it("lets the responsible lead clarify a completed internal review in the same attempt, without reopening a delivered product", async () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const root = s.job("Open product", s.lead); const review = child(s, root.id, "Independent final report", s.reviewer);
+    handIn(s, db, review.id); const { ports } = conveyor(s, db);
+    expect(closeStation(ports, review.id, "review-finished").ok).toBe(true);
+    s.attempt(review.id, "succeeded");
+    s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: review.id, threadBound: true });
+    const sent: Array<{ threadId: string; text: string }> = [];
+    const deps = { ...reworkDeps(s, db, sent), reworkLimit: () => 3 };
+    const lead: ServiceContext = { ...s.ctx, caller: { threadId: "thr_lead", attemptId: "run_lead", jobId: root.id, agentId: s.lead } };
+    const input = { requestId: randomUUID(), jobId: review.id, expectedRevision: s.store.getJob(review.id)!.revision,
+      comment: "Compare the newly pinned exact report with already verified bytes, publish the final clarification; do not repeat QA." };
+    const otherRoot = s.job("Other product", s.lead);
+    expect(await returnJobForRework(deps, { ...lead, caller: { ...lead.caller!, jobId: otherRoot.id } }, input)).toMatchObject({ ok: false, error: { code: "recovery_lead_only" } });
+    expect(await returnJobForRework(deps, { ...lead, caller: { ...lead.caller!, jobId: review.id, agentId: s.reviewer } }, input)).toMatchObject({ ok: false, error: { code: "recovery_lead_only" } });
+    const result = await returnJobForRework(deps, lead, input);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(s.store.getJob(review.id)?.state).toBe("running");
+    expect(await returnJobForRework(deps, lead, input)).toEqual(result);
+    expect(sent).toHaveLength(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM agency_run_attempt WHERE job_id = ?").get(review.id)).toEqual({ n: 1 });
+    expect(s.store.listActivity(review.id).at(-1)?.comment).not.toContain("заказчик вернул");
+    db.prepare("UPDATE agency_job SET state = 'done' WHERE id IN (?,?)").run(review.id, root.id);
+    expect(await returnJobForRework(deps, lead, { ...input, requestId: randomUUID(), expectedRevision: s.store.getJob(review.id)!.revision })).toMatchObject({ ok: false, error: { code: "reclamation_owner_only" } });
+    expect(sent).toHaveLength(1); db.close();
+  });
+
   function deliveredRoot(s: Seed, db: Db) {
     const root = s.job("Партия кроссовок", s.lead);
     const facts = s.store.setJobExecutionFacts(s.ctx, { requestId: randomUUID(), jobId: root.id, threadBound: true });

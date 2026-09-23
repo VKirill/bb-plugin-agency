@@ -1963,7 +1963,7 @@ export function registerAgency(bb: BbPluginApi) {
     if (!activity) return;
     enqueueParentWake(db, job, activity, now);
     const hasParentTarget = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? LIMIT 1").get(activity.id);
-    if (!hasParentTarget && ["progress_stalled", "rework_limit_reached", "loop_blocked", "review_creation_failed", "review_handoff_rejected"].includes(code)) {
+    if (!hasParentTarget && ["review_already_assigned", "progress_stalled", "rework_limit_reached", "loop_blocked", "review_creation_failed", "review_handoff_rejected"].includes(code)) {
       const triage = ensureRecoveryTriage(db, store, access.value.ctx, job, activity, agencyLanguage() === "en");
       if (triage && ["backlog", "queued"].includes(triage.state)) queueJobForLaunch(triage, uuidV5(LAUNCH_QUEUE_NAMESPACE, `recovery-queue:${triage.id}`));
       if (triage) return;
@@ -2183,9 +2183,9 @@ export function registerAgency(bb: BbPluginApi) {
         const job = store.getJob(incident.jobId);
         if (job) notifyQueueLead(job, incident.code);
       }
-      for (const issue of db.prepare("SELECT job_id, code FROM agency_launch_issue WHERE code IN ('rework_limit_reached','loop_blocked','review_creation_failed','review_handoff_rejected')").all() as Array<{ job_id: string; code: string }>) {
+      for (const issue of db.prepare("SELECT job_id, code FROM agency_launch_issue WHERE code IN ('review_already_assigned','rework_limit_reached','loop_blocked','review_creation_failed','review_handoff_rejected')").all() as Array<{ job_id: string; code: string }>) {
         const held = store.getJob(issue.job_id);
-        if (held && ["review_creation_failed", "review_handoff_rejected"].includes(issue.code) && ["done", "canceled", "running"].includes(held.state)) {
+        if (held && ["review_already_assigned", "review_creation_failed", "review_handoff_rejected"].includes(issue.code) && ["done", "canceled", "running"].includes(held.state)) {
           resolveLaunchIssue(db, held.id);
           continue;
         }

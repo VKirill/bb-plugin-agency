@@ -37,7 +37,7 @@ export type AutoReviewPorts = {
   now: () => string;
 };
 
-export type AutoReviewOutcome = "skipped" | "pending" | "created" | "failed";
+export type AutoReviewOutcome = "skipped" | "pending" | "created" | "failed" | "manual";
 
 export function reviewJobText(job: Pick<Job, "key" | "title">, version: HandedInVersion, lang = agencyLanguage()) {
   const title = `${lang === "en" ? "Review" : "Проверка"} ${job.key}: ${job.title}`.slice(0, 180);
@@ -81,6 +81,38 @@ export async function startAutoReview(ports: AutoReviewPorts, jobId: string): Pr
     );
     return "failed";
   };
+  // A lead may arrange predeploy → final review before the author's hand-in.
+  // Input provenance establishes a possible overlap, not authority to adopt its old verdict.
+  // Keep the existing station; the lead resolves the exact final version after independent acceptance.
+  const assigned = ports.db.prepare(`SELECT DISTINCT r.id, r.key FROM agency_job r
+    JOIN agency_membership m ON m.department_id = r.department_id AND m.agent_id = r.assigned_agent_id
+    JOIN agency_job_input_ref i ON i.target_job_id = r.id AND i.source_job_id = ?
+    WHERE r.parent_job_id = ? AND r.binding_id = ? AND r.department_id = ?
+      AND r.assigned_agent_id != ? AND m.role = 'reviewer'
+      AND (r.state IN ('backlog','queued','running','waiting_input','blocked','review') OR
+        (r.state = 'done' AND i.artifact_id = ? AND i.version = ? AND i.hash = ?
+          AND i.created_at <= (SELECT MAX(timestamp) FROM agency_activity WHERE job_id = r.id AND kind = 'artifact_published')))
+      AND NOT EXISTS (SELECT 1 FROM agency_auto_review a WHERE a.review_job_id = r.id AND a.job_id != ?)
+    ORDER BY r.id`).all(job.id, job.parentJobId ?? job.id, job.bindingId, job.departmentId, job.assignedAgentId,
+      version.artifactId, version.version, version.hash, job.id) as Array<{ id: string; key: string }>;
+  if (assigned.length) {
+    // Do not choose between multiple reviewers or hand work to a blocked/closed thread.
+    // No auto-review association is created: that would allow a partial predeploy verdict to accept the product.
+    if (assigned.length === 1) {
+      const existingReview = ports.getJob(assigned[0]!.id);
+      if (existingReview && !["done", "canceled"].includes(existingReview.state)) {
+        const attached = await ports.attachInput(existingReview, job, version);
+        if (!attached.ok) return failWith(attached.error.message); // Preserve the existing station on failure.
+      }
+    }
+    finish("manual", null);
+    recordTrace(ports.db, { jobId, step: "review.create", outcome: "waiting", reason: "existing_review_requires_resolution",
+      relatedJobId: assigned.length === 1 ? assigned[0]!.id : null, artifactHash: version.hash, facts: { count: assigned.length } });
+    ports.comment(job, en
+      ? `Existing review with inputs from this work: ${assigned.map(r => r.key).join(", ")}. No duplicate created. The lead selects the intended final review, attaches this exact artifact/version/hash BEFORE the final review report, and after its acceptance uses artifact accept with reviewResolution. An earlier predeploy verdict does not accept this version.`
+      : `Уже есть проверка со входами этой работы: ${assigned.map(r => r.key).join(", ")}. Дубль не создан. Руководитель выбирает назначенную финальную проверку, прикладывает точный artifact/version/hash ДО её итогового отчёта, а после положительного заключения использует artifact accept с reviewResolution. Прежний predeploy-допуск не принимает эту версию.`);
+    return "manual";
+  }
   const review = ports.createReview(job, version);
   if (!review.ok) return failWith(review.error.message);
   const attached = await ports.attachInput(review.value, job, version);
