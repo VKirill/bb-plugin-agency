@@ -164,6 +164,30 @@ function idleThreads(threadId: string): IsolatedThreadsApi {
 }
 
 describe("completion watch store review", () => {
+  it("keeps a parent's plan out of review while work is open and requires a fresh final publication", async () => {
+    const opened = openFileDb(); const seeded = await seedRunningJob(opened.db);
+    const child = seeded.store.createJob(seeded.ctx, {
+      requestId: requestId(), bindingId: seeded.job.bindingId, departmentId: seeded.job.departmentId,
+      parentJobId: seeded.job.id, title: "Implement the plan", brief: "Implement the remaining behavior.",
+      acceptance: "Behavior verified.", assignedAgentId: seeded.job.assignedAgentId, priority: "normal", dueAt: null,
+    });
+    if (!child.ok) throw new Error(child.error.message);
+    const plan = publishVersion(seeded, new TextEncoder().encode("Intermediate delivery plan"));
+    const launchId = requestId();
+    const read = (hash: string) => applyVerifiedReviewToStore({ store: seeded.store, ctx: seeded.ctx,
+      jobId: seeded.job.id, launchId, publishedHash: hash,
+      reading: interpretVerifiedCompletion({ threadStatus: "idle", publishedVerified: true, acceptedVerified: false }),
+    });
+    expect(read(plan.hash)).toMatchObject({ ok: true, value: { jobState: "running", reviewApplied: false } });
+    const canceled = seeded.store.transitionJob(seeded.ctx, { requestId: requestId(), jobId: child.value.id,
+      expectedRevision: child.value.revision, to: "canceled" });
+    expect(canceled.ok).toBe(true);
+    expect(read(plan.hash)).toMatchObject({ ok: true, value: { jobState: "running", reviewApplied: false } });
+    const final = publishVersion(seeded, new TextEncoder().encode("Fresh final result with child disposition"));
+    expect(read(final.hash)).toMatchObject({ ok: true, value: { jobState: "review", reviewApplied: true } });
+    opened.close();
+  });
+
   it("event/poll transitions running Job to review with published hash and is idempotent after reload", async () => {
     const opened = openFileDb();
     const seeded = await seedRunningJob(opened.db);

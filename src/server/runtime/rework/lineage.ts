@@ -4,6 +4,7 @@ import { fail, ok, type DomainResult } from "../../../domain";
 import { rulesForDepartment } from "../../rules/work-rules";
 import { latestLoopMark, rootJobId } from "../loop-break/store";
 import { loopEffect } from "../loop-break/mark";
+import { ACTIVE_RUN_ATTEMPT_STATES } from "../run-store/types";
 
 /** Both an in-thread return and a linked replacement consume the same result's budget. */
 export function reworkRoundCount(db: SqlDatabase, lineId: string): number {
@@ -25,6 +26,14 @@ export function assertRelaunchAllowed(db: SqlDatabase, jobId: string): DomainRes
   const job = db.prepare(`SELECT * FROM agency_job WHERE id = ?`).get(jobId) as
     { id: string; parent_job_id: string | null; rework_of_job_id: string | null; department_id: string } | undefined;
   if (!job) return fail("not_found", `job ${jobId} not found`);
+  // Another caller may have launched this job while readiness was being checked.
+  // Report the existing worker, not exhaustion of a budget it just consumed.
+  // An unbound prepared snapshot can still be reused by reservePreparedRun.
+  const active = db.prepare(`SELECT id FROM agency_run_attempt WHERE job_id = ?
+    AND state IN (${ACTIVE_RUN_ATTEMPT_STATES.map(() => "?").join(",")})
+    AND NOT (state = 'prepared' AND thread_id IS NULL AND launch_id IS NULL) LIMIT 1`)
+    .get(jobId, ...ACTIVE_RUN_ATTEMPT_STATES) as { id: string } | undefined;
+  if (active) return fail("active_attempt_exists", `job ${jobId} already has active attempt ${active.id}; follow that attempt instead of launching or recovering another`);
   const lineId = job.rework_of_job_id ?? job.id;
   if (hasRecoveryPermit(db, jobId)) return ok(true);
   const root = rootJobId(db, job.parent_job_id ?? job.id);

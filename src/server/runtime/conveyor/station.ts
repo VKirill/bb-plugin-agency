@@ -1,4 +1,5 @@
 import { recordTrace } from "../trace/store";
+import { freshParentSummary } from "../hand-in/service";
 import { fail, ok, type DomainResult } from "../../../domain";
 import type { ArtifactVersion, Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -130,15 +131,6 @@ function closedNow(result: DomainResult<Job | null>): result is { ok: true; valu
 
 function systemCtx(ctx: ServiceContext, bindingId: string): ServiceContext {
   return { actor: { kind: "system" }, allowedBindingIds: [bindingId], caller: undefined };
-}
-
-/** A parent's final version must be published after its working children finish. */
-function freshParentSummary(db: SqlDatabase, jobId: string): boolean {
-  const publication = db.prepare(`SELECT MAX(rowid) AS seq FROM agency_activity WHERE job_id = ? AND kind = 'artifact_published'`).get(jobId) as { seq: number | null };
-  const lastWork = db.prepare(`SELECT MAX(a.rowid) AS seq FROM agency_activity a JOIN agency_job j ON j.id = a.job_id
-    WHERE j.parent_job_id = ? AND a.kind IN ('job_created', 'artifact_published', 'job_transitioned')
-      AND NOT EXISTS (SELECT 1 FROM agency_auto_review q WHERE q.review_job_id = j.id)`).get(jobId) as { seq: number | null };
-  return lastWork.seq === null || (publication.seq !== null && publication.seq > lastWork.seq);
 }
 
 function stationReadyForAcceptance(ports: ClosePorts, job: Job, resolvedReviewId?: string): boolean {

@@ -49,6 +49,9 @@ export function applyVerifiedReviewToStore(deps: {
   if (job.state !== "running") {
     return ok(base);
   }
+  // Waiting for a delegated worker after publishing a plan is progress, not a
+  // failed final submission. Do not spend a review/rework round on it.
+  if (!deps.store.parentHandInReady(deps.jobId)) return ok(base);
   // The version returned for rework is not a hand-in; only a new hash is.
   if (deps.store.reworkBlocksReview(deps.jobId, publishedHash)) {
     return ok(base);

@@ -4,7 +4,7 @@ import { getPassport } from "../projects/passport.js";
 import { passportDeliveryFor, passportText } from "../../shared/passport.js";
 import { agencyLanguage } from "../i18n/language.js";
 import { currentAgencyRules } from "../templates/store";
-import { handInCommentMissing } from "../runtime/hand-in/service";
+import { handInCommentMissing, parentHandInReady } from "../runtime/hand-in/service";
 import { clearExhaustedModels } from "../runtime/agent-fallback";
 import { reworkBlocksReview, resolveRework } from "../runtime/rework/service";
 import { announceLoopBlock } from "../runtime/loop-break/announce";
@@ -2005,6 +2005,7 @@ export function createDomainStore(db: SqlDatabase, options: DomainStoreOptions =
     assertNotSelfReview,
     reworkBlocksReview: (jobId: string, publishedHash: string | null) => reworkBlocksReview(db, jobId, publishedHash),
     handInCommentMissing: (jobId: string) => handInCommentMissing(db, jobId),
+    parentHandInReady: (jobId: string) => parentHandInReady(db, jobId),
     currentAgencyRules: () => currentAgencyRules(db),
     workProfilesForLaunch: (bindingId: string, profileKey: string | null) => {
       const binding = repos.binding.get(bindingId);

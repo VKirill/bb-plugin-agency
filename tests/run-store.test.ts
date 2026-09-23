@@ -180,6 +180,24 @@ function attestation(seeded: ReturnType<typeof seedProject>) {
 }
 
 describe("run store persist", () => {
+  it.each(["launching", "running", "waiting_input", "awaiting_review", "unknown"])("reports the existing %s worker before an exhausted rework budget", (state) => {
+    const opened = openFileDb(); const seeded = seedProject(opened.db); const runs = createRunStore(opened.db);
+    const snapshot = compileFor(seeded);
+    const limit = Math.min(2, rulesForDepartment(opened.db, seeded.job.departmentId).reworkLimit);
+    let lastId = "";
+    for (let index = 0; index <= limit; index++) {
+      const reserved = runs.reservePreparedRun(seeded.ctx, { requestId: requestId(), snapshot, attestation: attestation(seeded) });
+      if (!reserved.ok) throw new Error(reserved.error.message);
+      lastId = reserved.value.attempt.attemptId;
+      opened.db.prepare("UPDATE agency_run_attempt SET state = 'canceled', thread_id = ? WHERE id = ?").run(`thr_pass_${index}`, lastId);
+    }
+    opened.db.prepare("UPDATE agency_run_attempt SET state = ? WHERE id = ?").run(state, lastId);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id)).toMatchObject({ ok: false, error: { code: "active_attempt_exists" } });
+    opened.db.prepare("UPDATE agency_run_attempt SET state = 'canceled' WHERE id = ?").run(lastId);
+    expect(assertRelaunchAllowed(opened.db, seeded.job.id)).toMatchObject({ ok: false, error: { code: "rework_limit_reached" } });
+    opened.close();
+  });
+
   it("counts canceled worker restarts and refuses another atomic reservation at the department limit", () => {
     const opened = openFileDb();
     const seeded = seedProject(opened.db);
