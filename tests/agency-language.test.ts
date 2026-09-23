@@ -19,7 +19,7 @@ describe("agency language", () => {
 
   it("switches every system message to agents to English", () => {
     setAgencyLanguage("en");
-    expect(completionReminderText("AG-3", "run_1", 1)).toContain("is not handed in");
+    expect(completionReminderText("AG-3", "run_1", 1)).toContain("is idle without final submission");
     expect(runWatchText("stalled", "AG-3")).toContain("is stalled");
     expect(reworkText("AG-3", "Fix totals.", "ab".repeat(32), "7a3f0c52-8d1e-4d8e-9a55-0f4a3a6b1c11")).toContain("returned AG-3 for rework");
     expect(formatParentWakeText({ key: "AG-4", state: "done" }, "act_1")).toContain("Subtask closed");

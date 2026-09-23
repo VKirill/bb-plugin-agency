@@ -749,6 +749,8 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   RECOVERY_TRIAGE_MIGRATION,
   LEAD_CONTROL_MIGRATION,
   LESSON_FEEDBACK_MIGRATION,
+  // Old counters measured total unfinished turns; they are not unanswered wake-ups.
+  `UPDATE agency_completion_reminder SET count = 0, idle_since = NULL, awaiting_turn = 0, last_sent_at = NULL WHERE blocked_at IS NULL`,
 ];
 
 function statementHash(sql: string): string {

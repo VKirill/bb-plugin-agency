@@ -348,7 +348,7 @@ export function buildWorkerInstructions(worker: WorkerContext): string {
     "- Do not create new Agency jobs and do not hand this work on: splitting work is the lead's job.",
     "- A question for the owner or conflicting instructions: `bb agency job report-needs-input`, then end your turn. The questions go to the chat that commissioned the job, not the Agency card.",
     "- Handing in means a published version and explicit bb agency job submit with jobId, expectedRevision, artifactId, version, hash and comment. Ordinary comments and plans never submit the result.",
-    `- Ending a turn without a published version or explicit submission brings a reminder; after ${worker.rules?.completionReminders ?? 2} reminders the job goes to the lead as blocked.`,
+    `- Idle wake-ups ask you to continue unfinished work, not hand in a partial result. Only ${worker.rules?.completionReminders ?? 2} consecutive unanswered wake-ups escalate to the lead; active work or recorded dependencies clear that episode. Submit only after the full acceptance is met.`,
     `- The Agency watches the attempt: ${worker.rules?.watchStallMinutes ?? 30} min without new events or ${worker.rules?.watchCeilingHours ?? 2} h of continuous work sends the job to the lead as blocked. Split long work into stages and note them in comments.`,
     "- If the job has an execution contract, start with readFirst, keep interfaces as they are, change only what mayChange lists, leave mustNotTouch alone, run every check and list them with their output in the final comment. Going outside it is a question to the lead, not a decision.",
     "- Work you could not finish is reported as such: say which acceptance criteria are not met and what is missing. A promise to do it later is not a result.",

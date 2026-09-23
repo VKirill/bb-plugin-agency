@@ -116,7 +116,7 @@ import { bindJobCommentHandler, readCliThreadId } from "./comments/register-glue
 import { CLI_COMMAND_SPECS, runAgencyCli, type CliOperation } from "./cli";
 import { resolveRpcAccess } from "./api/auth";
 import { createHash, randomUUID } from "node:crypto";
-import { remindIncompleteWorker, type ReminderPorts } from "./runtime/completion-reminder/service";
+import { completionWaitingDependencies, remindIncompleteWorker, type ReminderPorts } from "./runtime/completion-reminder/service";
 import type { Job } from "../shared/contracts";
 import type { ServiceContext } from "./services/context";
 import { agencyLanguage, setAgencyLanguage } from "./i18n/language";
@@ -2089,6 +2089,7 @@ export function registerAgency(bb: BbPluginApi) {
   };
   const reminderPorts = (): ReminderPorts => ({
     db,
+    waitingDependencies: (job) => completionWaitingDependencies(db, job),
     getJob: (jobId) => store.getJob(jobId),
     openChildren: (jobId) =>
       (db
@@ -2708,14 +2709,17 @@ export function registerAgency(bb: BbPluginApi) {
         }
       }
       try {
-        // A published version without the closing comment still needs a reminder, about the comment.
+        // A publication may be intermediate: a wake-up must never force final submission.
         const commentMissing = reading.publishedVerified && store.handInCommentMissing(row.jobId);
         const outcome = await remindIncompleteWorker(reminderPorts(), row, {
           ...reading,
           publishedVerified: reading.publishedVerified && !commentMissing,
           missing: commentMissing ? "comment" : "version",
         });
-        if (outcome !== "skipped" && outcome !== "waiting") onChanged();
+        if (outcome !== "skipped" && outcome !== "waiting") {
+          bb.log.info(`Completion wake: ${JSON.stringify({ jobId: row.jobId, launchId: row.launchId, threadId: row.threadId, outcome })}`);
+          onChanged();
+        }
       } catch (error) {
         bb.log.warn(`Completion reminder for ${row.jobId}: ${String(error)}`);
       }

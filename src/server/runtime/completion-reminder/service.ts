@@ -3,11 +3,9 @@ import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
 import type { IsolatedSendOutcome } from "../isolated-sdk/send-port.js";
 
-/**
- * A worker thread that ends its turn while its job is still running and has no
- * published result gets a reminder with the hand-in steps. After the limit the
- * job goes to blocked, which wakes the lead (parent wake) or shows it to the
- * owner. A lead waiting for its own open subtasks is not reminded.
+/** Resume an idle worker; never turn the wake-up budget into a delivery deadline.
+ * Only consecutive unanswered wake-ups count. A working thread or an unfinished
+ * dependency clears the episode. Loop diagnosis belongs to the lead/progress watch.
  */
 
 export const COMPLETION_REMINDER_LIMIT = 2;
@@ -32,7 +30,7 @@ export type ReminderRow = { threadId: string; jobId: string; launchId: string };
 export type ReminderReading = {
   threadStatus: string | null;
   publishedVerified: boolean;
-  /** What the hand-in lacks: the version itself or the closing comment after it. */
+  /** What final hand-in lacks: a version or explicit submission after it. */
   missing?: "version" | "comment";
 };
 
@@ -41,6 +39,7 @@ export type ReminderPorts = {
   getJob: (jobId: string) => Job | undefined;
   /** Children that are not done or canceled. */
   openChildren: (jobId: string) => number;
+  waitingDependencies?: (job: Job) => string[];
   attemptForLaunch: (launchId: string) => { id: string; state: string } | undefined;
   send: (threadId: string, text: string) => Promise<IsolatedSendOutcome>;
   /** Comment and move the job to blocked; returns false when the transition was refused. */
@@ -50,7 +49,7 @@ export type ReminderPorts = {
   limit?: (job: Job) => number;
 };
 
-export type ReminderOutcome = "skipped" | "waiting" | "sent" | "blocked";
+export type ReminderOutcome = "skipped" | "waiting" | "sent" | "blocked" | "resumed" | "dependency_wait";
 
 type Record = {
   attempt_id: string;
@@ -65,49 +64,50 @@ type Record = {
 /** Messages into an employee thread are English like the launch prompt; the Language line sets the reply language. */
 export const AGENT_MESSAGE_LANGUAGE: AgencyLanguage = "en";
 
-export function completionReminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage = agencyLanguage(), limit: number = COMPLETION_REMINDER_LIMIT): string {
-  const COMPLETION_REMINDER_LIMIT = limit;
-  if (lang === "en") {
-    return [
-      `Agency: job ${jobKey} is not handed in — there is no published result version (reminder ${count} of ${COMPLETION_REMINDER_LIMIT}).`,
-      "To hand in the work:",
-      `1. Report .agency/jobs/${jobKey}/report.md: outcome, what was done and where, how it was checked, what is not done.`,
-      "2. bb agency artifact create → bb agency artifact publish: a version of the report (and key result files).",
-      "3. bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): a two or three sentence summary for the lead with a link to the version.",
-      "4. End the turn.",
-      "Not your work or inputs are missing — return the job: comment «Return: …» and job transition to blocked. A question for the owner — job report-needs-input.",
-      `After ${COMPLETION_REMINDER_LIMIT} reminders without a result the job moves to «needs decision».`,
-      `agency.completionReminder:${attemptId}:${count}`,
-    ].join("\n");
-  }
+function reminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage, limit: number, published: boolean): string {
+  if (lang === "en") return [
+    `Agency: ${jobKey} is idle without final submission${published ? " (a version is published; it may be intermediate)" : ""}. Wake-up ${count}/${limit}; this is NOT a delivery deadline.`,
+    "If required work remains, continue it in this same job and attempt. Do not submit a partial result to satisfy a reminder. Record meaningful progress and the next step with job comment; publication alone does not mean the product is complete.",
+    "If waiting on another job, record the exact source and next action in job comment and notify your lead. Use job depend for work that requires a completed predecessor. Reviewers wait for pinned producers to reach review, not done: do not create a circular acceptance dependency. A reviewer may end the turn while input-producing jobs are still working. Do not poll, restart, or manufacture a final verdict.",
+    `Only when the full acceptance is met: write .agency/jobs/${jobKey}/report.md, publish its exact version with bb agency artifact create/publish, then bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment).`,
+    "A real blocker requires a factual report to the lead; use job report-needs-input only for a missing owner decision. Consecutive unanswered wake-ups escalate for diagnosis, not for forced partial hand-in.",
+    `agency.completionReminder:${attemptId}:${count}`,
+  ].join("\n");
   return [
-    `Агентство: поручение ${jobKey} не сдано — нет опубликованной версии результата (напоминание ${count} из ${COMPLETION_REMINDER_LIMIT}).`,
-    "Чтобы сдать работу:",
-    `1. Отчёт .agency/jobs/${jobKey}/report.md: итог, что сделано и где, чем проверено, что не сделано.`,
-    "2. bb agency artifact create → bb agency artifact publish: версия отчёта (и ключевых файлов результата).",
-    "3. bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): итог для руководителя в двух-трёх фразах со ссылкой на версию.",
-    "4. Завершите ход.",
-    "Работа не ваша или не хватает входов — верните задачу: комментарий «Возврат: …» и job transition в blocked. Вопрос владельцу — job report-needs-input.",
-    `После ${COMPLETION_REMINDER_LIMIT} напоминаний без результата задача перейдёт в «Ожидает решения».`,
+    `Агентство: ${jobKey} простаивает без итоговой сдачи${published ? " (опубликованная версия может быть промежуточной)" : ""}. Возобновление ${count}/${limit}; это НЕ срок сдачи.`,
+    "Если обязательная работа осталась, продолжайте её в той же задаче и попытке. Не сдавайте частичный результат ради напоминания. Зафиксируйте существенный прогресс и следующий шаг через job comment; публикация сама по себе не означает готовность продукта.",
+    "Если ожидаете другую задачу, укажите точный источник и следующий шаг через job comment и сообщите руководителю. job depend нужен, когда предшественник должен завершиться. Проверяющий ожидает review у закреплённых источников, а не done: не создавайте цикл приёмки. Проверяющий может завершить ход, пока исполнители готовят входы. Не опрашивайте статус циклом, не перезапускайте работу и не подменяйте ожидание финальным вердиктом.",
+    `Только после выполнения всех критериев: .agency/jobs/${jobKey}/report.md, точная версия через bb agency artifact create/publish, затем bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment).`,
+    "Реальный блокер передайте руководителю с фактами; job report-needs-input нужен только для недостающего решения владельца. Последовательные пробуждения без ответа приводят к разбору, а не к требованию неполной сдачи.",
     `agency.completionReminder:${attemptId}:${count}`,
   ].join("\n");
 }
 
+export function completionReminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage = agencyLanguage(), limit: number = COMPLETION_REMINDER_LIMIT): string {
+  return reminderText(jobKey, attemptId, count, lang, limit, false);
+}
+
 export function handInCommentReminderText(jobKey: string, attemptId: string, count: number, lang: AgencyLanguage = agencyLanguage(), limit: number = COMPLETION_REMINDER_LIMIT): string {
-  if (lang === "en") {
-    return [
-      `Agency: the result version of ${jobKey} is published, but there is no explicit final submission (reminder ${count} of ${limit}).`,
-      "bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): the outcome in two or three sentences — what was done, how it was checked, what is not done — with a link to the version. Then end the turn.",
-      "The job goes to review only after final submission.",
-      `agency.completionReminder:${attemptId}:${count}`,
-    ].join("\n");
-  }
-  return [
-    `Агентство: версия результата ${jobKey} опубликована, но нет явной итоговой сдачи (напоминание ${count} из ${limit}).`,
-    "bb agency job submit (jobId, expectedRevision, artifactId, version, hash, comment): итог в двух-трёх фразах — что сделано, чем проверено, что не сделано — со ссылкой на версию. Затем завершите ход.",
-    "На проверку задача уйдёт только после итоговой сдачи.",
-    `agency.completionReminder:${attemptId}:${count}`,
-  ].join("\n");
+  return reminderText(jobKey, attemptId, count, lang, limit, true);
+}
+
+/** Only concrete dependencies, never all siblings or an active parent plan.
+ * Review inputs are ready for a verdict at review (not only at done), avoiding
+ * the cycle in which the producer waits for acceptance from this reviewer.
+ */
+export function completionWaitingDependencies(db: SqlDatabase, job: Job): string[] {
+  const rows = db.prepare(`SELECT DISTINCT j.id FROM agency_job_dependency d
+    JOIN agency_job j ON j.id = d.depends_on_job_id
+    WHERE d.job_id = ? AND j.state NOT IN ('done', 'canceled')
+    UNION
+    SELECT DISTINCT j.id FROM agency_job j
+    WHERE j.id != ? AND j.id != COALESCE(?, '')
+      AND j.state NOT IN ('review', 'done', 'canceled')
+      AND (EXISTS (SELECT 1 FROM agency_auto_review q WHERE q.review_job_id = ? AND q.job_id = j.id)
+        OR (EXISTS (SELECT 1 FROM agency_membership m WHERE m.department_id = ? AND m.agent_id = ? AND m.role = 'reviewer')
+          AND EXISTS (SELECT 1 FROM agency_job_input_ref i WHERE i.target_job_id = ? AND i.source_job_id = j.id)))`)
+    .all(job.id, job.id, job.parentJobId, job.id, job.departmentId, job.assignedAgentId, job.id) as Array<{ id: string }>;
+  return rows.map(row => row.id);
 }
 
 function read(db: SqlDatabase, attemptId: string): Record | undefined {
@@ -135,7 +135,7 @@ export async function remindIncompleteWorker(
   if (!job || !attempt || attempt.state !== "running" || job.state !== "running") return "skipped";
   const now = ports.now();
   const limit = ports.limit ? ports.limit(job) : COMPLETION_REMINDER_LIMIT;
-  const current: Record = read(ports.db, attempt.id) ?? {
+  let current: Record = read(ports.db, attempt.id) ?? {
     attempt_id: attempt.id,
     job_id: job.id,
     count: 0,
@@ -144,18 +144,26 @@ export async function remindIncompleteWorker(
     last_sent_at: null,
     blocked_at: null,
   };
-  if (current.blocked_at) return "skipped";
-
-  if (reading.threadStatus !== "idle") {
-    // The worker is working (possibly on our reminder): the next idle is a new episode.
-    if (current.idle_since || current.awaiting_turn) {
-      upsert(ports.db, { ...current, idle_since: null, awaiting_turn: 0 }, now);
+  // A same-attempt authorized return/recovery must not inherit an old episode.
+  const clearEpisode = (): boolean => {
+    const changed = Boolean(current.count || current.idle_since || current.awaiting_turn || current.blocked_at);
+    if (changed) {
+      current = { ...current, count: 0, idle_since: null, awaiting_turn: 0, last_sent_at: null, blocked_at: null };
+      upsert(ports.db, current, now);
     }
-    return "skipped";
+    return changed;
+  };
+  if (current.blocked_at) clearEpisode();
+  // A queued message or unknown status is not an observed response.
+  if (reading.threadStatus === "running" || reading.threadStatus === "active") {
+    return clearEpisode() ? "resumed" : "skipped";
   }
-  if (reading.publishedVerified) return "skipped";
-  // A lead that ended its turn to wait for subtasks is not late: parent wake will call it back.
-  if (ports.openChildren(job.id) > 0) return "skipped";
+  if (reading.threadStatus !== "idle") return "skipped";
+  if (reading.publishedVerified) { clearEpisode(); return "skipped"; }
+  // Parent wake / input handoff will resume these workers. No premature final submission.
+  if (ports.openChildren(job.id) > 0 || (ports.waitingDependencies?.(job).length ?? 0) > 0) {
+    return clearEpisode() ? "dependency_wait" : "skipped";
+  }
 
   const nowMs = Date.parse(now);
   if (current.awaiting_turn && current.last_sent_at && nowMs - Date.parse(current.last_sent_at) < COMPLETION_REMINDER_RETRY_MS) {
@@ -171,8 +179,8 @@ export async function remindIncompleteWorker(
     const blocked = ports.block(
       job,
       agencyLanguage() === "en"
-        ? `Agency: the employee ended the turn without ${reading.missing === "comment" ? "a closing comment to the published version" : "a published result"} after ${limit} reminders. Check the attempt thread: reassign, clarify the brief or relaunch.`
-        : `Агентство: исполнитель завершил ход без ${reading.missing === "comment" ? "итогового комментария к опубликованной версии" : "опубликованного результата"} после ${limit} напоминаний. Проверьте тред попытки: переназначьте, уточните бриф или перезапустите.`,
+        ? `Agency: no resumed work observed after ${limit} consecutive wake-ups. Inspect the same attempt and its dependencies; diagnose with the lead. This is not a delivery deadline: do not submit a partial result or relaunch automatically.`
+        : `Агентство: после ${limit} последовательных пробуждений возобновление работы не наблюдалось. Руководителю: проверьте ту же попытку и её зависимости, установите причину. Это не срок сдачи: не требуйте частичный результат и не перезапускайте автоматически.`,
     );
     upsert(ports.db, { ...current, blocked_at: blocked ? now : null, idle_since: null }, now);
     return blocked ? "blocked" : "skipped";

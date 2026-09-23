@@ -79,7 +79,9 @@ describe("hand-in closing comment", () => {
     expect(await remindIncompleteWorker(ports, row, reading)).toBe("waiting");
     now = "2026-09-17T10:01:00.000Z";
     expect(await remindIncompleteWorker(ports, row, reading)).toBe("sent");
-    expect(sent[0]).toContain("there is no explicit final submission");
+    expect(sent[0]).toContain("is idle without final submission");
+    expect(sent[0]).toContain("it may be intermediate");
+    expect(sent[0]).toContain("Do not submit a partial result");
     expect(s.store.getJob(job.id)?.state).not.toBe("review");
   });
 });
