@@ -1,3 +1,4 @@
+import { WorkerContextPanel } from "./worker-context";
 import { AgentMetricsPanel } from "./agent-metrics";
 import { RecordLifecyclePanel } from "./organization-kit";
 import { AgentPluginsPanel } from "./agent-plugins";
@@ -356,6 +357,7 @@ export function AgentDetail({
               selected={draft.skills}
               onChange={(skills) => set({ skills })}
             />
+            {agent.recordId && <WorkerContextPanel scope="agent" scopeId={agent.recordId} skills={catalog?.skills} notice={notice} />}
             {draft.mcps.length > 0 && (
               <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
                 <p>{tr("В профиле отмечены MCP ({count}). Запуск Агентства пока не передаёт MCP сотрудникам, и с ними запуск отклоняется.", { count: draft.mcps.length })}</p>

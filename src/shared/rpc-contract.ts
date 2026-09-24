@@ -1,3 +1,4 @@
+import { workerContextQuerySchema, saveWorkerContextSchema, workerContextRecordSchema, workerContextViewSchema } from "./contracts/worker-context";
 import { recoveryDecisionSchema } from "./contracts/recovery";
 export { recoveryDecisionSchema, type RecoveryDecision } from "./contracts/recovery";
 import { recordLessonFeedbackSchema, leadStateQuerySchema, leadStateSchema, recordLeadDecisionSchema, leadDecisionRecordSchema, submitJobResultSchema } from "./contracts/lead-control";
@@ -1374,6 +1375,8 @@ export const rpcContract = defineRpcContract({
   listWorkProfiles: { input: z.object({ bbProjectId: z.string().optional() }).strict(), output: domainResultSchema(z.array(workProfileSchema)) },
   saveWorkProfile: { input: saveWorkProfileInputSchema, output: domainResultSchema(workProfileSchema) },
   deleteWorkProfile: { input: z.object({ bbProjectId: z.string().min(1), key: z.string().min(1) }).strict(), output: domainResultSchema(z.object({ removed: z.boolean() }).strict()) },
+  getWorkerContext: { input: workerContextQuerySchema, output: domainResultSchema(workerContextViewSchema) },
+  saveWorkerContext: { input: saveWorkerContextSchema, output: domainResultSchema(workerContextRecordSchema) },
   getSkillPool: {
     input: z.object({ departmentId: z.string().min(1) }).strict(),
     output: domainResultSchema(z.object({ departmentId: z.string(), skillIds: z.array(z.string()), grants: z.array(skillGrantSchema) }).strict()),

@@ -1,3 +1,4 @@
+import { WORKER_CONTEXT_MIGRATION } from "../runtime/worker-context/store";
 import { OBSERVATION_HEALTH_MIGRATION } from "../runtime/observation/health";
 import { HOST_RECONNECT_MIGRATION } from "../runtime/host-reconnect/service";
 import { LESSON_FEEDBACK_MIGRATION } from "../lead-control/observations";
@@ -759,6 +760,7 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
    WHERE send_state = 'confirmed'`,
   HOST_RECONNECT_MIGRATION,
   OBSERVATION_HEALTH_MIGRATION,
+  WORKER_CONTEXT_MIGRATION,
 ];
 
 function statementHash(sql: string): string {

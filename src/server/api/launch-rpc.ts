@@ -1,3 +1,4 @@
+import { contextForLaunch } from "../runtime/worker-context/store";
 import { recoverJob } from "../runtime/recovery/service";
 import { WAIT_CODES } from "../runtime/launch-queue/service";
 import { buildWorkerInstructions, readJobRoleContext } from "../delegation/instructions";
@@ -292,6 +293,7 @@ export function createIsolatedLaunchRpc(deps: {
             // A reserve is a new attempt of the same request: its operations get their own ids.
             const requestId = position === 0 ? input.requestId : uuidV5(input.requestId, `agency.launch.candidate.${position}`);
             const prepare = createPrepareRun({
+              workerContext: (departmentId, agentId) => contextForLaunch(deps.db, departmentId, agentId),
               store: deps.store,
               files: files.value,
               catalog,

@@ -1,3 +1,4 @@
+import type { ContextSelection } from "../worker-context/policy";
 import { assertBindingActive, assertDepartmentOnBinding, assertJobTransition, fail, ok, type DomainResult } from "../../../domain";
 import type { HostFilePort } from "../../../host/file-port.js";
 import { requestIdSchema } from "../../../shared/contracts";
@@ -47,6 +48,7 @@ export type PreparedRun = {
 };
 
 export type PrepareRunDeps = {
+  workerContext?: (departmentId: string, agentId: string) => ContextSelection | null;
   store: DomainStore;
   files: HostFilePort;
   catalog: SkillCatalogPort;
@@ -231,7 +233,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
         if (!neededIds.has(skill.id)) continue;
         const hashed = await hashCatalogSkillPackage(deps.catalog, skill);
         if (!hashed.ok) return hashed;
-        catalogSkills.push(hashed.value);
+        catalogSkills.push({...hashed.value, pluginId: skill.pluginId});
       }
 
       const persistedInputs = deps.jobInputs
@@ -244,6 +246,7 @@ export function createPrepareRun(deps: PrepareRunDeps) {
       if (!persistedInputs.ok) return persistedInputs;
 
       const compiled = compileContextSnapshot({
+        workerContext: deps.workerContext?.(job.departmentId, agentVersion.agentId),
         binding,
         job,
         agentVersion,

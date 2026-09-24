@@ -1,3 +1,4 @@
+import { canonicalizeJson } from "../context-snapshot/canonical";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -283,6 +284,10 @@ export function createReviewerThreadReusePort(
       if (!lineJobId) return null;
       const row = findReviewerThread(db, snapshot.agentVersion.agentId, lineJobId);
       if (!row) return null;
+      const original = db.prepare(`SELECT s.snapshot_json FROM agency_run_attempt a JOIN agency_context_snapshot s ON s.id=a.snapshot_id WHERE a.id=?`).get(row.originAttemptId) as {snapshot_json:string}|undefined;
+      const priorPolicy = original ? (JSON.parse(original.snapshot_json) as ContextSnapshot).workerContext?.policy ?? null : null;
+      // Provider sessions cannot reliably replace their loaded context on a follow-up.
+      if(canonicalizeJson(priorPolicy) !== canonicalizeJson(snapshot.workerContext?.policy ?? null)) return null;
       return {
         threadId: row.threadId,
         originLaunchId: row.originLaunchId,

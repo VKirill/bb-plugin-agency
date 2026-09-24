@@ -11,6 +11,10 @@ export function resolveAlias(tokens: string[]): CliRoutedOperation | { error: st
     return operation;
   }
 
+  if (head === "context" && rest.length === 1) {
+    if (rest[0] === "get") return "getWorkerContext";
+    if (rest[0] === "save") return "saveWorkerContext";
+  }
   if (head === "trace" && rest.length === 0) return "listTrace";
   if (head === "job" && rest[0] === "diagnose") return "getJobDiagnostics";
   if (head === "catalog" && rest.length === 0) return "listBbCatalog";

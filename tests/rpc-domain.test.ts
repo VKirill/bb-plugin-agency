@@ -1695,3 +1695,26 @@ describe("agency domain RPC", () => {
     expect(sameAuthor({ kind: "user", userId: "usr_owner" }, { kind: "user", userId: "usr_owner" })).toBe(true);
   });
 });
+
+describe("worker context RPC",()=>{
+ it("feature-tests VK, saves via the live handler and shows departmental inheritance",async()=>{
+  const {bb,harness}=createFakePluginHost({pluginId:"agency",sdk:catalogSdk({})});
+  let resolver:unknown;
+  Object.assign(bb.agents,{experimental_vkSessionPolicy:(fn:unknown)=>{resolver=fn;},experimental_vkContextContributions:()=>[{pluginId:"agency",instructions:true,configure:false,tools:[],skills:["agency"]}]});
+  await plugin(bb);
+  try{
+   expect(typeof resolver).toBe("function");const s=await seedWorkspace(harness);
+   const input={scope:"department",scopeId:s.department.id,requestId:requestId(),expectedRevision:0,policy:{skills:{mode:"assigned",names:[]}}};
+   expect(await rpc(harness,"saveWorkerContext",input)).toMatchObject({ok:true,value:{revision:1}});
+   expect(await rpc(harness,"getWorkerContext",{scope:"agent",scopeId:s.agent.id})).toMatchObject({ok:true,value:{available:true,inherited:[{departmentId:s.department.id,revision:1,policy:input.policy}]}});
+   expect(await rpc(harness,"saveWorkerContext",{...input,requestId:requestId()})).toMatchObject({ok:false,error:{code:"revision_conflict"}});
+  }finally{await harness.lifecycle.dispose();}
+ });
+ it("does not claim that saved context can be enforced without the API",async()=>{
+  const {harness}=await load();try{
+   const s=await seedWorkspace(harness);
+   expect(await rpc(harness,"getWorkerContext",{scope:"agent",scopeId:s.agent.id})).toMatchObject({ok:true,value:{available:false}});
+   expect(await rpc(harness,"saveWorkerContext",{scope:"agent",scopeId:s.agent.id,requestId:requestId(),expectedRevision:0,policy:{}})).toMatchObject({ok:false,error:{code:"unsupported"}});
+  }finally{await harness.lifecycle.dispose();}
+ });
+});

@@ -8,6 +8,8 @@ export const EXAMPLE_CATALOG_SKILL_ID =
 
 /** Полные валидируемые примеры. Policy — содержимое, не label. */
 export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
+  getWorkerContext: {scope:"agent",scopeId:"agent_aaaaaaaa"},
+  saveWorkerContext: {requestId:REQUEST_ID,expectedRevision:0,scope:"department",scopeId:"departme_aaaaaaaa",policy:{skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]}}},
   getLeadState: { jobId: "job_aaaaaaaaaaaa" },
   recordLessonFeedback: { requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", knowledgeId: "kno_aaaaaaaaaaaa", expectedRevision: 1, outcome: "helped", evidence: ["artifact/version/hash: regression passes after applying the lesson"], comment: "Applied the documented correction; verified the affected entrypoints." },
   recordLeadDecision: { requestId: REQUEST_ID, jobId: "job_aaaaaaaaaaaa", expectedRevision: 0, decision: { unknowns: ["Installed SDK support"], bottleneck: "SDK behavior unverified", action: "inspect", rationale: "Read installed declarations before implementation", nextCheck: "Record exact supported API signatures", evidence: ["Current repository package.json"] } },

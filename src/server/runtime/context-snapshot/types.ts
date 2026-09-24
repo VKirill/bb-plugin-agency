@@ -1,3 +1,5 @@
+import type { ContextSelection } from "../worker-context/policy";
+import type { FrozenWorkerContext } from "../../../shared/contracts/worker-context";
 import type { ArtifactVersion } from "../../../shared/contracts/artifact.js";
 import type { CatalogMcpId, CatalogSkillId } from "../../../shared/contracts/ids.js";
 import type { ProjectBinding } from "../../../shared/contracts/project-binding.js";
@@ -10,6 +12,7 @@ export type { CatalogMcpId, CatalogSkillId };
 export type SkillRole = "core" | "helper" | "method";
 
 export type CatalogSkillEntry = {
+  pluginId?: string;
   id: CatalogSkillId;
   hash: string;
   source: string;
@@ -62,6 +65,7 @@ export type HandoffPackage = {
 };
 
 export type CompileContextSnapshotInput = {
+  workerContext?: ContextSelection | null;
   binding: ProjectBinding;
   job: Job;
   agentVersion: AgentVersion;
@@ -172,6 +176,7 @@ export type SnapshotProvenance = {
 
 export type ContextSnapshot = {
   schemaVersion: 2;
+  workerContext?: FrozenWorkerContext;
   binding: {
     id: string;
     hostId: string;

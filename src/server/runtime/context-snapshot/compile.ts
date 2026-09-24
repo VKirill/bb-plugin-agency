@@ -1,3 +1,4 @@
+import { freezeWorkerContext, contextAllows } from "../worker-context/policy";
 import { contractText } from "../../../shared/contracts/job";
 import { catalogMcpIdSchema, catalogSkillIdSchema } from "../../../shared/contracts/ids.js";
 import { AGENCY_SKILL_COMMANDS, AGENCY_SKILL_FORBIDDEN_SURFACES } from "./agency-commands.js";
@@ -302,13 +303,28 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
       const entry = requireSkill(skillIndex, id, "method");
       if (!entry.ok) return entry;
       if (selectedIds.has(entry.value.id)) continue;
-      selected.push({ id: entry.value.id, hash: entry.value.hash, role: "method" });
+      selected.push({ id: entry.value.id, hash: entry.value.hash, role: "method", ...(entry.value.name ? {name:entry.value.name} : {}) });
       selectedIds.add(entry.value.id);
     }
   }
-  const pluginIds = sortedUnique(grants.map((grant) => grant.pluginId));
-  const pluginToolNames = sortedUnique(grants.flatMap((grant) => [...grant.toolNames]));
+  let pluginIds = sortedUnique(grants.map((grant) => grant.pluginId));
+  let pluginToolNames = sortedUnique(grants.flatMap((grant) => [...grant.toolNames]));
 
+  let workerContext;
+  const skillPluginIds = selected.map(s=>skillIndex.get(s.id)?.pluginId).filter((id):id is string=>!!id);
+  try { workerContext = freezeWorkerContext(input.workerContext, selected, [...pluginIds,...skillPluginIds], selected.filter(s=>s.role!=="method").map(s=>skillIndex.get(s.id)?.pluginId).filter((id):id is string=>!!id)); }
+  catch (error) { return {ok:false,error:{code:"worker_context_required",message:String(error)}}; }
+  if(workerContext) {
+    for(let index=selected.length-1;index>=0;index--) {
+      const skill=selected[index];const owner=skillIndex.get(skill.id)?.pluginId;
+      if(skill.role !== "method") continue;
+      if((skill.name && !contextAllows(workerContext.policy.skills,skill.name)) || (owner && !contextAllows(workerContext.policy.bbPlugins,owner))) {
+        selected.splice(index,1);selectedIds.delete(skill.id);
+      }
+    }
+    pluginIds=pluginIds.filter(id=>contextAllows(workerContext.policy.bbPlugins,id));
+    pluginToolNames=sortedUnique(grants.filter(g=>pluginIds.includes(g.pluginId)).flatMap(g=>[...g.toolNames]));
+  }
   const selectedMcps: SelectedMcp[] = [];
   const selectedMcpIds = new Set<string>();
   for (const mcpId of agentVersion.mcpIds) {
@@ -408,6 +424,7 @@ export function compileContextSnapshot(input: CompileContextSnapshotInput): Comp
 
   const snapshotWithoutDigest: Omit<ContextSnapshot, "digest"> = {
     schemaVersion: 2,
+    ...(workerContext ? {workerContext} : {}),
     binding: {
       id: binding.id,
       hostId: binding.hostId,

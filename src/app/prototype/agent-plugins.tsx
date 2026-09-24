@@ -92,7 +92,7 @@ export function AgentPluginsPanel({ selected, onChange, notice }: { selected: st
       <PageHead
         level={2}
         title="Плагины сотрудника"
-        description={tr("Отмечено: {count}. Запуск сотрудника получает навыки и инструкции отмеченных плагинов и разрешение на их инструменты; команда bb <плагин> работает всегда. Остальные плагины BB в его запуск не попадают.", { count: selected.length })}
+        description={tr("Отмечено: {count}. Эти плагины включаются в пакет задания. Чтобы ограничить загрузку остальных плагинов в сессию, настройте служебный контекст на вкладке «Навыки».", { count: selected.length })}
       />
       {plugins === null ? (
         <p className="text-sm text-muted-foreground">{tr("Читаем установленные плагины…")}</p>

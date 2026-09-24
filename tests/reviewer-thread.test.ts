@@ -1,3 +1,6 @@
+import { createReviewerThreadReusePort } from "../src/server/runtime/reviewer-thread/service";
+import type { ContextSnapshot } from "../src/server/runtime/context-snapshot/types";
+import type { RunAttempt } from "../src/server/runtime/run-store/types";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
@@ -226,4 +229,24 @@ describe("composeReviewFollowUp", () => {
     expect(en).toContain(packDir);
     expect(en).toContain("bb agency job submit");
   });
+});
+
+
+describe("reviewer context across sessions",()=>{
+ it("reuses unchanged context, but starts a fresh session when policy changes",()=>{
+  const t=setup();try{
+   const work=t.work("Work");const review=t.review("Review");t.linkReview(work.id,review.id,"11".repeat(32));
+   rememberReviewerThread(t.db,{reviewerAgentId:t.s.reviewer,lineJobId:work.id,threadId:"thr_policy",launchId:"launch_old",attemptId:"run_policy",jobId:review.id,now:"2026-09-24T00:00:00Z"});
+   const snapshot={job:{id:review.id},agentVersion:{agentId:t.s.reviewer},workerContext:{policy:{skills:{mode:"allow",names:["agency"]}},departmentRevision:1,agentRevision:0}} as ContextSnapshot;
+   t.db.pragma("foreign_keys = OFF");
+   t.db.prepare("INSERT INTO agency_context_snapshot VALUES ('snap_policy',?,'policy-digest',?,'2026-09-24T00:00:00Z')").run(review.id,JSON.stringify(snapshot));
+   t.db.prepare("INSERT INTO agency_run_attempt (id,job_id,attempt_no,snapshot_id,digest,thread_id,launch_id,state,revision,created_at,updated_at) VALUES ('run_policy',?,1,'snap_policy','policy-digest','thr_policy','launch_old','succeeded',1,'2026-09-24T00:00:00Z','2026-09-24T00:00:00Z')").run(review.id);
+   const reuse=createReviewerThreadReusePort(t.db,{get:async()=>({id:"thr_policy",status:"idle"})},undefined);
+   const attempt={jobId:review.id} as RunAttempt;
+   expect(reuse.resolve(t.s.ctx,attempt,snapshot)?.threadId).toBe("thr_policy");
+   expect(reuse.resolve(t.s.ctx,attempt,{...snapshot,workerContext:{...snapshot.workerContext!,agentRevision:7}})?.threadId).toBe("thr_policy");
+   expect(reuse.resolve(t.s.ctx,attempt,{...snapshot,workerContext:undefined})).toBeNull();
+   expect(reuse.resolve(t.s.ctx,attempt,{...snapshot,workerContext:{...snapshot.workerContext!,policy:{skills:{mode:"allow",names:["agency","copywriter"]}}}})).toBeNull();
+  }finally{t.db.close();}
+ });
 });

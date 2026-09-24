@@ -1,3 +1,4 @@
+import { workerContextQuerySchema, saveWorkerContextSchema } from "../../shared/contracts/worker-context";
 import { recordLessonFeedbackSchema, leadStateQuerySchema, recordLeadDecisionSchema, submitJobResultSchema } from "../../shared/contracts/lead-control";
 import { traceQuerySchema } from "../../shared/contracts/trace";
 import { jobDiagnosticsQuerySchema } from "../../shared/contracts/diagnostics";
@@ -127,6 +128,8 @@ export const CLI_OPERATIONS = {
   agentMetrics: { input: z.object({ agentId: z.string() }).strict(), summary: "Показатели сотрудника: загрузка, закрытые, доля без доработок, срок, расход за 30 дней" },
   getSkillPins: { input: emptyObjectSchema, summary: "Закреплённые версии навыков против текущих: чем отличаются и что мешает запуску" },
   pinSkills: { input: emptyObjectSchema, summary: "Закрепить текущие версии навыков; только владелец, не из треда сотрудника" },
+  getWorkerContext: { input: workerContextQuerySchema, summary: "Служебный контекст сотрудника или отдела (VK)" },
+  saveWorkerContext: { input: saveWorkerContextSchema, summary: "Настроить служебные навыки и плагины; CAS, только владелец" },
   getSkillPool: { input: z.object({ departmentId: z.string() }).strict(), summary: "Библиотека навыков отдела и журнал выдач: что отдел вправе поднять под задание" },
   setSkillPool: { input: z.object({ departmentId: z.string(), skillIds: z.array(z.string()).max(60), mode: z.enum(["replace", "merge"]).optional() }).strict(), summary: "Библиотека навыков отдела: mode merge дописывает, replace (по умолчанию) заменяет список целиком; правит владелец или руководитель этого отдела" },
   listSkillGrants: { input: z.object({ departmentId: z.string().optional(), agentId: z.string().optional() }).strict(), summary: "Журнал выдач: кому и какой навык открыли под задачу и кто решил" },

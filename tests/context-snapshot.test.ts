@@ -614,3 +614,23 @@ describe("compileContextSnapshot role", () => {
     expect(compileOk().prompt.levels.job).not.toContain("## Brief");
   });
 });
+
+describe("frozen worker session policy", () => {
+  it("pins the effective policy into the digest and excludes denied method skills from the task pack", () => {
+    const plain=compileOk();
+    const workerContext={departmentRevision:3,agentRevision:2,policy:{skills:{mode:"deny" as const,names:["copy-method"]}}};
+    const result=compileContextSnapshot(baseInput({workerContext}));
+    expect(result.ok).toBe(true); if(!result.ok)return;
+    expect(result.snapshot.digest).not.toBe(plain.digest);
+    expect(result.snapshot.workerContext?.departmentRevision).toBe(3);
+    expect(result.snapshot.selectedSkills.some(s=>s.name==="copy-method")).toBe(false);
+    expect(result.snapshot.selectedSkills.some(s=>s.name==="agency")).toBe(true);
+    expect(result.snapshot.exclusions.some(s=>s.id===METHOD_SKILL)).toBe(true);
+  });
+  it("automatically includes plugin owners of assigned skills", () => {
+    const input=baseInput(); input.catalogSkills=input.catalogSkills.map(s=>({...s,pluginId:s.id===METHOD_SKILL?"writer-tools":"agency"}));
+    input.workerContext={departmentRevision:1,agentRevision:0,policy:{skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]}}};
+    const snapshot=compileOk(input);
+    expect(snapshot.workerContext?.policy.bbPlugins?.names).toEqual(["agency","writer-tools"]);
+  });
+});

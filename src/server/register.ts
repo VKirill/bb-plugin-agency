@@ -1,3 +1,6 @@
+import { registerWorkerContext } from "./runtime/worker-context/resolver";
+import { readWorkerContext, saveWorkerContext } from "./runtime/worker-context/store";
+import { workerContextQuerySchema, saveWorkerContextSchema } from "../shared/contracts/worker-context";
 import { createRuntimeLifetime, createBoundedReader, observationErrorCode } from "./runtime/observation/control";
 import { recordObservation } from "./runtime/observation/health";
 import { readThreadFailure, resumeAfterHostReconnect, type ThreadFailure } from "./runtime/host-reconnect/service";
@@ -169,6 +172,7 @@ export function registerAgency(bb: BbPluginApi) {
   const telegram=telegramAdapter(bb);
   const machines=machineDirectory(bb);
   const db = openDatabase(bb);
+  const workerContext = registerWorkerContext(bb, db);
   configureTrace(db, () => { if (lifetime.isActive()) bb.log.warn("Agency trace write failed; execution continues. Inspect trace.health and database storage."); });
   recordTrace(db, { step: "runtime", outcome: "succeeded", reason: "loaded" });
   const inbox = createInbox(db);
@@ -1086,6 +1090,23 @@ export function registerAgency(bb: BbPluginApi) {
    * Библиотека навыков отдела и журнал выдач. Библиотеку правит владелец или руководитель этого
    * отдела: это решение о правах, но принимается оно один раз для отдела, а не на каждую задачу.
    */
+  const workerContextHandlers = {
+    getWorkerContext: async (raw: unknown) => {
+      const access = readOnly(); if(!access.ok) return access;
+      const input = workerContextQuerySchema.parse(raw);
+      if(!(input.scope === "agent" ? store.getAgent(input.scopeId) : store.getDepartment(input.scopeId))) return fail("not_found", "Context owner not found.");
+      return ok({...readWorkerContext(db,input), available:workerContext.available, contributions:workerContext.contributions(), inherited: input.scope === "agent" ? listStoredDepartments(db).filter(d=>store.listMemberships(d.id).some(m=>m.agentId===input.scopeId)).map(d=>({departmentId:d.id,name:d.name,...readWorkerContext(db,{scope:"department",scopeId:d.id})})) : []});
+    },
+    saveWorkerContext: async (raw: unknown) => {
+      const access = ownerOnly(); if(!access.ok) return access;
+      if(!workerContext.available) return fail("unsupported", "This BB build does not provide VK session policies.");
+      const input = saveWorkerContextSchema.parse(raw);
+      if(!(input.scope === "agent" ? store.getAgent(input.scopeId) : store.getDepartment(input.scopeId))) return fail("not_found", "Context owner not found.");
+      const result = saveWorkerContext(db,input);
+      if(result.ok) { recordTrace(db,{step:"worker-context.save",outcome:"succeeded",reason:`${input.scope}:${input.scopeId} revision=${result.value.revision}`}); onChanged(); }
+      return result;
+    },
+  };
   const skillPoolHandlers = {
     getSkillPool: async (input: { departmentId: string }) => {
       const access = readOnly();
@@ -1810,8 +1831,11 @@ export function registerAgency(bb: BbPluginApi) {
     ...passportHandlers,
     ...decisionHandlers,
     ...skillPoolHandlers,
+    ...workerContextHandlers,
   } satisfies Pick<
     PluginRpcHandlers<typeof rpcContract>,
+    | "getWorkerContext"
+    | "saveWorkerContext"
     | "getSkillPool"
     | "setSkillPool"
     | "listSkillGrants"
@@ -2898,6 +2922,7 @@ export function registerAgency(bb: BbPluginApi) {
     ...passportHandlers,
     ...decisionHandlers,
     ...skillPoolHandlers,
+    ...workerContextHandlers,
     setModelPrices: async ({ rows }) => {
       const next = await workSettings.experimental_set({ modelPricesJson: modelPriceOverridesJson(rows) });
       applyWorkSettings(next);
