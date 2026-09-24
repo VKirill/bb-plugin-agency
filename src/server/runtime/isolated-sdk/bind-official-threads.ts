@@ -50,14 +50,14 @@ function parseAgencyPluginMetadata(value: unknown): IsolatedThreadView["pluginMe
   };
 }
 
-async function loadPluginMetadata(
+export async function loadPluginMetadata(
   threads: BbPluginApi["sdk"]["threads"],
   threadId: string,
 ): Promise<IsolatedThreadView["pluginMetadata"]> {
   const fn = Reflect.get(threads, "getPluginMetadata");
   if (typeof fn !== "function") return undefined;
   try {
-    return parseAgencyPluginMetadata(await fn.call(threads, { threadId }));
+    return parseAgencyPluginMetadata(await Reflect.apply(fn, threads, [{ threadId }]));
   } catch {
     return undefined;
   }

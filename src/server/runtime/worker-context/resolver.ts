@@ -2,9 +2,10 @@ import type { BbPluginApi, PluginAgentConfigurationContext } from "@get-bb/plugi
 import type { SqlDatabase } from "../../db/sql";
 import type { ContextSnapshot } from "../context-snapshot/types";
 import type { VkSessionPolicy, WorkerContextView } from "../../../shared/contracts/worker-context";
+import { loadPluginMetadata } from "../isolated-sdk/bind-official-threads";
 
 type VkAgents = {
- experimental_vkSessionPolicy?: (resolver: (ctx: PluginAgentConfigurationContext) => VkSessionPolicy | null) => void;
+ experimental_vkSessionPolicy?: (resolver: (ctx: PluginAgentConfigurationContext) => VkSessionPolicy | null | Promise<VkSessionPolicy | null>) => void;
  experimental_vkContextContributions?: () => WorkerContextView["contributions"];
 };
 /** Metadata is only a lookup hint; identity and policy come from the stored launch snapshot. */
@@ -29,12 +30,22 @@ export function registerWorkerContext(bb: BbPluginApi, db: SqlDatabase) {
  const agents = bb.agents as unknown as VkAgents;
  const available = typeof agents.experimental_vkSessionPolicy === "function";
  const observed = new Map<string,string>();
- if(available) agents.experimental_vkSessionPolicy!(ctx => resolveWorkerContext(db,ctx,reason => {
+ if(available) agents.experimental_vkSessionPolicy!(async ctx => {
+  // Early VK runtimes pass an empty metadata object to this callback. Read the
+  // same plugin-scoped metadata through the public SDK, then keep every stored
+  // attempt/thread/binding check below. Do not overwrite conflicting metadata.
+  let source = "callback";
+  if(ctx.thread.id && Object.keys(ctx.pluginMetadata).length === 0) {
+   const metadata = await loadPluginMetadata(bb.sdk.threads, ctx.thread.id);
+   if(metadata) { ctx = {...ctx, pluginMetadata: metadata}; source = "sdk"; }
+  }
+  return resolveWorkerContext(db,ctx,reason => {
   const owned = typeof ctx.pluginMetadata.agencyJobId === "string" || db.prepare("SELECT 1 FROM agency_run_attempt WHERE thread_id = ?").get(ctx.thread.id);
   if(!owned || observed.get(ctx.thread.id) === reason) return;
   if(observed.size >= 512) observed.delete(observed.keys().next().value!);
   observed.set(ctx.thread.id,reason);
-  bb.log.info(`Worker context ${ctx.thread.id}: ${reason}`);
- }));
+  bb.log.info(`Worker context ${ctx.thread.id}: ${reason}; metadata=${source}`);
+  });
+ });
  return {available, contributions: () => agents.experimental_vkContextContributions?.() ?? []};
 }

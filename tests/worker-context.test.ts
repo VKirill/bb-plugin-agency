@@ -41,7 +41,7 @@ describe("worker context",()=>{
   expect(()=>freezeWorkerContext({...input,policy:{skills:{mode:"deny",names:["agency*"]}}},skills,[])).toThrow("service dependency");
   expect(()=>freezeWorkerContext({...input,policy:{skills:{mode:"assigned",names:[]}}},[{role:"core"}],[])).toThrow("name_missing");
  });
- it("resolves only database-backed thread identity, preserves the first session snapshot and legacy null",()=>{
+ it("resolves only database-backed thread identity, preserves the first session snapshot and legacy null",async()=>{
   const db=openMigratedDatabase(new Database(":memory:"));
   try{
    db.pragma("foreign_keys = OFF");
@@ -51,7 +51,24 @@ describe("worker context",()=>{
    const context=makePluginAgentConfigurationContext();
    const ctx={...context,pluginMetadata:{agencyAttemptId:"run_test",agencyLaunchId:"launch_test",agencyJobId:"job_test"},thread:{...context.thread,id:"thr_test"},project:{...context.project,id:"proj_test"},host:{...context.host,id:"host_test"},provider:{...context.provider,id:"codex"},environment:{...context.environment,path:"/work"}};
    expect(resolveWorkerContext(db,ctx)).toEqual(snapshot.workerContext.policy);
+   const readMetadata = vi.fn(async () => ctx.pluginMetadata);
+   const {bb,harness} = createFakePluginHost({pluginId:"agency",sdk:{threads:{getPluginMetadata:readMetadata}}});
+   let registered!: (ctx: typeof context) => unknown;
+   Reflect.set(bb.agents,"experimental_vkSessionPolicy",(fn: typeof registered) => { registered=fn; });
+   registerWorkerContext(bb,db);
+   // Old VK core passes {} even before Agency has recorded the spawn response.
+   expect(await registered({...ctx,pluginMetadata:{}})).toEqual(snapshot.workerContext.policy);
+   expect(readMetadata).toHaveBeenCalledWith({threadId:"thr_test",pluginId:"agency"});
    db.prepare("UPDATE agency_run_attempt SET thread_id='thr_test',state='running'").run();
+   expect(await registered({...ctx,pluginMetadata:{}})).toEqual(snapshot.workerContext.policy);
+   expect(await registered({...ctx,pluginMetadata:{},host:{...ctx.host,id:"host_foreign"}})).toBeNull();
+   expect(await registered({...ctx,pluginMetadata:{},thread:{...ctx.thread,id:"thr_forged"}})).toBeNull();
+   readMetadata.mockClear();
+   expect(await registered({...ctx,pluginMetadata:{...ctx.pluginMetadata,agencyJobId:"job_foreign"}})).toBeNull();
+   expect(readMetadata).not.toHaveBeenCalled();
+   readMetadata.mockRejectedValueOnce(new Error("metadata unavailable"));
+   expect(await registered({...ctx,pluginMetadata:{}})).toBeNull();
+   await harness.lifecycle.dispose();
    expect(resolveWorkerContext(db,{...ctx,thread:{...ctx.thread,id:"thr_forged"}})).toBeNull();
    expect(resolveWorkerContext(db,{...ctx,pluginMetadata:{}})).toBeNull();
    expect(resolveWorkerContext(db,{...ctx,host:{...ctx.host,id:"host_foreign"}})).toBeNull();

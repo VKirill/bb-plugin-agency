@@ -25,6 +25,12 @@
 
 На старте сохраняется ContextSnapshot: binding host/root/revision, job/revision, agentVersion (включая model), processVersion, effective PolicyVersion (capabilities/constraints/secretRefs), project rules hash, selected skill **и MCP** IDs/hash, input artifact IDs/version/hash (в том числе authorized upstream), exclusions, handoff или явный none, ограничения провайдера. Compiler — `schemaVersion` 2 ([revise](context-snapshot-revise.md) — исторические замечания, уже закрытые в compile). Persist — `run-store`. Spawn — штатный `threads.spawn` через координатор после проверки готовности (CLI, host, политики).
 
+## Применение фильтра VK
+
+`experimental_vkSessionPolicy` возвращает политику из неизменяемого снимка запуска. Метаданные — только ключ поиска: попытка, задача, launch ID, thread ID и привязки project/host/path/provider проверяются по базе Агентства. На ранних версиях VK, передающих пустой `pluginMetadata`, обработчик читает метаданные этого треда через штатный plugin-scoped `threads.getPluginMetadata`. Непустые конфликтующие метаданные не заменяются; неизвестному треду политика не назначается.
+
+`getLaunch` показывает сохранённый `workerContext`; лог `Worker context <thread>: applied; metadata=sdk|callback` доказывает работу обработчика. Эти сведения ещё не доказывают состав инструментов в уже открытой модели: его проверяют в свежем контексте. Для сохранения текущей attempt допустим штатный `bb thread clear` на idle после проверенного handoff, затем явное продолжение из него. История и рабочие файлы сохраняются; во время записи или доставки контекст не очищают. Системные инструменты провайдера не тождественны внешним MCP и могут оставаться доступными.
+
 ## Передача
 
 Новый сотрудник получает новый запуск и явный пакет, не скрытую память прошлого CLI. Минимум: задача, ожидаемый результат, входные version/hash, применимый процесс, разрешённая папка, открытые вопросы и ссылка на предыдущую попытку. До чтения проверяется hash. Старая попытка не переписывается; две параллельные роли не пишут один original.
