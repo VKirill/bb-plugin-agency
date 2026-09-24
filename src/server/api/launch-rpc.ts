@@ -384,9 +384,13 @@ export function createIsolatedLaunchRpc(deps: {
     },
     getLaunch: async (input) => {
       return withAccess((ctx) => {
-        if (input.launchId) return reads.getLaunchReceipt(ctx, input.launchId);
-        if (input.attemptId) return reads.getLaunchReceiptByAttempt(ctx, input.attemptId);
-        return fail("invalid_command", "getLaunch needs launchId or attemptId");
+        const receipt = input.launchId ? reads.getLaunchReceipt(ctx, input.launchId)
+          : input.attemptId ? reads.getLaunchReceiptByAttempt(ctx, input.attemptId)
+          : fail("invalid_command", "getLaunch needs launchId or attemptId");
+        if (!receipt.ok) return receipt;
+        const stored = reads.getSnapshot(ctx, receipt.value.snapshotId);
+        if (!stored.ok) return stored;
+        return ok({ ...receipt.value, workerContext: stored.value.snapshot.workerContext ?? null });
       });
     },
     reconcileLaunch: async (input) => {
