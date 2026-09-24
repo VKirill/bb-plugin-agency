@@ -97,7 +97,8 @@ export function createCompletionWatch(deps: CompletionWatchDeps) {
         if (current) {
           if (current.applyingAt !== null && Date.now() - current.applyingAt >= timeoutMs)
             observation(row, "apply", "observation_timeout");
-          waits.push(current.promise);
+          // A periodic poll must not itself wait on an already stuck mutation:
+          // otherwise each timer tick retains another never-settling Promise.all.
           continue;
         }
         // Bounded parallel reads: one slow row does not stop the whole watch.

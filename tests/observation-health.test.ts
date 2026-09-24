@@ -104,7 +104,8 @@ describe("observer health", () => {
       listBoundLaunches: () => [row], readPublishedForJob: async () => empty, applyReading: apply, onObservation: observation, pollMs: 1000, readTimeoutMs: 100 });
     try {
       const pass = watch.poll(); await vi.advanceTimersByTimeAsync(101);
-      const second = watch.poll(); expect(observation).toHaveBeenCalledWith(row, "apply", "observation_timeout");
+      const second = watch.poll(); await second;
+      expect(observation).toHaveBeenCalledWith(row, "apply", "observation_timeout");
       expect(apply).toHaveBeenCalledOnce(); resolve(); await Promise.all([pass, second]);
     } finally { watch.dispose(); }
   });
