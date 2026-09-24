@@ -293,7 +293,7 @@ export function createIsolatedLaunchRpc(deps: {
             // A reserve is a new attempt of the same request: its operations get their own ids.
             const requestId = position === 0 ? input.requestId : uuidV5(input.requestId, `agency.launch.candidate.${position}`);
             const prepare = createPrepareRun({
-              workerContext: (departmentId, agentId) => contextForLaunch(deps.db, departmentId, agentId),
+              workerContext: (departmentId, agentId) => typeof Reflect.get(deps.bb.agents, "experimental_vkSessionPolicy") === "function" ? contextForLaunch(deps.db, departmentId, agentId) : null,
               store: deps.store,
               files: files.value,
               catalog,
