@@ -53,3 +53,18 @@ describe("employee plugins tab", () => {
     await act(async () => root.unmount());
   });
 });
+
+it("searches the bounded plugin list without dropping hidden selections", async()=>{
+ const container=document.createElement("div");document.body.append(container);const root=createRoot(container);const changes:string[][]=[];
+ try{
+  await act(async()=>root.render(createElement(AgentPluginsPanel,{selected:["env-catalog"],onChange:ids=>changes.push(ids),notice:()=>{}})));
+  const list=container.querySelector('[data-testid="agent-plugins"]')!;
+  expect(list.classList.contains("max-h-80")).toBe(true);expect(list.classList.contains("overflow-y-auto")).toBe(true);
+  const search=container.querySelector('[aria-label="Поиск плагинов"]') as HTMLInputElement;
+  expect(list.contains(search)).toBe(false);
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(search,"bb_file_gateway");search.dispatchEvent(new Event("input",{bubbles:true}));});
+  expect(list.querySelector('[aria-label="Env Catalog"]')).toBeNull();
+  await act(async()=> (list.querySelector('[aria-label="File Gateway"]') as HTMLElement).click());
+  expect(changes.at(-1)).toEqual(["env-catalog","file-gateway"]);
+ }finally{await act(async()=>root.unmount());container.remove();}
+});

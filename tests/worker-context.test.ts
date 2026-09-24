@@ -14,7 +14,7 @@ describe("worker context",()=>{
  it("inherits per field, uses CAS, deduplicates requests and freezes previous selections",()=>{
   const db=openMigratedDatabase(new Database(":memory:"));
   try{
-   expect(contextForLaunch(db,"departme_aaaaaaaa",scopeId)).toBeNull();
+   expect(contextForLaunch(db,"departme_aaaaaaaa",scopeId)?.policy).toEqual({skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]}});
    const department={scope:"department",scopeId:"departme_aaaaaaaa",requestId:randomUUID(),expectedRevision:0,policy:{skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]}}};
    const saved=saveWorkerContext(db,department);expect(saved.ok).toBe(true);
    expect(saveWorkerContext(db,department)).toEqual(saved);

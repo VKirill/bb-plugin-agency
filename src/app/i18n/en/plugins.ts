@@ -1,5 +1,15 @@
 /** English UI texts, keyed by the exact Russian source text. Group: BB plugins, machines, sandbox. */
 export const EN_PLUGINS: Record<string, string> = {
+  "Список возможностей": "Capabilities list",
+  "Список плагинов": "Plugins list",
+  "Поиск плагинов": "Search plugins",
+  "Найти плагин…": "Find a plugin\u2026",
+  "Дополнительные настройки контекста": "Advanced context settings",
+  "Отмечено: {count}. На VK-сборке этот список ограничивает плагины новой сессии. Агентство и плагины выбранных навыков добавляются автоматически. Исключения отдела и сотрудника задаются в дополнительных настройках контекста.": "Selected: {count}. On VK builds this list filters plugins in new sessions. Agency and the plugins that own selected skills are included automatically. Department and employee exceptions are configured in advanced context settings.",
+  "Отмечено: {count}. На VK-сборке этот список ограничивает навыки новой сессии; добавляются служебные навыки Агентства и навыки, выданные под задачу. Исключения отдела и сотрудника задаются в дополнительных настройках контекста.": "Selected: {count}. On VK builds this list filters skills in new sessions, with Agency service skills and task grants included. Department and employee exceptions are configured in advanced context settings.",
+  "Отдел задаёт основу. Сотрудник переопределяет отдельные поля. По умолчанию используются списки профиля сотрудника. Изменения получает новая сессия; уже работающие сотрудники сохраняют прежний контекст.": "The department sets defaults; employees override individual fields. Employee profile lists are used by default. Changes affect new sessions; existing workers keep their context.",
+  "Основные списки находятся на вкладках «Навыки» и «Плагины» и сохраняются кнопкой «Сохранить профиль». Здесь задаются только исключения, MCP, плагины CLI и инструкции.": "Main selections are in Skills and Plugins and are saved with Save profile. Configure only exceptions, MCP, native CLI plugins and instructions here.",
+
   "Служебный контекст (VK)": "Service context (VK)",
   "Отдел задаёт основу. Сотрудник переопределяет отдельные поля. Без настроек действуют правила BB и раздела. Изменения получает новая сессия; уже работающие сотрудники сохраняют прежний контекст.": "The department sets defaults; employees override individual fields. Without settings, BB and folder rules apply. Changes affect new sessions; existing workers keep their context.",
   "Своя политика заменяет правила контекста project-folders для служебного треда. Агентство и его обязательные навыки остаются доступны. Это фильтр загрузки, а не ограничение прав доступа.": "A custom policy replaces project-folders context rules for the worker thread. Agency and its required skills stay available. This filters context loading, not access permissions.",

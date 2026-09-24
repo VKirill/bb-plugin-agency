@@ -290,6 +290,7 @@ export function AgentDetail({
               </Panel>
             )}
             <p className="pt-2 text-xs text-muted-foreground">{tr("Правила сотрудника — лимиты и песочница — сохраняются своей кнопкой и не меняют версию профиля.")}</p>
+            {agent.recordId && <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">{tr("Дополнительные настройки контекста")}</summary><div className="mt-4"><WorkerContextPanel scope="agent" scopeId={agent.recordId} notice={notice} /></div></details>}
             <WorkRulesEditor key={agent.id} scope={`agent:${agent.id}`} inheritable notice={notice} groups={[LIMIT_RULE_GROUP("сотрудника", false), AGENT_REVIEW_RULE_GROUP, AGENT_PASSPORT_RULE_GROUP, AGENT_SANDBOX_RULE_GROUP]} saveLabel="Сохранить правила сотрудника" inheritLabel="Как в отделе" />
           </>
         )}
@@ -349,7 +350,7 @@ export function AgentDetail({
             <PageHead
               level={2}
               title="Навыки сотрудника"
-              description={tr("Отмечено: {count}. Навыки передаются сотруднику при каждом запуске. Навыки Агентства (agency и agency-artifacts) подключаются автоматически, отмечать их не нужно.", { count: draft.skills.length })}
+              description={tr("Отмечено: {count}. На VK-сборке этот список ограничивает навыки новой сессии; добавляются служебные навыки Агентства и навыки, выданные под задачу. Исключения отдела и сотрудника задаются в дополнительных настройках контекста.", { count: draft.skills.length })}
             />
             <SearchInput aria-label={tr("Поиск навыков")} placeholder={tr("Найти навык…")} value={q} onChange={(event) => setQ(event.target.value)} />
             <CapabilityChecks
@@ -357,7 +358,6 @@ export function AgentDetail({
               selected={draft.skills}
               onChange={(skills) => set({ skills })}
             />
-            {agent.recordId && <WorkerContextPanel scope="agent" scopeId={agent.recordId} skills={catalog?.skills} notice={notice} />}
             {draft.mcps.length > 0 && (
               <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
                 <p>{tr("В профиле отмечены MCP ({count}). Запуск Агентства пока не передаёт MCP сотрудникам, и с ними запуск отклоняется.", { count: draft.mcps.length })}</p>

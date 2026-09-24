@@ -12,7 +12,7 @@ export function CapabilityChecks({
   onChange: (ids: string[]) => void;
 }) {
   return (
-    <div className="divide-y divide-border rounded-lg border border-border">
+    <div className="max-h-80 overflow-y-auto overscroll-contain divide-y divide-border rounded-lg border border-border" role="region" aria-label={tr("Список возможностей")} tabIndex={0}>
       {options.map((row) => {
         const checked = selected.includes(row.id);
         return (

@@ -5,7 +5,7 @@ import type { InstalledPluginRecord, rpcContract } from "../../shared/rpc-contra
 import { failureNotice } from "../data/persist";
 import { createRpcAgencyApi, type RpcCaller } from "../data/rpc-agency-api";
 import { tr } from "../i18n";
-import { Button, InfoHint, PageHead } from "./shared";
+import { Button, InfoHint, PageHead, SearchInput } from "./shared";
 
 /** What a plugin gives an employee's launch. A plugin with none of these only changes the BB interface. */
 export type PluginContribution = "instructions" | "skill" | "tools";
@@ -67,6 +67,7 @@ export function AgentPluginsPanel({ selected, onChange, notice }: { selected: st
   const noticeRef = useRef(notice);
   noticeRef.current = notice;
   const [plugins, setPlugins] = useState<InstalledPluginRecord[] | null>(null);
+  const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | PluginContribution>("all");
   useEffect(() => {
     let live = true;
@@ -84,16 +85,19 @@ export function AgentPluginsPanel({ selected, onChange, notice }: { selected: st
   }, []);
 
   const candidates = employeePluginCandidates(plugins ?? [], selected);
-  const rows = filter === "all" ? candidates : candidates.filter((plugin) => pluginContributions(plugin).includes(filter));
+  const query = search.trim().toLocaleLowerCase();
+  const matches = (text: string) => text.toLocaleLowerCase().includes(query);
+  const rows = candidates.filter(plugin => (filter === "all" || pluginContributions(plugin).includes(filter)) && matches([plugin.name,plugin.id,plugin.description,...plugin.toolNames].join(" ")));
   const hidden = interfaceOnlyPlugins(plugins ?? []).filter((plugin) => !selected.includes(plugin.id));
-  const missing = selected.filter((id) => plugins && !plugins.some((plugin) => plugin.id === id));
+  const missing = selected.filter((id) => plugins && !plugins.some((plugin) => plugin.id === id) && matches(id));
   return (
     <>
       <PageHead
         level={2}
         title="Плагины сотрудника"
-        description={tr("Отмечено: {count}. Эти плагины включаются в пакет задания. Чтобы ограничить загрузку остальных плагинов в сессию, настройте служебный контекст на вкладке «Навыки».", { count: selected.length })}
+        description={tr("Отмечено: {count}. На VK-сборке этот список ограничивает плагины новой сессии. Агентство и плагины выбранных навыков добавляются автоматически. Исключения отдела и сотрудника задаются в дополнительных настройках контекста.", { count: selected.length })}
       />
+      <SearchInput aria-label={tr("Поиск плагинов")} placeholder={tr("Найти плагин…")} value={search} onChange={event=>setSearch(event.target.value)}/>
       {plugins === null ? (
         <p className="text-sm text-muted-foreground">{tr("Читаем установленные плагины…")}</p>
       ) : (
@@ -115,7 +119,7 @@ export function AgentPluginsPanel({ selected, onChange, notice }: { selected: st
             ))}
           </InfoHint>
         </div>
-        <div className="divide-y divide-border rounded-lg border border-border" data-testid="agent-plugins">
+        <div className="max-h-80 overflow-y-auto overscroll-contain divide-y divide-border rounded-lg border border-border" data-testid="agent-plugins" role="region" aria-label={tr("Список плагинов")} tabIndex={0}>
           {rows.map((plugin) => {
             const checked = selected.includes(plugin.id);
             const warning = PLUGIN_WARNINGS[plugin.id];
@@ -154,7 +158,7 @@ export function AgentPluginsPanel({ selected, onChange, notice }: { selected: st
               </span>
             </label>
           ))}
-          {!rows.length && !missing.length && <p className="px-3 py-4 text-sm text-muted-foreground">{tr(filter === "all" ? "В BB нет плагинов с инструкциями, навыками или инструментами для сотрудников." : "Под этот фильтр плагинов нет.")}</p>}
+          {!rows.length && !missing.length && <p className="px-3 py-4 text-sm text-muted-foreground">{tr(query ? "По запросу ничего не найдено." : filter === "all" ? "В BB нет плагинов с инструкциями, навыками или инструментами для сотрудников." : "Под этот фильтр плагинов нет.")}</p>}
         </div>
         {hidden.length > 0 && (
           <p className="pt-2 text-xs text-muted-foreground" title={hidden.map((plugin) => plugin.name).join(", ")}>

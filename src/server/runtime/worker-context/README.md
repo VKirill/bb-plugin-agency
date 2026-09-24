@@ -10,7 +10,7 @@ Optional integration with [VK session policy](https://github.com/VKirill/bb/blob
 
 ## Settings and launch
 
-Owner configures **employee → Skills** or **department → Skill library**. SQLite stores per-scope rules, revisions and idempotency receipts. RPC/CLI saves require requestId and expectedRevision (0 when absent). Department fields form defaults; explicit employee fields replace them. Missing fields inherit. Empty policy resets to inheritance. No recursive department-parent inheritance.
+Existing **employee → Skills / Plugins** profile selections are the default VK allowlists; no second opt-in or copied lists. Extra filters live in **employee → Execution → Advanced context settings** and **department → Skill library**. Skill and plugin lists have a 320px scroll area with search outside. SQLite stores per-scope rules, revisions and idempotency receipts. RPC/CLI saves require requestId and expectedRevision (0 when absent). Department fields form defaults; explicit employee fields replace them. Missing fields inherit, falling back to assigned profile/task lists for skills and BB plugins. Empty policy resets to those defaults. No recursive department-parent inheritance.
 
 | Filter | Effect |
 | --- | --- |

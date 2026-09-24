@@ -39,23 +39,23 @@ export function WorkerContextPanel({scope,scopeId,skills=[],notice}:{scope:"agen
  if(!view.available)return null;
  const change=(key:keyof WorkerContextPolicy,value:unknown)=>setDraft(current=>{const next={...current,[key]:value};if(value===undefined)delete next[key];return next;});
  const dirty=JSON.stringify(draft)!==JSON.stringify(view.policy);
- return <Panel title="Служебный контекст (VK)">
+ return <Panel title={scope === "agent" ? "Дополнительные настройки контекста" : "Служебный контекст (VK)"}>
   <fieldset disabled={pending} className="space-y-4" data-testid="worker-context">
-   <p className="text-sm text-muted-foreground">{tr("Отдел задаёт основу. Сотрудник переопределяет отдельные поля. Без настроек действуют правила BB и раздела. Изменения получает новая сессия; уже работающие сотрудники сохраняют прежний контекст.")}</p>
+   <p className="text-sm text-muted-foreground">{tr("Отдел задаёт основу. Сотрудник переопределяет отдельные поля. По умолчанию используются списки профиля сотрудника. Изменения получает новая сессия; уже работающие сотрудники сохраняют прежний контекст.")}</p>
    <p className="text-sm text-muted-foreground">{tr("Своя политика заменяет правила контекста project-folders для служебного треда. Агентство и его обязательные навыки остаются доступны. Это фильтр загрузки, а не ограничение прав доступа.")}</p>
    {view.inherited?.length>0&&<details className="text-sm"><summary>{tr("Настройки отделов сотрудника")}</summary>{view.inherited.map(d=><div key={d.departmentId} className="mt-2"><strong>{d.name}</strong><ul>{Object.entries({...FILTERS,...FLAGS}).map(([key,label])=>{const value=d.policy[key as keyof WorkerContextPolicy];return <li key={key}>{tr(label)}: {value===undefined?tr("Наследовать"):typeof value==="boolean"?tr(value?"Загружать":"Не загружать"): `${tr(value.mode==="assigned"?"Только назначенное":value.mode==="allow"?"Только перечисленные":"Все, кроме перечисленных")} · ${value.names.join(", ") || "—"}`}</li>;})}</ul></div>)}</details>}
-   <Button variant="outline" size="sm" disabled={pending} onClick={()=>setDraft({skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]},mcpServers:{mode:"allow",names:[]},nativePlugins:{mode:"allow",names:[]}})}>{tr("Только назначенное в профиле и задаче")}</Button>
-   <SearchInput aria-label={tr("Поиск в контексте")} placeholder={tr("Найти навык или плагин…")} value={search} onChange={e=>setSearch(e.target.value)}/>
+   {scope === "department" && <Button variant="outline" size="sm" disabled={pending} onClick={()=>setDraft({skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]},mcpServers:{mode:"allow",names:[]},nativePlugins:{mode:"allow",names:[]}})}>{tr("Только назначенное в профиле и задаче")}</Button>}
+   {scope === "department" ? <SearchInput aria-label={tr("Поиск в контексте")} placeholder={tr("Найти навык или плагин…")} value={search} onChange={e=>setSearch(e.target.value)}/> : <p className="text-sm text-muted-foreground">{tr("Основные списки находятся на вкладках «Навыки» и «Плагины» и сохраняются кнопкой «Сохранить профиль». Здесь задаются только исключения, MCP, плагины CLI и инструкции.")}</p>}
    {Object.entries(FILTERS).map(([raw,label])=>{
     const key=raw as keyof typeof FILTERS;const rule=draft[key];
     const options=[{value:"inherit",label:"Наследовать"},...(key==="skills"||key==="bbPlugins"?[{value:"assigned",label:"Только назначенное"}]:[]),{value:"allow",label:"Только перечисленные"},{value:"deny",label:"Все, кроме перечисленных"}];
     const mode=!rule?"inherit":rule.mode;
     const choices=key==="skills"?[...new Set(skills.map(s=>s.label))].map(id=>({id,detail:""})):key==="bbPlugins"?view.contributions.map(c=>({id:c.pluginId,detail:`${c.tools.length} ${tr("инструментов")} · ${c.skills.length} ${tr("навыков")}`})):[];
     return <div key={key} className="space-y-2 border-t border-border pt-3">
-     <Choice label={label} value={mode} options={options} onChange={value=>change(key,value==="inherit"?undefined:{mode:value==="all"?"deny":value,names:value==="all"?[]:rule?.names??[]})}/>
+     <Choice label={label} value={mode} options={options} onChange={value=>change(key,value==="inherit"?undefined:{mode:value,names:rule?.names??[]})}/>
      {rule&&<>
       <TextField label="Имена: по одному в строке; * в конце — префикс" multiline value={rule.names.join("\n")} onChange={text=>change(key,{...rule,names:text.split("\n")})}/>
-      {choices.length>0&&<div className="max-h-48 overflow-auto rounded-md border border-border">{choices.filter(c=>c.id.toLowerCase().includes(search.toLowerCase())).map(c=><label key={c.id} className="flex items-center gap-2 px-3 py-2 text-sm"><Checkbox checked={rule.names.includes(c.id)} disabled={pending} onCheckedChange={checked=>change(key,{...rule,names:checked?[...rule.names.filter(Boolean),c.id]:rule.names.filter(n=>n!==c.id)})}/><span>{c.id} <span className="text-muted-foreground">{c.detail}</span></span></label>)}</div>}
+      {scope === "department" && choices.length>0&&<div className="max-h-48 overflow-auto rounded-md border border-border">{choices.filter(c=>c.id.toLowerCase().includes(search.toLowerCase())).map(c=><label key={c.id} className="flex items-center gap-2 px-3 py-2 text-sm"><Checkbox checked={rule.names.includes(c.id)} disabled={pending} onCheckedChange={checked=>change(key,{...rule,names:checked?[...rule.names.filter(Boolean),c.id]:rule.names.filter(n=>n!==c.id)})}/><span>{c.id} <span className="text-muted-foreground">{c.detail}</span></span></label>)}</div>}
      </>}
     </div>;
    })}

@@ -29,6 +29,10 @@ export function saveWorkerContext(db: SqlDatabase, raw: unknown) {
 export function contextForLaunch(db: SqlDatabase, departmentId: string, agentId: string) {
  const department = readWorkerContext(db,{scope:"department",scopeId:departmentId});
  const agent = readWorkerContext(db,{scope:"agent",scopeId:agentId});
- const policy: WorkerContextPolicy = {...department.policy,...agent.policy};
+ // Existing profile lists are the default VK allowlists, not a second opt-in configuration.
+ const policy: WorkerContextPolicy = {
+  skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]},
+  ...department.policy,...agent.policy,
+ };
  return Object.keys(policy).length ? {policy,departmentRevision:department.revision,agentRevision:agent.revision} : null;
 }
