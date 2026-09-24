@@ -11,6 +11,8 @@ export const jobDiagnosticsViewSchema = z.object({
   jobId: z.string(), jobKey: z.string(), history: z.string(),
   attempts: z.array(z.object({ attemptId: z.string(), threadId: z.string().nullable(), state: z.string(), createdAt: z.string() })),
   trace: traceViewSchema,
+  observerHealth: z.array(z.object({ launchId: z.string(), jobId: z.string(), threadId: z.string(), stage: z.string(), code: z.string(),
+    firstAt: z.string(), lastAt: z.string(), failures: z.number().int(), notifiedAt: z.string().nullable() })).default([]),
   conversation: z.object({ threadId: z.string().nullable(), entries: z.array(z.object({ seq: z.number(), type: z.string(), text: z.string() })),
     nextBeforeSeq: z.number().nullable(), error: z.string().nullable() }),
 }).strict();

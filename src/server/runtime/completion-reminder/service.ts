@@ -35,6 +35,7 @@ export type ReminderReading = {
 };
 
 export type ReminderPorts = {
+  isActive?: () => boolean;
   db: SqlDatabase;
   getJob: (jobId: string) => Job | undefined;
   /** Children that are not done or canceled. */
@@ -130,6 +131,7 @@ export async function remindIncompleteWorker(
   row: ReminderRow,
   reading: ReminderReading,
 ): Promise<ReminderOutcome> {
+  if (ports.isActive?.() === false) return "skipped";
   const job = ports.getJob(row.jobId);
   const attempt = ports.attemptForLaunch(row.launchId);
   if (!job || !attempt || attempt.state !== "running" || job.state !== "running") return "skipped";
@@ -192,6 +194,7 @@ export async function remindIncompleteWorker(
       ? handInCommentReminderText(job.key, attempt.id, count, AGENT_MESSAGE_LANGUAGE, limit)
       : completionReminderText(job.key, attempt.id, count, AGENT_MESSAGE_LANGUAGE, limit);
   const outcome = await ports.send(row.threadId, text);
+  if (ports.isActive?.() === false) return "skipped";
   if (outcome.kind === "rejected") return "skipped";
   upsert(ports.db, { ...current, count, idle_since: null, awaiting_turn: 1, last_sent_at: now }, now);
   return "sent";

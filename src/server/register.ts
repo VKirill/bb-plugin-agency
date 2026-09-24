@@ -1,3 +1,5 @@
+import { createRuntimeLifetime, createBoundedReader, observationErrorCode } from "./runtime/observation/control";
+import { recordObservation } from "./runtime/observation/health";
 import { readThreadFailure, resumeAfterHostReconnect, type ThreadFailure } from "./runtime/host-reconnect/service";
 import { sweepProgressSignals } from "./lead-control/progress-watch";
 import { ensureRecoveryTriage } from "./runtime/recovery/escalation";
@@ -151,6 +153,9 @@ import { buildAgencyInstructions, DELEGATION_MODES, parseDelegationMode, type De
 import { applyPendingSessionPolicy, resolveSessionPolicy, saveSessionPolicy } from "./delegation/session-policy";
 
 export function registerAgency(bb: BbPluginApi) {
+  const lifetime = createRuntimeLifetime();
+  bb.onDispose(lifetime.dispose);
+  const readRuntime = createBoundedReader(lifetime.isActive);
   const documents = bb.hosts.experimental_client({ contract: documentHostContract });
   const prepareDemoDocument = async (
     input: Parameters<typeof documentHostContract.materialize.input.parse>[0],
@@ -164,7 +169,7 @@ export function registerAgency(bb: BbPluginApi) {
   const telegram=telegramAdapter(bb);
   const machines=machineDirectory(bb);
   const db = openDatabase(bb);
-  configureTrace(db, () => bb.log.warn("Agency trace write failed; execution continues. Inspect trace.health and database storage."));
+  configureTrace(db, () => { if (lifetime.isActive()) bb.log.warn("Agency trace write failed; execution continues. Inspect trace.health and database storage."); });
   recordTrace(db, { step: "runtime", outcome: "succeeded", reason: "loaded" });
   const inbox = createInbox(db);
   const plugins = createPluginDirectory({ listPlugins: () => bb.sdk.plugins.list(), addsInstructions: createInstructionDetector() });
@@ -177,6 +182,7 @@ export function registerAgency(bb: BbPluginApi) {
     }),
   });
   const onChanged = () => {
+    if (!lifetime.isActive()) return;
     try {
       bb.realtime.publish("domain-changed", null);
     } catch (error) {
@@ -463,6 +469,7 @@ export function registerAgency(bb: BbPluginApi) {
     });
   };
   const skillPinDeps: SkillPinDeps = {
+    isActive: lifetime.isActive,
     catalog: createSdkSkillCatalogPort(bb.sdk.skills),
     scope: () => {
       const binding = listStoredBindings(db).find((row) => !row.archivedAt);
@@ -1969,7 +1976,8 @@ export function registerAgency(bb: BbPluginApi) {
       if (triage && ["backlog", "queued"].includes(triage.state)) queueJobForLaunch(triage, uuidV5(LAUNCH_QUEUE_NAMESPACE, `recovery-queue:${triage.id}`));
       if (triage) return;
     }
-    void flushParentWakes({ db, send, now }).catch(() => {
+    void flushParentWakes({ isActive: lifetime.isActive, db, send, now }).catch(() => {
+      if (!lifetime.isActive()) return;
       recordTrace(db, { jobId: job.id, step: "lead.delivery", outcome: "failed", reason: "flush_exception", collapse: true });
     });
     const delivered = db.prepare("SELECT 1 FROM agency_parent_wake WHERE activity_id = ? AND send_state IN ('confirmed', 'queued') LIMIT 1").get(activity.id);
@@ -2045,7 +2053,7 @@ export function registerAgency(bb: BbPluginApi) {
             reworkLimit: (reworkJob) => store.rulesForDepartment(reworkJob.departmentId).reworkLimit,
             currentPublishedHash: async (jobId) => {
               const published = await readJobPublishedArtifact(
-                { ctx: access.value.ctx, store, db, documents },
+                { ctx: access.value.ctx, store, db, documents, isActive: lifetime.isActive },
                 jobId,
               );
               return published.ok && published.value.publishedVerified ? published.value.publishedHash : null;
@@ -2085,10 +2093,41 @@ export function registerAgency(bb: BbPluginApi) {
     });
     if (!moved.ok) return false;
     systemComment(job, comment);
-    void flushParentWakes({ db, send, now: new Date().toISOString() }).catch(() => undefined);
+    void flushParentWakes({ isActive: lifetime.isActive, db, send, now: new Date().toISOString() }).catch(() => undefined);
     return true;
   };
+  const onObservation = (row: { jobId: string; launchId: string; threadId: string }, stage: string, code: string | null) => {
+    if (!lifetime.isActive()) return;
+    const outcome = recordObservation(db, row, stage, code, new Date().toISOString(), (fault) => {
+      const job = store.getJob(row.jobId);
+      const attempt = attemptForLaunch(row.launchId);
+      if (!job || job.state !== "running" || attempt?.state !== "running") return false;
+      const en = agencyLanguage() === "en";
+      return blockWithReason(job, en
+        ? `Agency observer cannot verify execution (${fault.stage}/${fault.code}, since ${fault.firstAt}). Lead: inspect job diagnose, BB connectivity and storage. Keep the same attempt; do not submit a partial result or restart blindly.`
+        : `Наблюдатель Агентства не может проверить исполнение (${fault.stage}/${fault.code}, с ${fault.firstAt}). Руководителю: проверьте job diagnose, связь BB и хранилище. Сохраните попытку; не сдавайте неполный результат и не перезапускайте вслепую.`);
+    });
+    if (outcome !== "healthy") {
+      recordTrace(db, { jobId: row.jobId, launchId: row.launchId, threadId: row.threadId,
+        step: `observer.${stage}`, outcome: outcome === "recovered" ? "succeeded" : "failed", reason: code ?? "recovered", collapse: true });
+      if (outcome === "notified" || outcome === "recovered") {
+        bb.log.info(`Observer health: ${JSON.stringify({ ...row, stage, code, outcome })}`);
+        onChanged();
+      }
+    }
+  };
+  const observeRuntime = async <T,>(row: { jobId: string; launchId: string; threadId: string }, stage: string, read: () => Promise<T>): Promise<T> => {
+    try {
+      const result = await readRuntime(`${row.launchId}:${stage}`, read);
+      onObservation(row, stage, null);
+      return result;
+    } catch (error) {
+      onObservation(row, stage, observationErrorCode(error));
+      throw error;
+    }
+  };
   const reminderPorts = (): ReminderPorts => ({
+    isActive: lifetime.isActive,
     db,
     waitingDependencies: (job) => completionWaitingDependencies(db, job),
     getJob: (jobId) => store.getJob(jobId),
@@ -2104,22 +2143,14 @@ export function registerAgency(bb: BbPluginApi) {
   });
   /** Why BB put the thread in error, from its own events; null when it did not say. */
   const providerErrorDetail = async (threadId: string): Promise<ThreadFailure> => {
-    try {
-      const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "40",
-        types: ["provider/error", "system/error", "client/turn/requested", "turn/started"] });
-      return readThreadFailure(events);
-    } catch {
-      return { detail: null, willRetry: null, hostTurn: null };
-    }
+    const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "40",
+      types: ["provider/error", "system/error", "client/turn/requested", "turn/started"] });
+    return readThreadFailure(events);
   };
   const jobHostOnline = async (job: Job): Promise<boolean | null> => {
     const binding = store.getBinding(job.bindingId);
     if (!binding) return null;
-    try {
-      return (await bb.sdk.hosts.get({ hostId: binding.hostId })).status === "connected";
-    } catch {
-      return null;
-    }
+    return (await bb.sdk.hosts.get({ hostId: binding.hostId })).status === "connected";
   };
   const usedLaunchModel = (version: { providerId: string; model: string }, launchId: string) => {
     const attempt = db
@@ -2173,7 +2204,7 @@ export function registerAgency(bb: BbPluginApi) {
   // Launch queue: waiting jobs start as soon as their limits allow.
   let queueBusy = false;
   const runLaunchQueue = async () => {
-    if (queueBusy) return;
+    if (!lifetime.isActive() || queueBusy) return;
     queueBusy = true;
     try {
       sweepProgressSignals(db, store.getJob, notifyQueueLead);
@@ -2199,8 +2230,10 @@ export function registerAgency(bb: BbPluginApi) {
       if (repairQueuedJobs(db, new Date().toISOString()).length) onChanged();
       if (reopenDroppedAssignedJobs(db, new Date().toISOString()).length) onChanged();
       const pins = await readSkillPinStatus(skillPinDeps);
+      if (!lifetime.isActive()) return;
       if (pins.ok && pins.value.editable && !pins.value.inSync && pins.value.rows.every((row) => row.currentHash)) {
         const pinned = await pinCurrentSkills(skillPinDeps);
+        if (!lifetime.isActive()) return;
         if (pinned.ok) bb.log.info("Launch queue: pinned current Agency skill versions");
         else bb.log.warn(`Launch queue: could not pin skill versions: ${pinned.error.message}`);
       }
@@ -2211,6 +2244,7 @@ export function registerAgency(bb: BbPluginApi) {
         if (queued.ok) onChanged();
       }
       const result = await sweepLaunchQueue({
+        isActive: lifetime.isActive,
         db,
         notifyLead: notifyQueueLead,
         getJob: (jobId) => store.getJob(jobId),
@@ -2229,6 +2263,7 @@ export function registerAgency(bb: BbPluginApi) {
         },
         now: () => new Date().toISOString(),
       });
+      if (!lifetime.isActive()) return;
       if (result.launched || result.removed) onChanged();
       const conveyor = conveyorPorts();
       if (conveyor) {
@@ -2240,8 +2275,10 @@ export function registerAgency(bb: BbPluginApi) {
         if (closed > 0) onChanged();
       }
       await flushClientBounces({ db, send, now: new Date().toISOString() });
+      if (!lifetime.isActive()) return;
       await flushStuckOwnerAnswers();
     } catch (error) {
+      if (!lifetime.isActive()) return;
       recordTrace(db, { step: "queue.sweep", outcome: "failed", reason: "exception", collapse: true });
       bb.log.warn(`Launch queue: ${String(error)}`);
     } finally {
@@ -2317,6 +2354,7 @@ export function registerAgency(bb: BbPluginApi) {
   const dispatcherEngine = { db, launch: intentJobs };
   let dispatcherBusy = false;
   const scanEscapes = async () => {
+    if (!lifetime.isActive()) return;
     const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const attempts = (
       db
@@ -2333,6 +2371,7 @@ export function registerAgency(bb: BbPluginApi) {
     ).map((row) => ({ attemptId: row.id, jobId: row.job_id, threadId: row.thread_id }));
     const grew = await scanSandboxEscapes(
       {
+        isActive: lifetime.isActive,
         db,
         now: () => new Date().toISOString(),
         onReadError: (threadId, error) => bb.log.warn(`Sandbox escape scan of ${threadId}: ${error instanceof Error ? error.message : String(error)}`),
@@ -2451,8 +2490,9 @@ export function registerAgency(bb: BbPluginApi) {
     }
   };
   const runDispatcher = async () => {
+    if (!lifetime.isActive()) return;
     void plugins.list().catch(() => undefined);
-    void scanEscapes().catch((error) => bb.log.warn(`Sandbox escape scan: ${String(error)}`));
+    void scanEscapes().catch((error) => { if (lifetime.isActive()) bb.log.warn(`Sandbox escape scan: ${observationErrorCode(error)}`); });
     if (dispatcherBusy) return;
     dispatcherBusy = true;
     try {
@@ -2556,7 +2596,7 @@ export function registerAgency(bb: BbPluginApi) {
         now: () => new Date(),
       }).catch((error) => bb.log.warn(`Telegram queue: ${String(error)}`));
     } catch (error) {
-      bb.log.warn(`Dispatcher: ${String(error)}`);
+      if (lifetime.isActive()) bb.log.warn(`Dispatcher: ${observationErrorCode(error)}`);
     } finally {
       dispatcherBusy = false;
     }
@@ -2593,6 +2633,7 @@ export function registerAgency(bb: BbPluginApi) {
   bb.onDispose(() => clearInterval(dispatcherSweep));
   const dueSweep = setInterval(() => {
     void sweepDueReminders({
+      isActive: lifetime.isActive,
       db,
       listDueJobs: () =>
         (db.prepare(`SELECT id FROM agency_job WHERE due_at IS NOT NULL AND state NOT IN ('done', 'canceled')`).all() as { id: string }[])
@@ -2610,12 +2651,13 @@ export function registerAgency(bb: BbPluginApi) {
       (sent) => {
         if (sent > 0) onChanged();
       },
-      (error) => bb.log.warn(`Due reminders: ${String(error)}`),
+      (error) => { if (lifetime.isActive()) bb.log.warn(`Due reminders: ${observationErrorCode(error)}`); },
     );
   }, DUE_SWEEP_INTERVAL_MS);
   bb.onDispose(() => clearInterval(dueSweep));
   const runStaleSweep = () =>
     sweepStaleNudges({
+      isActive: lifetime.isActive,
       db,
       getJob: (jobId) => store.getJob(jobId),
       rulesFor: (departmentId) => store.rulesForDepartment(departmentId),
@@ -2640,25 +2682,27 @@ export function registerAgency(bb: BbPluginApi) {
           }
         }
       },
-      (error) => bb.log.warn(`Stale nudge: ${String(error)}`),
+      (error) => { if (lifetime.isActive()) bb.log.warn(`Stale nudge: ${observationErrorCode(error)}`); },
     );
   const staleSweep = setInterval(() => void runStaleSweep(), STALE_SWEEP_INTERVAL_MS);
   bb.onDispose(() => clearInterval(staleSweep));
   void runStaleSweep();
   const readingChanged = createReadingChangeGate();
   const completionWatch = createCompletionWatch({
+    isActive: lifetime.isActive,
+    onObservation,
+    onGlobalError: (code) => { if (lifetime.isActive()) bb.log.warn(`Observer sweep: ${code}`); },
     threads: officialThreads,
     listBoundLaunches: () => listBoundLaunchWatches(db),
     readPublishedForJob: async (jobId) => {
       const access = resolveRpcAccess(db);
       if (!access.ok) return { publishedVerified: false, acceptedVerified: false, publishedHash: null };
       const published = await readJobPublishedArtifact(
-        { ctx: access.value.ctx, store, db, documents },
+        { ctx: access.value.ctx, store, db, documents, isActive: lifetime.isActive },
         jobId,
       );
-      return published.ok
-        ? published.value
-        : { publishedVerified: false, acceptedVerified: false, publishedHash: null };
+      if (!published.ok) throw Object.assign(new Error("Artifact observation failed"), { code: published.error.code });
+      return published.value;
     },
     applyReading: async (row, reading, publishedHash, thread) => {
       const applied = await (async () => {
@@ -2696,9 +2740,10 @@ export function registerAgency(bb: BbPluginApi) {
             attemptAcceptedApplied: false,
           };
         }
-        await flushParentWakes({ db, send, now: new Date().toISOString() });
+        await flushParentWakes({ isActive: lifetime.isActive, db, send, now: new Date().toISOString() });
         return applied.value;
       })();
+      if (!lifetime.isActive()) return applied;
       if (applied.reviewApplied) {
         const conveyor = conveyorPorts();
         if (conveyor) {
@@ -2713,50 +2758,77 @@ export function registerAgency(bb: BbPluginApi) {
           publishedVerified: reading.publishedVerified && !commentMissing,
           missing: commentMissing ? "comment" : "version",
         });
+        if (!lifetime.isActive()) return applied;
+        onObservation(row, "reminder", null);
         if (outcome !== "skipped" && outcome !== "waiting") {
           bb.log.info(`Completion wake: ${JSON.stringify({ jobId: row.jobId, launchId: row.launchId, threadId: row.threadId, outcome })}`);
           onChanged();
         }
       } catch (error) {
-        bb.log.warn(`Completion reminder for ${row.jobId}: ${String(error)}`);
+        if (!lifetime.isActive()) return applied;
+        onObservation(row, "reminder", observationErrorCode(error));
       }
       try {
         // A thread in error may be waiting for BB itself: read the reason and the machine first.
         let errorDetail: string | null = null;
         let bbWillRetry: boolean | null = null;
         let hostOnline: boolean | null = null;
-        if (reading.threadStatus === "error") {
-          const reported = await providerErrorDetail(row.threadId);
-          errorDetail = reported.detail;
-          bbWillRetry = reported.willRetry;
-          const job = store.getJob(row.jobId);
-          hostOnline = job ? await jobHostOnline(job) : null;
-          const reconnect = await resumeAfterHostReconnect({
-            db, getJob: store.getJob, attemptForLaunch,
-            hostOnline: jobHostOnline,
-            threadStatus: async (threadId) => (await bb.sdk.threads.get({ threadId })).status,
-            queuedCount: async (threadId) => (await bb.sdk.threads.queuedMessages.list({ threadId })).length,
-            retry: (threadId, turnRequestId) => bb.sdk.threads.retry({ threadId, turnRequestId,
-              reason: "Agency: host reconnected; resume the exact failed turn in the same attempt" }),
-            block: blockWithReason, comment: systemComment, now: () => new Date().toISOString(),
-            log: (event) => bb.log.info(`Host reconnect: ${JSON.stringify(event)}`),
-          }, row, reported);
-          if (reconnect === "retried" || reconnect === "blocked") onChanged();
-          // A dispatched retry invalidates this reading. Waiting still goes through
-          // the bounded watchdog, so an offline host/parked queue cannot hide forever.
-          if (reconnect === "retried" || reconnect === "blocked") return applied;
-          if (reconnect === "waiting") bbWillRetry = true;
+        let queuedWork: boolean | null = null;
+        let observationsKnown = true;
+        if (reading.threadStatus === "active") {
+          for (const stage of ["failure", "host", "queue", "retry_status", "queue_delivery"]) onObservation(row, stage, null);
         }
+        if (reading.threadStatus === "error") {
+          const job = store.getJob(row.jobId);
+          const observations = await Promise.allSettled([
+            observeRuntime(row, "failure", () => providerErrorDetail(row.threadId)),
+            observeRuntime(row, "host", () => job ? jobHostOnline(job) : Promise.resolve(null)),
+            observeRuntime(row, "queue", () => bb.sdk.threads.queuedMessages.list({ threadId: row.threadId })),
+          ]);
+          if (!lifetime.isActive()) return applied;
+          const [failure, host, queue] = observations;
+          observationsKnown = observations.every(value => value.status === "fulfilled");
+          if (failure.status === "fulfilled") { errorDetail = failure.value.detail; bbWillRetry = failure.value.willRetry; }
+          if (host.status === "fulfilled") hostOnline = host.value;
+          if (queue.status === "fulfilled") {
+            queuedWork = queue.value.some(entry => !entry.failureReason);
+            const stuck = hostOnline === true && queue.value.some(entry => entry.failureReason && (!entry.sendAt || entry.sendAt <= Date.now()));
+            onObservation(row, "queue_delivery", stuck ? "queued_dispatch_failed" : null);
+          }
+          if (observationsKnown && failure.status === "fulfilled" && queue.status === "fulfilled") {
+            try {
+              const reconnect = await resumeAfterHostReconnect({
+                isActive: lifetime.isActive, db, getJob: store.getJob, attemptForLaunch,
+                hostOnline: async () => hostOnline,
+                threadStatus: (threadId) => observeRuntime(row, "retry_status", async () => (await bb.sdk.threads.get({ threadId })).status),
+                queuedCount: async () => queue.value.length,
+                retry: (threadId, turnRequestId) => bb.sdk.threads.retry({ threadId, turnRequestId,
+                  reason: "Agency: resume the exact transiently failed turn in the same attempt" }),
+                block: blockWithReason, comment: systemComment, now: () => new Date().toISOString(),
+                log: (event) => { if (lifetime.isActive()) {
+                  bb.log.info(`Execution retry: ${JSON.stringify(event)}`);
+                  recordTrace(db, { ...event, step: "execution.retry", requestId: event.requestId,
+                    outcome: event.outcome === "sent" || event.outcome === "queued" ? "succeeded" : "waiting", reason: event.outcome });
+                } },
+              }, row, failure.value);
+              if (!lifetime.isActive()) return applied;
+              if (reconnect === "retried" || reconnect === "blocked") { onChanged(); return applied; }
+            } catch { observationsKnown = false; /* observeRuntime recorded retry_status */ }
+          }
+        }
+        if (!lifetime.isActive()) return applied;
         const watched = superviseRun(runWatchPorts({
           providerError: () => errorDetail,
           bbWillRetry: () => bbWillRetry,
           hostOnline: () => hostOnline,
-          switchToFallback: switchJobToFallback,
+          queuedWork: () => queuedWork,
+          switchToFallback: observationsKnown ? switchJobToFallback : undefined,
         }), row, {
           threadStatus: reading.threadStatus,
           threadUpdatedAt: thread?.updatedAt ? new Date(thread.updatedAt).toISOString() : null,
           backgroundAgents: thread?.activeBackgroundAgentCount ?? 0,
         });
+        onObservation(row, "run_watch", null);
         if (watched === "warned" || watched === "blocked") onChanged();
         if (watched === "blocked") {
           const conveyor = conveyorPorts();
@@ -2766,7 +2838,7 @@ export function registerAgency(bb: BbPluginApi) {
           }
         }
       } catch (error) {
-        bb.log.warn(`Run watch for ${row.jobId}: ${String(error)}`);
+        if (lifetime.isActive()) onObservation(row, "run_watch", observationErrorCode(error));
       }
       return applied;
     },
@@ -2856,7 +2928,7 @@ export function registerAgency(bb: BbPluginApi) {
   const recoveredAt = new Date().toISOString();
   recoverParentWakesFromActivities(db, recoveredAt);
   recoverClientBouncesFromOpenWaits(db, recoveredAt);
-  void flushParentWakes({ db, send, now: recoveredAt }).catch(() => undefined);
+  void flushParentWakes({ isActive: lifetime.isActive, db, send, now: recoveredAt }).catch(() => undefined);
   void flushClientBounces({ db, send, now: recoveredAt }).catch(() => undefined);
   void flushStuckOwnerAnswers().then(() => recoverOwnerQuestionCards());
   bb.rpc.register(rpcContract, rpcHandlers);

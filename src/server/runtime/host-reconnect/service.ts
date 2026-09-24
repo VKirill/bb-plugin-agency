@@ -1,3 +1,4 @@
+import { failureKind } from "../run-watch/failure-policy";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
 import { agencyLanguage } from "../../i18n/language.js";
@@ -9,25 +10,27 @@ export const HOST_RECONNECT_MIGRATION = `CREATE TABLE agency_host_retry (
 )`;
 
 type Event = { seq: number; type: string; data?: unknown };
-export type ThreadFailure = { detail: string | null; willRetry: boolean | null; hostTurn: { requestId: string; errorSeq: number } | null };
-const HOST_DISCONNECT = /\bHost is not connected\b|\bhost_disconnected\b|\bhost_unavailable\b/i;
+export type ThreadFailure = { detail: string | null; willRetry: boolean | null; retryTurn: { requestId: string; errorSeq: number } | null };
 
 /** Only the current failure and its preceding request; never replay a historical turn. */
 export function readThreadFailure(events: readonly Event[]): ThreadFailure {
   const ordered = [...events].sort((a, b) => b.seq - a.seq);
-  const empty: ThreadFailure = { detail: null, willRetry: null, hostTurn: null };
+  const empty: ThreadFailure = { detail: null, willRetry: null, retryTurn: null };
   const error = ordered.find(e => e.type === "provider/error" || e.type === "system/error");
   if (!error || ordered.some(e => e.seq > error.seq && (e.type === "client/turn/requested" || e.type === "turn/started"))) return empty;
   const data = error.data as { code?: unknown; detail?: unknown; message?: unknown; willRetry?: unknown } | undefined;
-  const detail = [data?.detail, data?.message].find(v => typeof v === "string" && v.trim()) as string | undefined;
+  const rawDetail = [data?.detail, data?.message].find(v => typeof v === "string" && v.trim()) as string | undefined;
+  const code = typeof data?.code === "string" && /^[a-zA-Z0-9_.:-]{1,80}$/.test(data.code) ? data.code : null;
+  const detail = error.type === "provider/error" && code ? `${code}: ${rawDetail ?? ""}` : rawDetail;
   const request = ordered.find(e => e.seq < error.seq && e.type === "client/turn/requested");
   const requestId = (request?.data as { requestId?: unknown } | undefined)?.requestId;
-  const isHost = error.type === "system/error" && data?.code === "thread_command_failed" && HOST_DISCONNECT.test(detail ?? "");
+  const retryable = failureKind(detail) === "transient" && (error.type === "provider/error" || data?.code === "thread_command_failed");
   return { detail: detail ?? null, willRetry: typeof data?.willRetry === "boolean" ? data.willRetry : null,
-    hostTurn: isHost && typeof requestId === "string" && requestId ? { requestId, errorSeq: error.seq } : null };
+    retryTurn: retryable && typeof requestId === "string" && requestId ? { requestId, errorSeq: error.seq } : null };
 }
 
 export type HostReconnectPorts = {
+  isActive?: () => boolean;
   db: SqlDatabase;
   getJob(id: string): Job | undefined;
   attemptForLaunch(id: string): { id: string; state: string } | undefined;
@@ -50,17 +53,21 @@ export async function resumeAfterHostReconnect(
   row: { jobId: string; launchId: string; threadId: string },
   failure: ThreadFailure,
 ): Promise<"skipped" | "waiting" | "retried" | "blocked"> {
-  if (!failure.hostTurn) return "skipped";
+  const active = () => ports.isActive?.() !== false;
+  if (!active() || !failure.retryTurn || failure.willRetry === true) return "skipped";
   let job = ports.getJob(row.jobId);
   const attempt = ports.attemptForLaunch(row.launchId);
   if (!job || job.state !== "running" || attempt?.state !== "running") return "skipped";
   if (await ports.hostOnline(job) !== true) return "waiting";
+  if (!active()) return "skipped";
   if (await ports.queuedCount(row.threadId) > 0) return "waiting";
+  if (!active()) return "skipped";
   if (await ports.threadStatus(row.threadId) !== "error") return "waiting";
+  if (!active()) return "skipped";
   // Re-read after network I/O: a manual stop or lead intervention wins.
   job = ports.getJob(row.jobId);
   if (!job || job.state !== "running" || ports.attemptForLaunch(row.launchId)?.state !== "running") return "skipped";
-  const { requestId, errorSeq } = failure.hostTurn;
+  const { requestId, errorSeq } = failure.retryTurn;
   const now = ports.now();
   const event = (outcome: string) => ports.log({ jobId: job!.id, attemptId: attempt.id, threadId: row.threadId, requestId, outcome });
   const block = (reason: string): "blocked" | "waiting" => {
@@ -86,24 +93,26 @@ export async function resumeAfterHostReconnect(
     return ports.db.prepare("INSERT OR IGNORE INTO agency_host_retry (attempt_id,turn_request_id,job_id,error_seq,state,claimed_at) VALUES (?,?,?,?, 'claimed',?)")
       .run(attempt.id, requestId, job!.id, errorSeq, now).changes ? "claimed" : "existing";
   })();
-  if (claim === "limit") return block("third_host_disconnect");
+  if (claim === "limit") return block("third_transport_failure");
   if (claim !== "claimed") return "waiting";
   event("claimed");
   let result: Awaited<ReturnType<HostReconnectPorts["retry"]>>;
   try {
     result = await ports.retry(row.threadId, requestId);
   } catch {
+    if (!active()) return "skipped";
     ports.db.prepare("UPDATE agency_host_retry SET state = 'uncertain' WHERE attempt_id = ? AND turn_request_id = ?").run(attempt.id, requestId);
     event("uncertain");
     // Another caller/core may have resumed it, or the host may have disconnected
     // after the check. Leave a minute for reconciliation; never duplicate the call.
     return "waiting";
   }
+  if (!active()) return "skipped";
   ports.db.prepare("UPDATE agency_host_retry SET state = 'confirmed', delivery = ? WHERE attempt_id = ? AND turn_request_id = ?")
     .run(result.delivery, attempt.id, requestId);
   event(result.delivery);
   ports.comment(job, agencyLanguage() === "en"
-    ? `Agency: host connection restored. BB retry for turn ${requestId}: ${result.delivery}; same thread ${row.threadId} and attempt ${attempt.id} retained.`
-    : `Агентство: связь с хостом восстановлена. Штатный BB retry для хода ${requestId}: ${result.delivery}; прежние тред ${row.threadId} и попытка ${attempt.id} сохранены.`);
+    ? `Agency: retrying a transient execution failure. BB retry for turn ${requestId}: ${result.delivery}; same thread ${row.threadId} and attempt ${attempt.id} retained.`
+    : `Агентство: повтор временного сбоя исполнения. Штатный BB retry для хода ${requestId}: ${result.delivery}; прежние тред ${row.threadId} и попытка ${attempt.id} сохранены.`);
   return "retried";
 }

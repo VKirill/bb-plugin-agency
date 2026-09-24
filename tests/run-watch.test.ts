@@ -122,7 +122,7 @@ describe("run watch", () => {
 
   it("waits out an error BB retries by itself, and still blocks a dead one", () => {
     // A subscription window: BB waits for the reset and carries the same thread on.
-    const limited = harness({ providerError: () => "Rate limit reached; resets in 42 minutes" });
+    const limited = harness({ providerError: () => "Rate limit reached; resets in 42 minutes", bbWillRetry: () => true });
     // The owner hears it once, then the watch simply waits.
     expect(superviseRun(limited.ports, limited.row, { ...active, threadStatus: "error" })).toBe("warned");
     expect(limited.comments[0]).toContain("BB сам ждёт возможности продолжить");
@@ -175,21 +175,21 @@ describe("run watch", () => {
     expect(superviseRun(dead.ports, dead.row, { ...active, threadStatus: "error" })).toBe("skipped");
   });
 
-  it("waits when the reserve is missing or the switch is refused", () => {
+  it("does not assume a retry when the reserve is missing or refused", () => {
     const waiting = harness({
       providerError: () => "Codex usage limit reached",
       canSwitchToFallback: () => false,
     });
-    expect(superviseRun(waiting.ports, waiting.row, { ...active, threadStatus: "error" })).toBe("warned");
-    waiting.tick(RUN_WATCH_ERROR_MS + 1000);
     expect(superviseRun(waiting.ports, waiting.row, { ...active, threadStatus: "error" })).toBe("ok");
+    waiting.tick(RUN_WATCH_ERROR_MS + 1000);
+    expect(superviseRun(waiting.ports, waiting.row, { ...active, threadStatus: "error" })).toBe("blocked");
 
     const failed = harness({
       providerError: () => "Codex usage limit reached",
       canSwitchToFallback: () => true,
       switchToFallback: () => false,
     });
-    expect(superviseRun(failed.ports, failed.row, { ...active, threadStatus: "error" })).toBe("warned");
+    expect(superviseRun(failed.ports, failed.row, { ...active, threadStatus: "error" })).toBe("ok");
   });
 
   it("leaves idle threads to the completion reminder and restarts the episode", () => {
@@ -323,5 +323,39 @@ describe("supervision after same-attempt BB retry", () => {
     expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
     expect(superviseRun(h.ports, h.row, active)).toBe("skipped");
     expect(h.blocked).toHaveLength(1);
+  });
+});
+
+describe("structured retry and actionable errors", () => {
+  it("trusts willRetry=true even with unfamiliar provider text", () => {
+    const h = harness({ providerError: () => "temporary vendor condition ABC", bbWillRetry: () => true });
+    const error = { ...active, threadStatus: "error" };
+    expect(superviseRun(h.ports, h.row, error)).toBe("warned");
+    h.tick(RUN_WATCH_ERROR_MS + 1);
+    expect(superviseRun(h.ports, h.row, error)).toBe("ok");
+    expect(h.blocked).toEqual([]);
+  });
+  it("does not wait six hours solely because an error mentions timeout/502", () => {
+    const h = harness({ providerError: () => "502 request timeout", bbWillRetry: () => null });
+    const error = { ...active, threadStatus: "error" };
+    expect(superviseRun(h.ports, h.row, error)).toBe("ok");
+    h.tick(RUN_WATCH_ERROR_MS + 1);
+    expect(superviseRun(h.ports, h.row, error)).toBe("blocked");
+    expect(h.blocked[0]).toContain("transient");
+  });
+  it("leaves confirmed queued continuation to BB, including on a usage limit", () => {
+    let switched = false;
+    const h = harness({ providerError: () => "usage limit", bbWillRetry: () => false, queuedWork: () => true,
+      canSwitchToFallback: () => true, switchToFallback: () => { switched = true; return true; } });
+    expect(superviseRun(h.ports, h.row, { ...active, threadStatus: "error" })).toBe("warned");
+    expect(switched).toBe(false); expect(h.blocked).toEqual([]);
+  });
+  it.each([
+    ["401 unauthorized", "auth"], ["context_length_exceeded", "context"],
+    ["model_not_found", "model"], ["spawn ENOENT", "environment"], ["ENOSPC", "environment"],
+  ])("immediately gives the lead an actionable diagnosis for %s", (detail, kind) => {
+    const h = harness({ providerError: () => detail });
+    expect(superviseRun(h.ports, h.row, { ...active, threadStatus: "error" })).toBe("blocked");
+    expect(h.blocked[0]).toContain(`(${kind})`);
   });
 });

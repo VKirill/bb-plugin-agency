@@ -79,3 +79,13 @@ describe("lead diagnostics", () => {
     db.close();
   });
 });
+
+it("shows system/provider failure categories without exposing raw credential-bearing messages", () => {
+  expect(visibleDiagnosticMessages([
+    { seq: 2, type: "system/error", data: { code: "thread_command_failed", detail: "Host is not connected" } },
+    { seq: 1, type: "provider/error", data: { code: "authentication_error", message: "token=private", willRetry: false } },
+  ])).toEqual([
+    { seq: 1, type: "execution_error", text: "kind=auth; willRetry=false; inspect the linked turn for details" },
+    { seq: 2, type: "execution_error", text: "kind=transient; willRetry=unknown; inspect the linked turn for details" },
+  ]);
+});

@@ -42,15 +42,18 @@ type AttemptRef = { attemptId: string; jobId: string; threadId: string };
  * attempts whose count grew. A failing thread read is skipped until the next pass.
  */
 export async function scanSandboxEscapes(
-  deps: { db: SqlDatabase; events: SandboxEventsPort; now: () => string; pageSize?: number; maxPages?: number; onReadError?: (threadId: string, error: unknown) => void },
+  deps: { isActive?: () => boolean; db: SqlDatabase; events: SandboxEventsPort; now: () => string; pageSize?: number; maxPages?: number; onReadError?: (threadId: string, error: unknown) => void },
   attempts: readonly AttemptRef[],
 ): Promise<string[]> {
   // BB returns at most 100 thread events per call.
   // BB refuses an event limit of 100 («Thread event limit cannot exceed 100»), so pages stay smaller.
+  const active = () => deps.isActive?.() !== false;
+  if (!active()) return [];
   const pageSize = Math.min(deps.pageSize ?? 50, 99);
   const maxPages = deps.maxPages ?? 20;
   const grew: string[] = [];
   for (const attempt of attempts) {
+    if (!active()) return grew;
     const row = deps.db.prepare(`SELECT commands, last_seq FROM agency_sandbox_escape WHERE attempt_id = ?`).get(attempt.attemptId) as
       | { commands: number; last_seq: string | null }
       | undefined;
@@ -60,6 +63,7 @@ export async function scanSandboxEscapes(
     try {
       for (let page = 0; page < maxPages; page += 1) {
         const chunk = await deps.events.list({ threadId: attempt.threadId, ...(afterSeq ? { afterSeq } : {}), limit: pageSize });
+        if (!active()) return grew;
         read = true;
         for (const event of chunk) if (outsideSandboxItemId(event)) added += 1;
         const last = chunk.at(-1);
@@ -67,6 +71,7 @@ export async function scanSandboxEscapes(
         if (chunk.length < pageSize) break;
       }
     } catch (error) {
+      if (!active()) return grew;
       deps.onReadError?.(attempt.threadId, error);
       if (!read) continue;
     }

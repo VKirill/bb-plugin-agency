@@ -30,20 +30,20 @@ function harness() {
 
 describe("host reconnect", () => {
   it("recognizes the actual system transport error and keeps the original turn ID", () => {
-    expect(failure).toEqual({ detail: "Host is not connected", willRetry: null, hostTurn: { requestId: "creq_failed", errorSeq: 11 } });
+    expect(failure).toEqual({ detail: "Host is not connected", willRetry: null, retryTurn: { requestId: "creq_failed", errorSeq: 11 } });
     expect(readThreadFailure([...events].reverse())).toEqual(failure);
   });
   it("ignores historic failures once any newer request/turn has started", () => {
     for (const type of ["client/turn/requested", "turn/started"]) {
-      expect(readThreadFailure([...events, { seq: 12, type, data: { requestId: "creq_new" } }]).hostTurn).toBeNull();
+      expect(readThreadFailure([...events, { seq: 12, type, data: { requestId: "creq_new" } }]).retryTurn).toBeNull();
     }
   });
   it("never treats provider errors, unrelated system errors or missing requests as transport retries", () => {
-    expect(readThreadFailure([events[1]]).hostTurn).toBeNull();
-    expect(readThreadFailure([events[0], { ...events[1], type: "provider/error" }]).hostTurn).toBeNull();
-    expect(readThreadFailure([events[0], { ...events[1], data: { code: "other", detail: "Host is not connected" } }]).hostTurn).toBeNull();
-    expect(readThreadFailure([events[0], { ...events[1], data: { code: "thread_command_failed", detail: "permission denied" } }]).hostTurn).toBeNull();
-    expect(readThreadFailure([...events, { seq: 12, type: "provider/error", data: { message: "Quota", willRetry: false } }])).toEqual({ detail: "Quota", willRetry: false, hostTurn: null });
+    expect(readThreadFailure([events[1]]).retryTurn).toBeNull();
+    expect(readThreadFailure([events[0], { ...events[1], type: "provider/error" }]).retryTurn?.requestId).toBe("creq_failed");
+    expect(readThreadFailure([events[0], { ...events[1], data: { code: "other", detail: "Host is not connected" } }]).retryTurn).toBeNull();
+    expect(readThreadFailure([events[0], { ...events[1], data: { code: "thread_command_failed", detail: "permission denied" } }]).retryTurn).toBeNull();
+    expect(readThreadFailure([...events, { seq: 12, type: "provider/error", data: { message: "Quota", willRetry: false } }])).toEqual({ detail: "Quota", willRetry: false, retryTurn: null });
   });
   it("waits for a connected host, then retries only that failed turn", async () => {
     const h = harness(); vi.mocked(h.ports.hostOnline).mockResolvedValueOnce(false);
@@ -97,7 +97,7 @@ describe("host reconnect", () => {
   it("routes the third transport failure to the lead without a third automatic retry", async () => {
     const h = harness();
     for (let i = 0; i < 3; i++) {
-      const next = { ...failure, hostTurn: { requestId: `creq_${i}`, errorSeq: i + 10 } };
+      const next = { ...failure, retryTurn: { requestId: `creq_${i}`, errorSeq: i + 10 } };
       expect(await resumeAfterHostReconnect(h.ports, row, next)).toBe(i < 2 ? "retried" : "blocked");
     }
     expect(h.ports.retry).toHaveBeenCalledTimes(2); expect(h.ports.block).toHaveBeenCalledOnce();
@@ -110,5 +110,37 @@ describe("host reconnect", () => {
     superviseRun(watch, row, reading); h.tick(RUN_WATCH_PROVIDER_WAIT_MS);
     expect(await resumeAfterHostReconnect(h.ports, row, failure)).toBe("waiting");
     expect(superviseRun(watch, row, reading)).toBe("blocked"); expect(h.ports.retry).not.toHaveBeenCalled();
+  });
+});
+
+describe("transient retry and lifecycle fencing", () => {
+  it("retries a provider 502 through the same exact-turn BB API", async () => {
+    const h = harness();
+    const transient = readThreadFailure([events[0], { seq: 11, type: "provider/error", data: { message: "502 Bad Gateway" } }]);
+    expect(await resumeAfterHostReconnect(h.ports, row, transient)).toBe("retried");
+    expect(h.ports.retry).toHaveBeenCalledExactlyOnceWith(row.threadId, "creq_failed");
+  });
+  it("does not compete with explicit willRetry even before the queue is visible", async () => {
+    const h = harness();
+    expect(await resumeAfterHostReconnect(h.ports, row, { ...failure, willRetry: true })).toBe("skipped");
+    expect(h.ports.retry).not.toHaveBeenCalled();
+  });
+  it("does not retry permanent authentication/model errors", async () => {
+    const h = harness();
+    for (const message of ["401 unauthorized", "model_not_found", "context_length_exceeded", "ENOENT"]) {
+      const permanent = readThreadFailure([events[0], { seq: 11, type: "provider/error", data: { message } }]);
+      expect(await resumeAfterHostReconnect(h.ports, row, permanent)).toBe("skipped");
+    }
+    expect(h.ports.retry).not.toHaveBeenCalled();
+  });
+  it("leaves the durable claim for the next factory when disposed during retry", async () => {
+    const h = harness(); let active = true; h.ports.isActive = () => active;
+    vi.mocked(h.ports.retry).mockImplementation(async () => { active = false; return { ok: true, delivery: "sent" }; });
+    expect(await resumeAfterHostReconnect(h.ports, row, failure)).toBe("skipped");
+    expect(h.db.prepare("SELECT state FROM agency_host_retry").get()).toEqual({ state: "claimed" });
+    expect(h.ports.comment).not.toHaveBeenCalled();
+    active = true;
+    expect(await resumeAfterHostReconnect(h.ports, row, failure)).toBe("waiting");
+    expect(h.ports.retry).toHaveBeenCalledOnce();
   });
 });

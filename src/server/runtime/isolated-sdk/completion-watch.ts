@@ -1,3 +1,4 @@
+import { createBoundedReader, observationErrorCode } from "../observation/control";
 import type { IsolatedThreadView, IsolatedThreadsApi } from "./sdk-ports.js";
 import { interpretVerifiedCompletion, type CompletionReading } from "./completion.js";
 import type { AppliedCompletion } from "./completion-apply.js";
@@ -26,6 +27,10 @@ export type CompletionWatchDeps = {
   ) => Promise<AppliedCompletion>;
   onReading?: (jobId: string, reading: AppliedCompletion) => void;
   pollMs?: number;
+  readTimeoutMs?: number;
+  isActive?: () => boolean;
+  onObservation?: (row: BoundLaunchWatch, stage: string, code: string | null) => void;
+  onGlobalError?: (code: string) => void;
 };
 
 /**
@@ -36,96 +41,89 @@ export type CompletionWatchDeps = {
  */
 export function createCompletionWatch(deps: CompletionWatchDeps) {
   let disposed = false;
-  let inFlight = false;
-  let coalesced = false;
-  const pollMs = deps.pollMs ?? 5_000;
-
-  async function reconcileOne(row: BoundLaunchWatch): Promise<AppliedCompletion | null> {
-    let threadStatus: string | null = null;
-    let thread: IsolatedThreadView | null = null;
+  let cursor = 0;
+  const active = () => !disposed && deps.isActive?.() !== false;
+  const timeoutMs = deps.readTimeoutMs ?? 15_000;
+  const read = createBoundedReader(active, timeoutMs);
+  const flights = new Map<string, { promise: Promise<void>; applyingAt: number | null }>();
+  const observation = (row: BoundLaunchWatch, stage: string, code: string | null) => {
+    if (active()) deps.onObservation?.(row, stage, code);
+  };
+  async function observe<T>(row: BoundLaunchWatch, stage: string, operation: () => Promise<T>): Promise<T> {
     try {
-      thread = await deps.threads.get({ threadId: row.threadId, include: "environment,host" });
-      threadStatus = thread.status ?? null;
-    } catch {
-      threadStatus = null;
-    }
-    if (disposed) return null;
-    let artifact: PublishedJobReading = {
-      publishedVerified: false,
-      acceptedVerified: false,
-      publishedHash: null,
-    };
-    try {
-      artifact = await deps.readPublishedForJob(row.jobId);
-    } catch {
-      return null;
-    }
-    if (disposed) return null;
-    const reading = interpretVerifiedCompletion({
-      threadStatus,
-      publishedVerified: artifact.publishedVerified,
-      acceptedVerified: artifact.acceptedVerified,
-    });
-    const applied = await deps.applyReading(row, reading, artifact.publishedHash, thread);
-    if (disposed) return null;
-    return applied;
-  }
-
-  async function runPass(): Promise<void> {
-    if (disposed) return;
-    if (inFlight) {
-      coalesced = true;
-      return;
-    }
-    inFlight = true;
-    try {
-      do {
-        coalesced = false;
-        for (const row of deps.listBoundLaunches()) {
-          if (disposed) return;
-          try {
-            const reading = await reconcileOne(row);
-            if (disposed || !reading) continue;
-            deps.onReading?.(row.jobId, reading);
-          } catch {
-            continue;
-          }
-        }
-      } while (coalesced && !disposed);
-    } finally {
-      inFlight = false;
+      const value = await read(`${row.launchId}:${stage}`, operation);
+      observation(row, stage, null);
+      return value;
+    } catch (error) {
+      observation(row, stage, observationErrorCode(error));
+      throw error;
     }
   }
-
+  async function reconcileOne(row: BoundLaunchWatch): Promise<void> {
+    const thread = await observe(row, "thread", () => deps.threads.get({ threadId: row.threadId, include: "environment,host" }));
+    if (!active()) return;
+    // Artifact I/O is needed for handing in an idle worker, not for supervising
+    // a running/failed turn. An offline result host must not hide reconnect.
+    const artifact = thread.status === "idle"
+      ? await observe(row, "artifact", () => deps.readPublishedForJob(row.jobId))
+      : { publishedVerified: false, acceptedVerified: false, publishedHash: null };
+    if (!active()) return;
+    const reading = interpretVerifiedCompletion({ threadStatus: thread.status ?? null,
+      publishedVerified: artifact.publishedVerified, acceptedVerified: artifact.acceptedVerified });
+    const flight = flights.get(row.launchId);
+    if (flight) flight.applyingAt = Date.now();
+    try {
+      // Mutations are never timed out/replayed. Other rows remain observable;
+      // a stuck apply is reported by subsequent polls until its actual settlement.
+      const applied = await deps.applyReading(row, reading, artifact.publishedHash, thread);
+      if (!active()) return;
+      observation(row, "apply", null);
+      deps.onReading?.(row.jobId, applied);
+    } catch (error) {
+      observation(row, "apply", observationErrorCode(error));
+    }
+  }
   async function poll(): Promise<void> {
+    if (!active()) return;
     try {
-      await runPass();
-    } catch {
-      return;
+      const waits: Promise<void>[] = [];
+      const rows = deps.listBoundLaunches();
+      const start = rows.length ? cursor % rows.length : 0;
+      for (let offset = 0; offset < rows.length; offset++) {
+        const index = (start + offset) % rows.length;
+        const row = rows[index]!;
+        if (!active()) break;
+        const current = flights.get(row.launchId);
+        if (current) {
+          if (current.applyingAt !== null && Date.now() - current.applyingAt >= timeoutMs)
+            observation(row, "apply", "observation_timeout");
+          waits.push(current.promise);
+          continue;
+        }
+        // Bounded parallel reads: one slow row does not stop the whole watch.
+        if (flights.size >= 4) continue;
+        const flight = { promise: Promise.resolve(), applyingAt: null as number | null };
+        flights.set(row.launchId, flight);
+        cursor = index + 1;
+        flight.promise = reconcileOne(row).catch(() => { /* observe recorded the failing stage */ })
+          .finally(() => { if (flights.get(row.launchId) === flight) flights.delete(row.launchId); });
+        waits.push(flight.promise);
+      }
+      await Promise.all(waits);
+    } catch (error) {
+      if (active()) deps.onGlobalError?.(observationErrorCode(error));
     }
   }
-
-  const timer = setInterval(() => {
-    void poll();
-  }, pollMs);
-
-  function hintFromCoreEvent(thread: IsolatedThreadView): void {
-    if (disposed) return;
-    const row = deps.listBoundLaunches().find((item) => item.threadId === thread.id);
-    if (!row) return;
-    void poll();
-  }
-
+  const timer = setInterval(() => { void poll(); }, deps.pollMs ?? 5_000);
   return {
     poll,
-    hintFromCoreEvent,
-    dispose() {
-      disposed = true;
-      clearInterval(timer);
+    hintFromCoreEvent(thread: IsolatedThreadView) {
+      if (!active()) return;
+      try { if (deps.listBoundLaunches().some(row => row.threadId === thread.id)) void poll(); }
+      catch (error) { deps.onGlobalError?.(observationErrorCode(error)); }
     },
-    get disposed() {
-      return disposed;
-    },
+    dispose() { disposed = true; clearInterval(timer); },
+    get disposed() { return !active(); },
   };
 }
 

@@ -57,3 +57,10 @@ describe("sandbox escapes", () => {
     }
   });
 });
+
+it("does not write events returned after plugin disposal", async () => {
+  const db = openMigratedDatabase(new Database(":memory:")); let active = true;
+  await expect(scanSandboxEscapes({ db, isActive: () => active, now: () => "2026-09-24T00:00:00Z",
+    events: { list: async () => { active = false; db.close(); return [started(1, "late", outside)]; } },
+  }, [{ attemptId: "run_late", jobId: "job_late", threadId: "thr_late" }])).resolves.toEqual([]);
+});

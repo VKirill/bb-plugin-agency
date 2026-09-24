@@ -1,3 +1,5 @@
+import { failureKind } from "../run-watch/failure-policy";
+import { observationHealth } from "../observation/health";
 import type { z } from "zod";
 import { fail, ok } from "../../../domain";
 import type { jobDiagnosticsQuerySchema } from "../../../shared/contracts/diagnostics";
@@ -11,6 +13,11 @@ type Event = { seq: number; type: string; data: unknown };
 export function visibleDiagnosticMessages(rows: Event[]) {
   return rows.flatMap(row => {
     const data = row.data as { item?: { type?: string; text?: string; exitCode?: number }; error?: { message?: string } };
+    if (row.type === "system/error" || row.type === "provider/error") {
+      const fault = row.data as { code?: unknown; detail?: unknown; message?: unknown; willRetry?: unknown } | null;
+      const text = [fault?.code, fault?.detail, fault?.message].filter(v => typeof v === "string").join(" ");
+      return [{ seq: row.seq, type: "execution_error", text: `kind=${failureKind(text)}; willRetry=${typeof fault?.willRetry === "boolean" ? fault.willRetry : "unknown"}; inspect the linked turn for details` }];
+    }
     const item = data?.item;
     // Only visible assistant messages and failure codes; no reasoning, tool arguments or raw output.
     if (row.type === "item/completed" && item?.type === "agentMessage" && typeof item.text === "string")
@@ -46,7 +53,7 @@ export async function getJobDiagnostics(db: SqlDatabase, ctx: ServiceContext, in
     try { rows = await events({ threadId: selected.threadId, order: "desc", limit: String(input.limit), ...(input.beforeSeq ? { beforeSeq: String(input.beforeSeq) } : {}) }); }
     catch { error = "thread_history_unavailable"; }
   }
-  return ok({ jobId: job.id, jobKey: job.key, history: recoveryHistory(db, job.id), attempts,
+  return ok({ observerHealth: observationHealth(db, job.id), jobId: job.id, jobKey: job.key, history: recoveryHistory(db, job.id), attempts,
     trace: listTrace(db, { jobId: job.id, descendants: false, limit: input.limit }),
     conversation: { threadId: selected?.threadId ?? null, entries: visibleDiagnosticMessages(rows),
       nextBeforeSeq: rows.length === input.limit ? Math.min(...rows.map(r => r.seq)) : null, error } });

@@ -1,3 +1,4 @@
+import { failureKind, failureAdvice } from "./failure-policy";
 import { agencyLanguage, type AgencyLanguage } from "../../i18n/language.js";
 import type { Job } from "../../../shared/contracts";
 import type { SqlDatabase } from "../../db/sql";
@@ -26,12 +27,6 @@ export const RUN_WATCH_ERROR_MS = 5 * 60_000;
  * tells the owner. A machine that went offline is the same case: nothing is lost.
  */
 export const RUN_WATCH_PROVIDER_WAIT_MS = 6 * 60 * 60_000;
-const PROVIDER_RETRY_TEXT = /rate.?limit|quota|usage limit|subscription|overload|too many requests|\b(429|50[0-9])\b|timed? ?out|timeout|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|not connected|disconnect/i;
-
-/** True when BB is expected to carry this thread on by itself. */
-export function providerWillRetry(detail: string | null | undefined): boolean {
-  return Boolean(detail && PROVIDER_RETRY_TEXT.test(detail));
-}
 /** Continuously active this long, even with progress: blocked. */
 export const RUN_WATCH_CEILING_MS = 2 * 60 * 60_000;
 
@@ -75,6 +70,7 @@ export type RunWatchPorts = {
    * Null when BB did not say. A usage limit with willRetry false is a dead attempt.
    */
   bbWillRetry?: (threadId: string) => boolean | null;
+  queuedWork?: (threadId: string) => boolean | null;
   /** False when the machine of the job is offline: the attempt waits for it to come back. */
   hostOnline?: (job: Job) => boolean | null;
   /** Owner-set reserve is ready for this attempt (still on the primary). */
@@ -290,7 +286,9 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
   const inStatusMs = nowMs - Date.parse(record.status_since);
   if (status === "error") {
     const detail = ports.providerError?.(row.threadId);
-    if (isUsageLimitDetail(detail) && ports.canSwitchToFallback?.(job, row) && ports.switchToFallback) {
+    const bbRetries = ports.bbWillRetry?.(row.threadId);
+    const queued = ports.queuedWork?.(row.threadId) === true;
+    if (!queued && bbRetries !== true && isUsageLimitDetail(detail) && ports.canSwitchToFallback?.(job, row) && ports.switchToFallback) {
       const switched = ports.switchToFallback(job, row);
       if (switched) {
         record.outcome = "fallback";
@@ -300,16 +298,25 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
       }
     }
     // BB said it will not continue this thread: a usage limit is then a dead attempt, not a wait.
-    const bbRetries = ports.bbWillRetry?.(row.threadId);
-    if (isUsageLimitDetail(detail) && bbRetries === false) return finish("usage_limit");
-    // BB retries a subscription window or an overload by itself; the attempt is not dead yet.
-    const waiting = (bbRetries !== false && providerWillRetry(detail)) || ports.hostOnline?.(job) === false;
+    if (!queued && isUsageLimitDetail(detail) && bbRetries === false) return finish("usage_limit");
+    // Retry is a fact from BB or its durable queue, never a guess from error text.
+    const waiting = bbRetries === true || queued || ports.hostOnline?.(job) === false;
     if (waiting && inStatusMs < RUN_WATCH_PROVIDER_WAIT_MS) {
       if (!record.warned_at && ports.comment(job, runWatchText("provider_wait", job.key, agencyLanguage(), t))) record.warned_at = now;
       save(ports.db, record, now);
       return record.warned_at === now ? "warned" : "ok";
     }
-    if (inStatusMs >= t.errorMs) return finish("error");
+    const kind = failureKind(detail);
+    const actionable = ["auth", "context", "model", "environment"].includes(kind);
+    if (actionable || inStatusMs >= t.errorMs) {
+      const en = agencyLanguage() === "en";
+      const text = (en ? `Agency: ${job.key} needs the lead's decision (${kind}). ` : `Агентство: ${job.key} требует решения руководителя (${kind}). `)
+        + failureAdvice(kind, en);
+      const blocked = ports.block(job, text);
+      if (blocked) { record.outcome = "error"; record.outcome_at = now; }
+      save(ports.db, record, now);
+      return blocked ? "blocked" : "ok";
+    }
     save(ports.db, record, now);
     return "ok";
   }

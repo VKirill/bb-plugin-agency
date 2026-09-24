@@ -22,6 +22,7 @@ export const DUE_SWEEP_INTERVAL_MS = 60_000;
 export type DueReminderKind = "soon" | "overdue";
 
 export type DuePorts = {
+  isActive?: () => boolean;
   db: SqlDatabase;
   /** Open jobs with a due date. */
   listDueJobs: () => Job[];
@@ -78,9 +79,11 @@ function alreadySent(db: SqlDatabase, jobId: string, kind: DueReminderKind, dueA
 }
 
 export async function sweepDueReminders(ports: DuePorts): Promise<number> {
+  if (ports.isActive?.() === false || !ports.db.open) return 0;
   const now = ports.now();
   let sent = 0;
   for (const job of ports.listDueJobs()) {
+    if (ports.isActive?.() === false || !ports.db.open) return sent;
     const kind = dueReminderFor(job, ports.reminderHours(job), now);
     if (!kind || !job.dueAt) continue;
     if (alreadySent(ports.db, job.id, kind, job.dueAt)) continue;

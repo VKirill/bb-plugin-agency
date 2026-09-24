@@ -34,6 +34,7 @@ export type SkillPinStatus = {
 };
 
 export type SkillPinDeps = {
+  isActive?: () => boolean;
   catalog: SkillCatalogPort;
   /** A project scope to list the catalog in; null when no project is connected. */
   scope: () => SkillCatalogScope | null;
@@ -45,7 +46,9 @@ export type SkillPinDeps = {
 };
 
 export async function readSkillPinStatus(deps: SkillPinDeps): Promise<DomainResult<SkillPinStatus>> {
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   const loaded = await deps.load();
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   if (!loaded.ok) return loaded;
   if (!loaded.value) {
     return ok({ origin: "none", editable: false, hostIds: [], rows: [], inSync: true, note: "Закрепление не настроено: запуски берут навыки из каталога без проверки версии." });
@@ -73,6 +76,7 @@ export async function readSkillPinStatus(deps: SkillPinDeps): Promise<DomainResu
       rows.push({ ...base, name: null, currentHash: null, problem: "Навык не найден в каталоге BB." });
       continue;
     }
+    if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
     const hashed = await hashCatalogSkillPackage(deps.catalog, skill);
     rows.push({
       ...base,
@@ -94,6 +98,7 @@ export async function readSkillPinStatus(deps: SkillPinDeps): Promise<DomainResu
 /** Writes the current package hashes into the roles config. Every row must be readable. */
 export async function pinCurrentSkills(deps: SkillPinDeps): Promise<DomainResult<SkillPinStatus>> {
   const status = await readSkillPinStatus(deps);
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   if (!status.ok) return status;
   if (!status.value.editable) {
     return fail("skill_pin_not_editable", status.value.note ?? "Закрепление не настроено.");
@@ -103,7 +108,9 @@ export async function pinCurrentSkills(deps: SkillPinDeps): Promise<DomainResult
     return fail("skill_pin_unreadable", `Навык ${unreadable.name ?? unreadable.id}: ${unreadable.problem ?? "текущая версия не прочитана"}`);
   }
   if (status.value.inSync) return status;
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   const loaded = await deps.load();
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   if (!loaded.ok) return loaded;
   if (!loaded.value) return fail("skill_pin_not_editable", "Закрепление не настроено.");
   const hashOf = (id: string) => status.value.rows.find((row) => row.id === id)!.currentHash!;

@@ -249,3 +249,17 @@ describe("automatic assignment", () => {
     expect(result.ok ? null : result.error.code).toBe("no_member_for_assignment");
   });
 });
+
+describe("launch sweep disposal", () => {
+  it.each(["gate", "launch"])("does not touch the closed database after a late %s result", async (stage) => {
+    const { db, s, job } = setup(); const item = job("Reload while pending"); enqueueLaunch(db, item.id, "2026-09-24T01:00:00.000Z");
+    let active = true; let launched = 0;
+    const dispose = () => { active = false; db.close(); };
+    const ports: LaunchQueuePorts = { db, isActive: () => active, getJob: id => s.store.getJob(id),
+      checkLimits: async () => { if (stage === "gate") dispose(); return ok({ warnings: [] }); },
+      launch: async () => { launched++; dispose(); return ok({}); },
+      comment: () => { throw new Error("late comment"); }, now: () => "2026-09-24T01:00:01.000Z" };
+    await expect(sweepLaunchQueue(ports)).resolves.toEqual({ launched: 0, removed: 0 });
+    expect(launched).toBe(stage === "gate" ? 0 : 1);
+  });
+});

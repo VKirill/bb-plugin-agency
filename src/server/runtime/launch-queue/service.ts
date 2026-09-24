@@ -126,6 +126,7 @@ export function listLaunchQueue(db: SqlDatabase): QueueEntry[] {
 }
 
 export type LaunchQueuePorts = {
+  isActive?: () => boolean;
   notifyLead?: (job: Job, code: string) => void;
   db: SqlDatabase;
   getJob: (jobId: string) => Job | undefined;
@@ -186,6 +187,8 @@ function setReason(db: SqlDatabase, jobId: string, reason: string, now: string):
  * file, and the higher priority gets it.
  */
 export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launched: number; removed: number }> {
+  const active = () => ports.isActive?.() !== false;
+  if (!active()) return { launched: 0, removed: 0 };
   const en = agencyLanguage() === "en";
   let launched = 0;
   let removed = 0;
@@ -193,6 +196,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
   const inFlight: Promise<void>[] = [];
 
   const settle = async (job: Job, entry: QueueEntry): Promise<void> => {
+    if (!active()) return;
     const started = Date.now();
     recordTrace(ports.db, { jobId: job.id, step: "queue.launch", outcome: "started", reason: "ready" });
     let result: DomainResult<unknown>;
@@ -203,6 +207,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     } finally {
       pending.delete(job.id);
     }
+    if (!active()) return;
     recordTrace(ports.db, { jobId: job.id, step: "queue.launch", outcome: result.ok ? "succeeded" : "failed", reason: result.ok ? "launched" : result.error.code, durationMs: Date.now() - started });
     if (result.ok) {
       resolveLaunchIssue(ports.db, job.id);
@@ -244,6 +249,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
   };
 
   for (const entry of listLaunchQueue(ports.db)) {
+    if (!active()) break;
     const job = ports.getJob(entry.jobId);
     // Launched by hand, canceled or moved on: the queue has nothing to do.
     if (!job || (job.state !== "backlog" && job.state !== "queued")) {
@@ -254,6 +260,7 @@ export async function sweepLaunchQueue(ports: LaunchQueuePorts): Promise<{ launc
     }
     const checkedAt = Date.now();
     const limits = await ports.checkLimits(job, [...pending]);
+    if (!active()) break;
     recordTrace(ports.db, { jobId: job.id, step: "queue.gate", outcome: limits.ok ? "succeeded" : "waiting", reason: limits.ok ? "ready" : limits.error.code, durationMs: Date.now() - checkedAt, collapse: true });
     if (!limits.ok && LEAD_ACTION_CODES.has(limits.error.code)) ports.notifyLead?.(job, limits.error.code);
     if (!limits.ok && WAIT_CODES.has(limits.error.code)) {

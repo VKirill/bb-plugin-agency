@@ -348,12 +348,15 @@ function writeOutcome(db: SqlDatabase, row: WakeRow, outcome: IsolatedSendOutcom
 }
 
 export async function flushParentWakes(deps: {
+  isActive?: () => boolean;
   db: SqlDatabase;
   send: IsolatedSendPort;
   now: string;
 }): Promise<void> {
+  if (deps.isActive?.() === false || !deps.db.open) return;
   const claimed = deps.db.transaction(() => claimPending(deps.db, deps.now))();
   for (const item of claimed) {
+    if (deps.isActive?.() === false || !deps.db.open) return;
     const live = deps.db.transaction(() => {
       const row = readWake(deps.db, item.row.activity_id, item.row.parent_attempt_id) ?? item.row;
       if (!wakeStillCurrentHead(deps.db, row)) {
@@ -394,6 +397,7 @@ export async function flushParentWakes(deps: {
     } catch {
       outcome = { kind: "unknown", code: "send_transport", message: item.sendNow ? "send failed" : "recover failed" };
     }
+    if (deps.isActive?.() === false || !deps.db.open) return;
     deps.db.transaction(() => writeOutcome(deps.db, row, outcome, deps.now))();
     recordTrace(deps.db, { jobId: row.child_job_id, relatedJobId: row.parent_job_id, step: "lead.delivery",
       outcome: outcome.kind === "confirmed" || outcome.kind === "recovered" ? "succeeded" : "failed",

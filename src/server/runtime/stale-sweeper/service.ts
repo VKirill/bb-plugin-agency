@@ -45,6 +45,7 @@ export type RecordOwnerMessageFn = (
 ) => DomainResult<{ message: OwnerMessage; duplicate: boolean }>;
 
 export type StaleSweepPorts = {
+  isActive?: () => boolean;
   db: SqlDatabase;
   getJob: (id: string) => Job | undefined;
   /** register.ts uses this name; keep it so that file stays untouched. */
@@ -459,7 +460,7 @@ function emptyStats(): StaleSweepStats {
 
 export async function sweepStaleJobs(ports: StaleSweepPorts): Promise<StaleSweepStats> {
   const stats = emptyStats();
-  if (!hasTable(ports.db)) return stats;
+  if (ports.isActive?.() === false || !ports.db.open || !hasTable(ports.db)) return stats;
   const now = ports.now();
   const nowIso = iso(now);
   const lang = ports.lang ?? agencyLanguage();
@@ -474,6 +475,7 @@ export async function sweepStaleJobs(ports: StaleSweepPorts): Promise<StaleSweep
     const rules = rulesOf(ports, job.departmentId);
     const watched =
       job.state === "running" && hasLiveAttempt(ports.db, job.id) ? await liveAttemptIsWatched(ports, job.id) : false;
+    if (ports.isActive?.() === false || !ports.db.open) return stats;
     const candidate = isStaleCandidate(ports.db, job, rules, now, { liveAttemptWatched: watched });
     if (!candidate.ok) continue;
     stats.candidates += 1;
@@ -546,7 +548,7 @@ export async function sweepStaleJobs(ports: StaleSweepPorts): Promise<StaleSweep
 export const sweepStaleNudges = sweepStaleJobs;
 
 export async function recoverStaleNudges(ports: StaleSweepPorts, stats: StaleSweepStats = emptyStats()): Promise<StaleSweepStats> {
-  if (!hasTable(ports.db)) return stats;
+  if (ports.isActive?.() === false || !ports.db.open || !hasTable(ports.db)) return stats;
   const now = ports.now();
   const nowIso = iso(now);
   const lang = ports.lang ?? agencyLanguage();
@@ -572,11 +574,12 @@ export async function recoverStaleNudges(ports: StaleSweepPorts, stats: StaleSwe
 }
 
 export async function flushStaleNudges(ports: StaleSweepPorts, stats: StaleSweepStats = emptyStats()): Promise<StaleSweepStats> {
-  if (!hasTable(ports.db)) return stats;
+  if (ports.isActive?.() === false || !ports.db.open || !hasTable(ports.db)) return stats;
   const now = ports.now();
   const nowIso = iso(now);
   const lang = ports.lang ?? agencyLanguage();
   await recoverStaleNudges(ports, stats);
+  if (ports.isActive?.() === false || !ports.db.open) return stats;
 
   const pending = ports.db
     .prepare(
@@ -636,6 +639,7 @@ async function dispatchClaimedBatch(
   stats: StaleSweepStats,
   opts: { sendIfAbsent: boolean },
 ): Promise<void> {
+  if (ports.isActive?.() === false || !ports.db.open) return;
   const origin = rows[0]?.origin_thread_id;
   if (!origin) return;
   const liveRows = orderBatchRows(rows, ports.getJob);
@@ -662,6 +666,7 @@ async function dispatchClaimedBatch(
   let outcome: IsolatedSendOutcome | { kind: "recovered" };
   try {
     const presence = await ports.send.recoverContinuation(origin, staleBatchToken(batch), first.queued_message_id);
+    if (ports.isActive?.() === false || !ports.db.open) return;
     if (presence === "present") outcome = { kind: "recovered" };
     else if (presence === "queued") {
       outcome = { kind: "confirmed", delivery: "queued", queuedMessageId: first.queued_message_id ?? undefined };
@@ -675,6 +680,7 @@ async function dispatchClaimedBatch(
   } catch {
     outcome = { kind: "unknown", code: "send_transport", message: "stale nudge send failed" };
   }
+  if (ports.isActive?.() === false || !ports.db.open) return;
   markSend(ports.db, ids, outcome, nowIso);
   if (outcome.kind === "confirmed" || outcome.kind === "recovered") stats.sent += 1;
   if (outcome.kind === "rejected") {

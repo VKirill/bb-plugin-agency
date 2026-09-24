@@ -9,6 +9,7 @@ import { interpretVerifiedCompletion, verifyOpenedCurrentVersion, type Completio
 
 export async function readJobPublishedArtifact(
   deps: {
+    isActive?: () => boolean;
     ctx: ServiceContext;
     store: DomainStore;
     db: SqlDatabase;
@@ -16,6 +17,7 @@ export async function readJobPublishedArtifact(
   },
   jobId: string,
 ): Promise<DomainResult<{ publishedVerified: boolean; acceptedVerified: boolean; publishedHash: string | null }>> {
+  if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
   const job = deps.store.getJob(jobId);
   if (!job) return fail("not_found", `job ${jobId} not found`);
   const binding = deps.store.getBinding(job.bindingId);
@@ -46,6 +48,7 @@ export async function readJobPublishedArtifact(
     const current = versions.at(-1) ?? null;
     if (!current) continue;
     const opened = await storage.openOriginal(artifactId, jobId, current.version);
+    if (deps.isActive?.() === false) return fail("runtime_disposed", "Runtime was disposed");
     const acceptance = deps.db
       .prepare(`SELECT version, hash FROM agency_artifact_acceptance WHERE artifact_id = ? AND job_id = ?`)
       .get(artifactId, jobId) as { version: number; hash: string } | undefined;
