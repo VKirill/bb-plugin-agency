@@ -1,3 +1,4 @@
+import { completionWaitingDependencies } from "../completion-reminder/service";
 import type { DomainResult } from "../../../domain";
 import type { Job, WorkRules } from "../../../shared/contracts";
 import { batchId, nudgeId, staleBatchToken, staleNudgeToken } from "../../../shared/contracts/stale-nudge";
@@ -205,6 +206,22 @@ function workerUsesOrigin(db: SqlDatabase, jobId: string, origin: string): boole
   );
 }
 
+/** A coordinator/reviewer waiting on concrete active work is not an abandoned task.
+ * Blocked/review children still require the lead's attention; unrelated siblings never suppress a nudge.
+ */
+function hasExpectedWork(db: SqlDatabase, job: Job): boolean {
+  const working = (id: string, state: string) =>
+    (state === "running" && hasLiveAttempt(db, id)) || (state === "queued" && isInLaunchQueue(db, id));
+  const children = db.prepare("SELECT id, state FROM agency_job WHERE parent_job_id = ? AND state NOT IN ('done','canceled')")
+    .all(job.id) as Array<{ id: string; state: string }>;
+  if (children.length) return children.every(child => working(child.id, child.state));
+  const inputs = completionWaitingDependencies(db, job);
+  return inputs.length > 0 && inputs.every(id => {
+    const source = db.prepare("SELECT state FROM agency_job WHERE id = ?").get(id) as { state: string } | undefined;
+    return Boolean(source && working(id, source.state));
+  });
+}
+
 export function isStaleCandidate(
   db: SqlDatabase,
   job: Job,
@@ -221,6 +238,7 @@ export function isStaleCandidate(
   if (job.state === "running" && hasLiveAttempt(db, job.id) && opts?.liveAttemptWatched !== false) {
     return { ok: false, reason: "live_attempt" };
   }
+  if (job.state === "running" && hasExpectedWork(db, job)) return { ok: false, reason: "expected_work" };
   if (hasOpenDependency(db, job.id)) return { ok: false, reason: "open_dependency" };
   if (isInLaunchQueue(db, job.id)) return { ok: false, reason: "launch_queue" };
   if (hasOpenNeedsInputWait(db, job.id)) return { ok: false, reason: "needs_input" };

@@ -63,6 +63,35 @@ function comments(s: ReturnType<typeof seed>) {
 }
 
 describe("stale sweeper", () => {
+  it("does not nudge an idle reviewer waiting on its actual working input, but notices a blocked producer", () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const producer = s.job("Implementation", s.developer); const reviewer = s.job("Review", s.reviewer);
+    const unrelated = s.job("Unrelated review", s.reviewer);
+    for (const job of [producer, reviewer, unrelated]) db.prepare("UPDATE agency_job SET state = 'running', updated_at = ? WHERE id = ?").run(STALE_AT, job.id);
+    s.input(reviewer.id, producer.id); s.attempt(producer.id, "running");
+    expect(isStaleCandidate(db, s.store.getJob(reviewer.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false })).toMatchObject({ ok: false, reason: "expected_work" });
+    expect(isStaleCandidate(db, s.store.getJob(unrelated.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false }).ok).toBe(true);
+    db.prepare("UPDATE agency_job SET state = 'blocked' WHERE id = ?").run(producer.id);
+    expect(isStaleCandidate(db, s.store.getJob(reviewer.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false }).ok).toBe(true);
+    db.prepare("UPDATE agency_job SET state = 'review' WHERE id = ?").run(producer.id);
+    expect(isStaleCandidate(db, s.store.getJob(reviewer.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false }).ok).toBe(true);
+    db.close();
+  });
+
+  it("keeps coordinators quiet during active child work, but nudges when a child needs a decision", () => {
+    const db = openMigratedDatabase(new Database(":memory:")); const s = seed(db);
+    const root = s.job("Delivery", s.lead); const child = s.job("Code", s.developer);
+    db.prepare("UPDATE agency_job SET state = 'running', updated_at = ? WHERE id IN (?, ?)").run(STALE_AT, root.id, child.id);
+    db.prepare("UPDATE agency_job SET parent_job_id = ? WHERE id = ?").run(root.id, child.id); s.attempt(child.id, "running");
+    expect(isStaleCandidate(db, s.store.getJob(root.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false })).toMatchObject({ ok: false, reason: "expected_work" });
+    db.prepare("UPDATE agency_job SET state = 'review' WHERE id = ?").run(child.id);
+    const otherInput = s.job("Other active input", s.developer);
+    db.prepare("UPDATE agency_job SET state = 'running' WHERE id = ?").run(otherInput.id);
+    s.input(root.id, otherInput.id); s.attempt(otherInput.id, "running");
+    expect(isStaleCandidate(db, s.store.getJob(root.id)!, DEFAULT_WORK_RULES, NOW, { liveAttemptWatched: false }).ok).toBe(true);
+    db.close();
+  });
+
   it("skips waiting_input, live attempts, open dependencies and fresh jobs", () => {
     const db = openMigratedDatabase(new Database(":memory:"));
     const s = seed(db);

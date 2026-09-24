@@ -8,6 +8,7 @@ export const EXAMPLE_CATALOG_SKILL_ID =
 
 /** Полные валидируемые примеры. Policy — содержимое, не label. */
 export const CLI_EXAMPLES: Record<CliRoutedOperation, unknown> = {
+  assessVerification: { jobId: "job_aaaaaaaaaaaa", phase: "implementation", diff: "- Old label\n+ Clear label", changedPaths: ["README.md"], completeDiff: true, knownFailure: false, requiredNow: false },
   getWorkerContext: {scope:"agent",scopeId:"agent_aaaaaaaa"},
   saveWorkerContext: {requestId:REQUEST_ID,expectedRevision:0,scope:"department",scopeId:"departme_aaaaaaaa",policy:{skills:{mode:"assigned",names:[]},bbPlugins:{mode:"assigned",names:[]}}},
   getLeadState: { jobId: "job_aaaaaaaaaaaa" },

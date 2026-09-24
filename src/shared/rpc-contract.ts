@@ -1,3 +1,4 @@
+import { verificationAdviceInputSchema, verificationAdviceSchema } from "./contracts/verification-advice";
 import { workerContextQuerySchema, saveWorkerContextSchema, workerContextRecordSchema, workerContextViewSchema } from "./contracts/worker-context";
 import { recoveryDecisionSchema } from "./contracts/recovery";
 export { recoveryDecisionSchema, type RecoveryDecision } from "./contracts/recovery";
@@ -1395,6 +1396,7 @@ export const rpcContract = defineRpcContract({
     input: z.object({ departmentId: z.string().optional(), agentId: z.string().optional() }).strict(),
     output: domainResultSchema(z.array(skillGrantSchema)),
   },
+  assessVerification: { input: verificationAdviceInputSchema, output: domainResultSchema(verificationAdviceSchema) },
   getDecisionSettings: { input: z.null(), output: domainResultSchema(decisionViewSchema) },
   saveDecisionSettings: { input: saveDecisionSettingsInputSchema, output: domainResultSchema(decisionSettingsSchema) },
   saveDecisionKey: { input: z.object({ name: z.string().min(1).max(120), value: z.string().min(1).max(500) }).strict(), output: domainResultSchema(z.object({ name: z.string() }).strict()) },

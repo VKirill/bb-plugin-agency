@@ -1,3 +1,6 @@
+import { assessVerification, VERIFICATION_POINT } from "../decisions/verification-advice";
+import { getDecisionSettings } from "../decisions/settings";
+import { appendDecisionLog } from "../decisions/log";
 import { newOpaqueId, createRepositories } from "../db";
 import { readLeadState } from "../lead-control/state";
 import { dependencyLinks, readNextStep, removeJobDependency, saveNextStep } from "../flow/service";
@@ -57,6 +60,7 @@ type DomainMethod =
   | "listWorkspace"
   | "listBbCatalog"
   | "listCapabilityCatalog"
+  | "assessVerification"
   | "getLeadState"
   | "recordLessonFeedback"
   | "recordLeadDecision"
@@ -259,6 +263,17 @@ export function createDomainRpc(deps: {
 
     listCapabilityCatalog: (input) => withAccess(() => loadCapabilityCatalog(bb, input, db)),
 
+    assessVerification: (input) => withAccess(async (access) => {
+      const scoped = store.scopedJob(access.ctx, input.jobId);
+      if (!scoped.ok) return scoped;
+      if (access.ctx.caller && access.ctx.caller.jobId !== input.jobId)
+        return fail("forbidden_job_control", "Assess changes for your assigned job only");
+      const job = scoped.value.job;
+      const advice = await assessVerification(getDecisionSettings(db), { title: job.title, brief: job.brief, acceptance: job.acceptance }, input);
+      appendDecisionLog(db, { point: VERIFICATION_POINT, jobKey: job.key, outcome: advice.action,
+        detail: `${advice.reason}; sha256=${advice.inputHash}; bytes=${advice.inputBytes}`, answers: advice.answers, ms: advice.ms }, new Date().toISOString());
+      return ok(advice);
+    }),
     getLeadState: (input) => withAccess((access) => {
       const scoped = store.scopedJob(access.ctx, input.jobId);
       if (!scoped.ok) return scoped;

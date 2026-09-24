@@ -462,6 +462,9 @@ export const EN_SETTINGS: Record<string, string> = {
   "Укажите, в какой переменной лежит ключ.":
     "Say which variable holds the key.",
   "Ключ не найден.": "Key not found.",
+  "Промежуточная проверка": "Intermediate verification",
+  "По запросу сотрудника: оценить полный diff законченного блока. Низкий риск — перенести тест до финала; конкретный риск — адресная проверка. Не вызывается после каждой правки, не принимает результат и не отменяет обязательные финальные проверки.":
+    "On worker request: assess the complete diff of a finished batch. Low risk can defer testing to the final candidate; a concrete risk calls for a focused check. Not called after each edit, does not accept work or waive mandatory final checks.",
   "Привратник памяти":
     "Memory gatekeeper",
   "Перед записью урока в память отдела: хранить ли, какой это вид, нет ли в тексте секрета или временного статуса, не повтор ли это. Отказ и находка секрета останавливают запись, вид и важность приходят предложением.":

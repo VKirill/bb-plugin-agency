@@ -1,3 +1,4 @@
+import { verificationAdviceInputSchema } from "../../shared/contracts/verification-advice";
 import { workerContextQuerySchema, saveWorkerContextSchema } from "../../shared/contracts/worker-context";
 import { recordLessonFeedbackSchema, leadStateQuerySchema, recordLeadDecisionSchema, submitJobResultSchema } from "../../shared/contracts/lead-control";
 import { traceQuerySchema } from "../../shared/contracts/trace";
@@ -72,6 +73,7 @@ import {
 const emptyObjectSchema = z.object({}).strict();
 
 export const CLI_OPERATIONS = {
+  assessVerification: { input: verificationAdviceInputSchema, summary: "Необязательная оценка промежуточной проверки законченного блока: полный diff, риск и TypeSafe; не приёмка и не отмена финальных тестов" },
   getLeadState: { input: leadStateQuerySchema, summary: "Цель, решение, дети и готовность сдачи; children имеют nextOffset" },
   recordLessonFeedback: { input: recordLessonFeedbackSchema, summary: "Оценка применения урока с доказательствами; CAS по ревизии знания" },
   recordLeadDecision: { input: recordLeadDecisionSchema, summary: "Решение руководителя: неизвестное, причина, действие и следующая проверка; CAS по decisionRevision" },
