@@ -249,6 +249,13 @@ export function superviseRun(ports: RunWatchPorts, row: RunWatchRow, observation
     save(ports.db, record, now);
     ports.onReworkPhase?.({ jobId: job.id, attemptId: attempt.id, reworkAt, previousActiveSince });
   }
+  // A lead may resume a transport-failed turn in the same attempt. Require
+  // actual thread activity, not merely a job-state reset, to re-arm supervision.
+  // Other outcomes (especially the work ceiling) require their own recovery.
+  if (record.outcome === "error" && record.thread_status === "error" && status === "active") {
+    record.outcome = null;
+    record.outcome_at = null;
+  }
   if (record.outcome) return "skipped";
   if (stored && stored.thread_status !== status) {
     // A status change is itself a sign of life and opens a new episode.

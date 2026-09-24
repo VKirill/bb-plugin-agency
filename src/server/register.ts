@@ -1,3 +1,4 @@
+import { readThreadFailure, resumeAfterHostReconnect, type ThreadFailure } from "./runtime/host-reconnect/service";
 import { sweepProgressSignals } from "./lead-control/progress-watch";
 import { ensureRecoveryTriage } from "./runtime/recovery/escalation";
 import { assertRelaunchAllowed } from "./runtime/rework/lineage.js";
@@ -2102,19 +2103,14 @@ export function registerAgency(bb: BbPluginApi) {
     limit: (job) => store.rulesForDepartment(job.departmentId).completionReminders,
   });
   /** Why BB put the thread in error, from its own events; null when it did not say. */
-  const providerErrorDetail = async (threadId: string): Promise<{ detail: string | null; willRetry: boolean | null }> => {
+  const providerErrorDetail = async (threadId: string): Promise<ThreadFailure> => {
     try {
-      const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "20", types: ["provider/error"] });
-      for (const event of events as readonly { data?: unknown }[]) {
-        const data = event.data as { detail?: unknown; message?: unknown; willRetry?: unknown } | undefined;
-        const text = [data?.detail, data?.message].find((value) => typeof value === "string" && value.trim());
-        const willRetry = typeof data?.willRetry === "boolean" ? data.willRetry : null;
-        if (typeof text === "string" || willRetry !== null) return { detail: typeof text === "string" ? text : null, willRetry };
-      }
+      const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "40",
+        types: ["provider/error", "system/error", "client/turn/requested", "turn/started"] });
+      return readThreadFailure(events);
     } catch {
-      /* the thread could not be read: the watch decides without a reason */
+      return { detail: null, willRetry: null, hostTurn: null };
     }
-    return { detail: null, willRetry: null };
   };
   const jobHostOnline = async (job: Job): Promise<boolean | null> => {
     const binding = store.getBinding(job.bindingId);
@@ -2735,6 +2731,21 @@ export function registerAgency(bb: BbPluginApi) {
           bbWillRetry = reported.willRetry;
           const job = store.getJob(row.jobId);
           hostOnline = job ? await jobHostOnline(job) : null;
+          const reconnect = await resumeAfterHostReconnect({
+            db, getJob: store.getJob, attemptForLaunch,
+            hostOnline: jobHostOnline,
+            threadStatus: async (threadId) => (await bb.sdk.threads.get({ threadId })).status,
+            queuedCount: async (threadId) => (await bb.sdk.threads.queuedMessages.list({ threadId })).length,
+            retry: (threadId, turnRequestId) => bb.sdk.threads.retry({ threadId, turnRequestId,
+              reason: "Agency: host reconnected; resume the exact failed turn in the same attempt" }),
+            block: blockWithReason, comment: systemComment, now: () => new Date().toISOString(),
+            log: (event) => bb.log.info(`Host reconnect: ${JSON.stringify(event)}`),
+          }, row, reported);
+          if (reconnect === "retried" || reconnect === "blocked") onChanged();
+          // A dispatched retry invalidates this reading. Waiting still goes through
+          // the bounded watchdog, so an offline host/parked queue cannot hide forever.
+          if (reconnect === "retried" || reconnect === "blocked") return applied;
+          if (reconnect === "waiting") bbWillRetry = true;
         }
         const watched = superviseRun(runWatchPorts({
           providerError: () => errorDetail,

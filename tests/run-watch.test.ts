@@ -301,3 +301,27 @@ describe("run watch", () => {
     expect(lastProgressFromDatabase(h.db, "thr_other", "job_other")).toBeNull();
   });
 });
+
+describe("supervision after same-attempt BB retry", () => {
+  it("requires actual error-to-active recovery before rearming an error-blocked watch", () => {
+    // The lead has returned the job to running, but that alone must not reset it.
+    const h = harness({ getJob: () => ({ ...job, state: "running" }) });
+    const error = { ...active, threadStatus: "error" };
+    superviseRun(h.ports, h.row, error);
+    h.tick(RUN_WATCH_ERROR_MS);
+    expect(superviseRun(h.ports, h.row, error)).toBe("blocked");
+    expect(superviseRun(h.ports, h.row, error)).toBe("skipped");
+    expect(superviseRun(h.ports, h.row, active)).toBe("ok");
+    h.tick(RUN_WATCH_STALL_MS);
+    expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
+    expect(h.blocked).toHaveLength(2);
+  });
+  it("does not rearm a work ceiling just because the thread is active", () => {
+    const h = harness({ getJob: () => ({ ...job, state: "running" }) });
+    superviseRun(h.ports, h.row, active);
+    h.tick(RUN_WATCH_CEILING_MS); h.progressNow();
+    expect(superviseRun(h.ports, h.row, active)).toBe("blocked");
+    expect(superviseRun(h.ports, h.row, active)).toBe("skipped");
+    expect(h.blocked).toHaveLength(1);
+  });
+});

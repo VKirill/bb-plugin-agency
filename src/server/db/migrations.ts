@@ -1,3 +1,4 @@
+import { HOST_RECONNECT_MIGRATION } from "../runtime/host-reconnect/service";
 import { LESSON_FEEDBACK_MIGRATION } from "../lead-control/observations";
 import { LEAD_CONTROL_MIGRATION } from "../lead-control/state";
 import { RECOVERY_TRIAGE_MIGRATION } from "../runtime/recovery/escalation";
@@ -755,6 +756,7 @@ CREATE INDEX agency_stale_nudge_batch_idx ON agency_stale_nudge(batch_id)`,
   `ALTER TABLE agency_rework ADD COLUMN confirmed_at TEXT;
    UPDATE agency_rework SET confirmed_at = CASE WHEN resolved_at IS NULL THEN updated_at ELSE created_at END
    WHERE send_state = 'confirmed'`,
+  HOST_RECONNECT_MIGRATION,
 ];
 
 function statementHash(sql: string): string {
