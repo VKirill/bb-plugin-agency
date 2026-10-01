@@ -1,3 +1,19 @@
+---
+title: Основной навык плагина и справочный каталог
+type: capabilities
+created: 2026-09-15
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [skills, context, agents]
+sources:
+  - docs/cli.md
+  - docs/session-context-contract.md
+  - docs/architecture.md
+  - src/server/runtime/context-snapshot/compile.ts
+  - src/server/runtime/prepare-run/prepare.ts
+  - src/server/api/launch-rpc.ts
+---
 # Основной навык плагина и справочный каталог
 
 Сверено 2026-09-20 с **0.1.0-alpha.16**, навык **0.28.5**. Этот файл описывает,
@@ -16,6 +32,8 @@
 Один основной skill не означает один гигантский промпт. Он читает нужную процедуру из `references/`. Конкретные инструкции сотрудников хранятся в AgentVersion.instructions; процесс и приёмка отдела — в ProcessVersion; brief и acceptance заказа — в Job.
 
 ## Сборка контекста
+
+Этап компиляции разрешает выбранные skill/MCP ID по переданным каталогам, промпт перечисляет навыки и инструменты плагинов, а prepare передаёт каталог навыков компилятору снимка (`src/server/runtime/context-snapshot/compile.ts:330-342`, `src/server/runtime/context-snapshot/compile.ts:638-653`, `src/server/runtime/prepare-run/prepare.ts:231-269`).
 
 ```mermaid
 flowchart TD

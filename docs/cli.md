@@ -1,6 +1,21 @@
+---
+title: CLI Агентства
+type: capabilities
+created: 2026-09-15
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [cli, commands, agency]
+sources:
+  - docs/bb-api.md
+  - src/server/register.ts
+  - src/server/comments/register-glue.ts
+  - src/server/cli/schema-help.ts
+  - src/server/cli/operations.ts
+---
 # CLI Агентства
 
-`bb agency` вызывает те же domain handlers и Zod-схемы, что и RPC. Отдельной бизнес-логики и прямого SQLite нет. Произвольный RPC закрыт allowlist. Spawn — только `launch prepare` после readiness; `status.execution` и notify не запуск. Полный список операций на этой сборке — `bb agency help` / `bb agency schema <operation>`, не перечень в разделе Allowlist (он исторический).
+`bb agency` вызывает те же domain handlers и Zod-схемы, что и RPC. Отдельной бизнес-логики и прямого SQLite нет. Произвольный RPC закрыт allowlist. Spawn — только `launch prepare` после readiness; `status.execution` и notify не запуск. Полный список операций на этой сборке — `bb agency help` / `bb agency schema <operation>`, не перечень в разделе Allowlist (он исторический). Регистрация CLI, спецификация команд и схемы операций находятся в `src/server/register.ts:2960-2965`, `src/server/cli/schema-help.ts:43-71` и `src/server/cli/operations.ts:75-115`.
 
 Проверенные CLI запуска: Claude Code, Codex, Cursor, OpenCode, Antigravity — если CLI подключён в BB и разрешён политиками проекта и сотрудника.
 
@@ -55,7 +70,7 @@ bb agency job attach-input --input-json '{...attachJobInput}'
 bb agency job report-needs-input --input-json '{...reportNeedsInput}'
 bb agency job answer-needs-input --input-json '{...answerNeedsInput}'
 bb agency job ask-owner
-# native composer choice card in this chat; optional --input-json '{"questions":[...]}'
+#native composer choice card in this chat; optional --input-json '{"questions":[...]}'
 bb agency job attempts --input-json '{"jobId":"<id>"}'
 bb agency job comment --input-json '{"requestId":"<uuid>","jobId":"<id>","comment":"..."}'
 bb agency launch readiness --json
@@ -84,3 +99,9 @@ bb agency call saveAgentProfile --input-json '{...}'
 Ответ domain: `{ ok: true, value }` или ошибка с кодом. `bytesBase64`, `logBytes` и значения секретов в stdout заменяются на `{ omitted: true }`. `secretRefs` (имена) остаются. Повторяющийся `requestId` и `revision_conflict` обрабатывает сервер: не затирайте чужую ревизию.
 
 `status` / `notify` — прежние команды журнала, не CRUD и не запуск агента.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Agency documentation](README.md)
+- [Основной навык плагина и справочный каталог](skills-integration.md)

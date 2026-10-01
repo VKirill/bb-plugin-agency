@@ -1,3 +1,19 @@
+---
+title: Референсы UI
+type: overview
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [ui, references, research]
+sources:
+  - docs/product-review.md
+  - docs/ui-plan.md
+  - DESIGN.md
+  - src/app/prototype/jobs.tsx
+  - src/app/prototype/job-detail.tsx
+  - src/app/prototype/job-work-timeline.tsx
+---
 # Референсы UI
 
 Изучен публичный репозиторий https://github.com/multica-ai/multica,
@@ -24,3 +40,5 @@ commit a9e82c79739446111b8ca9acbb256f584072d20d, 13 сентября 2026.
 - @get-bb/plugin-sdk 0.4.87: ProviderModelPicker, PermissionModePicker,
   NewThreadComposer, Markdown, SourceCode, navPanel/useBbNavigate.
 - Официальный реестр компонентов BB desktop-v0.43.1 из components.json.
+
+Интерфейс задач Агентства поддерживает список/канбан, карточку задачи и BB `ThreadChat` для привязанного рабочего треда (`src/app/prototype/jobs.tsx:80-90`, `src/app/prototype/job-detail.tsx:63-90`, `src/app/prototype/job-work-timeline.tsx:7-28`).

@@ -1,79 +1,89 @@
-# Архитектура Агентства
+---
+title: Agency architecture
+type: architecture
+created: 2026-09-13
+updated: 2026-09-28
+status: active
+confidence: medium
+tags: [architecture, runtime, rpc]
+sources:
+  - package.json
+  - server.ts
+  - host.ts
+  - app.tsx
+  - src/server/register.ts
+  - src/server/api/domain-rpc.ts
+  - src/server/api/dispatcher-rpc.ts
+  - src/app/data/rpc-agency-api.ts
+  - src/domain/job-state.ts
+  - src/server/api/auth.ts
+  - src/server/api/bound-files.ts
+  - src/server/api/launch-rpc.ts
+  - src/host/entry-handlers.ts
+  - src/host/file-handlers.ts
+---
+# Agency architecture
 
-Срез: 2026-09-20, source **0.1.0-alpha.16**. [Этапы](roadmap.md), [данные](data-model.md),
-[API](bb-api.md). Корневой README — введение установки; здесь модули.
+TL;DR: The BB plugin app and CLI use registered RPC handlers; server services own persistence and launch coordination, while host handlers perform guarded file operations on the selected machine.
 
-## Назначение и границы
-
-Агентство владеет сотрудниками, отделами, поручениями, версиями файлов и
-запуском **через свои RPC/CLI**. BB владеет провайдерами, машинами, тредами и UI.
-BB Tasks и Workflows — другие продукты. Notify — inbox / очередь Telegram Projects, не spawn.
-
-Cron и webhook **есть** в правилах отдела (2026-09-17): диспетчер ставит задачу
-руководителю. Ни webhook, ни UI realtime не вызывают spawn: только `prepareLaunch`
-через координатор.
+## System context
 
 ```mermaid
-flowchart TD
-  UI[UI и CLI] --> S[Domain RPC]
-  S --> D[(SQLite)]
-  S --> F[Файлы host binding]
-  S --> P[prepare-run + compile]
-  P --> L[launch coordinator]
-  L --> T[Hidden thread BB]
-  T --> W[Watch / hash]
-  W --> S
-  S --> N[reportNeedsInput]
-  N --> A[answerNeedsInput + send]
+C4Container
+    title Agency containers and external systems
+    Person(owner, "BB owner", "Uses Agency pages and the bb agency CLI")
+    System_Ext(bb, "BB host", "Owns plugin runtime, providers, threads, machines, and UI shell")
+    System_Boundary(agency, "Agency plugin") {
+        Container(app, "Plugin app", "React / BB plugin SDK", "Job, team, inbox, run, and usage screens")
+        Container(server, "Plugin server", "TypeScript", "RPC, CLI, domain services, dispatcher, and launch coordinator")
+        ContainerDb(db, "Agency database", "SQLite via BB storage", "Jobs, versions, attempts, decisions, and settings")
+        Container(host, "Host entry", "BB host SDK", "Guarded project-bound file operations")
+    }
+    Rel(owner, app, "Uses")
+    Rel(owner, server, "Runs bb agency commands")
+    Rel(app, server, "Calls typed RPC")
+    Rel(server, db, "Reads and writes")
+    Rel(server, bb, "Uses BB SDK for catalogs and threads")
+    Rel(server, host, "Calls host file contract")
+    Rel(host, bb, "Runs on selected host")
 ```
 
-## Что есть в source
+The package declares server, host, app, and skills entry points. `server.ts` calls `registerAgency`; `host.ts` installs the experimental document host contract; the app entry is `app.tsx`. (`package.json:5-10`, `server.ts:1-6`, `host.ts:1-8`)
 
-```text
-src/shared/contracts          Zod + RPC
-src/domain                    переходы Job/attempt без I/O
-src/server/db                 append-only миграции, в т.ч. run/needs_input
-src/server/services           CRUD, facts, accept
-src/server/artifacts          publish/open
-src/server/runtime
-  isolation.ts                заметка каталога: навыки/MCP не изолируются по тредам
-  context-snapshot            compile schema 2
-  prepare-run                 reserve + attachJobInput
-  run-store                   snapshot, attempt, receipt
-  launch                      coordinator, reconcile
-  isolated-sdk                verify, completion, watch
-  needs-input                 reportNeedsInput / answerNeedsInput
-src/server/api                domain-rpc + launch-rpc
-src/server/cli                allowlist
-src/app/prototype             рабочие экраны на RPC + отдельное демо
-skills/agency                 CLI-контракт воркера
-```
+## Runtime building blocks
 
-Нет в продукте: `src/server/interactions` (BB forms), scheduler, EventDefinition
-outbox, работающий dispatcher claim-loop, изоляция всех CLI.
+| Building block | Responsibility | Evidence |
+| --- | --- | --- |
+| Shared contracts | Zod schemas and RPC method contract shared by UI and server | `src/server/api/domain-rpc.ts:17-20`, `src/app/data/rpc-agency-api.ts:1-28` |
+| Domain | Pure job transitions and dependency checks | `src/domain/job-state.ts:4-15`, `src/domain/job-state.ts:35-111` |
+| Server registration | Opens storage, creates services, wires RPC, CLI, and background runtime | `src/server/register.ts:98-155`, `src/server/register.ts:2959-2965` |
+| Domain RPC | Performs access resolution and dispatches workspace, job, artifact, team, and rules operations | `src/server/api/domain-rpc.ts:131-190` |
+| Dispatcher RPC | Exposes event definitions, sources, rules, inbox ingestion, and action intents | `src/server/api/dispatcher-rpc.ts:17-59` |
+| App data adapter | Parses RPC results into UI API views and failure states | `src/app/data/rpc-agency-api.ts:65-124` |
+| Host file entry | Routes materialization and guarded file operations to the host | `src/host/entry-handlers.ts:1-10`, `src/host/file-handlers.ts:8-53` |
 
-`dispatcher/engine.ts` — typed inbox→rule→outbox/claim; live/auto off. `agency_inbox` — pending notify, не replay. Resource-lease (G9-3) отдельно.
+## Job runtime
 
-## Контекст и полномочия
+1. The caller creates or updates a durable job through domain RPC; handlers resolve access and use the domain store. (`src/server/api/domain-rpc.ts:131-190`)
+2. The domain validates transitions. Queueing needs an assignee, binding, brief, and acceptance criteria; running also needs a thread binding. (`src/domain/job-state.ts:39-63`)
+3. Launch operations are handled by the launch RPC and coordinator wiring in server registration. A persisted execution status is separate from creating a BB thread. (`src/server/api/launch-rpc.ts:1-24`, `src/server/register.ts:98-125`)
+4. The app receives workspace and job results through `createRpcAgencyApi`; invalid or unknown responses become typed errors or unavailable states. (`src/app/data/rpc-agency-api.ts:65-90`)
+5. A job reaches `done` only when the current version is accepted and review policy is satisfied. (`src/domain/job-state.ts:64-78`)
 
-Снимок: версии правил, процесса, роли, брифа, effective policy, CLI/host,
-входы, exclusions, handoff. Слой job не отменяет department. Конфликт —
-`reportNeedsInput` с source refs, не silent pick. Закрытие — `answerNeedsInput` + official send.
+## HTTP and RPC boundaries
 
-Права — пересечение платформы, binding, отдела, сотрудника и задачи.
-Текст поручения не расширяет allowlist. Неизвестные capabilities = запрет spawn.
+The main typed RPC contract is registered at `bb.rpc.register`; CLI operations are registered separately. The server also registers a `POST /notify` route with `auth: "none"`; the route uses webhook ingress authentication and returns an ingress receipt or error. (`src/server/register.ts:2631-2657`, `src/server/register.ts:2959-2965`)
 
-## Активация
+API modules under `src/server/api/` are implementation modules used by the registered RPC handlers. Their filenames are not independent HTTP paths. `auth.ts` documents the BB SDK RPC transport path; file operations stay on the host contract instead of the public plugin RPC contract. (`src/server/api/auth.ts:11-27`, `src/server/api/bound-files.ts:1-12`, `src/server/register.ts:2959-2965`)
 
-1. Durable CRUD и pin входов (`attachJobInput`).
-2. `getIsolationReadiness` с `jobId` (CLI, политики, правила проекта).
-3. `prepareLaunch` → receipt → native `threads.spawn`. `reconcile` не второй spawn.
-4. `idle` + hash текущей версии → review / `awaiting_review`.
-5. Иначе Job остаётся `running`, пока worker не вызовет `reportNeedsInput`.
-6. Accept — отдельная команда по artifactId+version+hash.
+See [BB API](bb-api.md) for registered routes and API modules, and [Data model](data-model.md) for persistent records.
 
-## Эксплуатация
+<!-- lane-pilot:backlinks -->
+## Referenced by
 
-Сервер в процессе BB. Production reload/core pin — отдельный rollout.
-Откат кода только с совместимой схемой. Старые notify не replay в runtime.
-Telegram optional, без второго polling loop.
+- [Agency documentation](README.md)
+- [BB API and Agency routes](bb-api.md)
+- [Agency data model](data-model.md)
+- [Agency gotchas](gotchas.md)
+- [Собственные MCP сотрудника](mcp-import.md)
+- [Agency overview](overview.md)

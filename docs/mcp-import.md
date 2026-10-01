@@ -1,4 +1,37 @@
+---
+title: Собственные MCP сотрудника
+type: component
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [mcp, agents, configuration]
+sources:
+  - docs/architecture.md
+  - docs/bb-api.md
+  - docs/instruction-context.md
+  - src/app/prototype/mcp-config.ts
+  - src/app/prototype/custom-mcp.tsx
+  - src/app/prototype/agent-detail.tsx
+---
 # Собственные MCP сотрудника
+
+## How it works
+
+1. The editor receives the current MCP items, reserved names, and an `onChange` callback. The agent profile currently renders this editor disabled, so its add/edit controls are unavailable there (`src/app/prototype/agent-detail.tsx:361-392`).
+2. When enabled in a caller, Add opens an empty JSON editor; Edit loads one existing server. Editing the text clears the previous preview and error (`src/app/prototype/custom-mcp.tsx:8-19`).
+3. Validate parses a single `mcpServers` object and checks server shape, URL, secret-reference syntax, argument count, import size, server count, and case-insensitive name collisions (`src/app/prototype/mcp-config.ts:4-33`).
+4. A valid import displays a preview. Add appends its servers; Edit replaces the one edited item while preserving its enabled flag (`src/app/prototype/custom-mcp.tsx:21-26`, `src/app/prototype/custom-mcp.tsx:40-42`).
+5. The profile UI represents selected and disabled catalog MCP IDs separately from custom configuration; it currently rejects a profile that has MCPs because launch delivery is unavailable (`src/app/prototype/agent-detail.tsx:361-392`).
+
+| Mode or state | Input and behavior | Failure or outcome |
+| --- | --- | --- |
+| Add | One JSON document may contain 1–20 uniquely named servers. A successful preview appends them through `onChange`. | Invalid JSON/schema, size/count limits, or name collision clear the preview and show the parse error. (`src/app/prototype/mcp-config.ts:19-33`, `src/app/prototype/custom-mcp.tsx:21-26`) |
+| Edit | The editor accepts one server and replaces the matching item after validation. | A multi-server edit is rejected; failed validation leaves the current items unchanged. (`src/app/prototype/custom-mcp.tsx:21-26`, `src/app/prototype/custom-mcp.tsx:42`) |
+| Enabled / disabled item | Enabled is a UI selection state; the label remains “Not connected.” | It does not test network access or start the server. (`src/app/prototype/custom-mcp.tsx:30-35`) |
+| Disabled profile editor | The profile passes `disabled`; custom MCP editing is unavailable. | This editor makes no configuration change. (`src/app/prototype/agent-detail.tsx:361-392`) |
+
+The parser reports malformed or unsupported input in the editor and does not resolve secret references or connect to a server (`src/app/prototype/mcp-config.ts:19-33`, `src/app/prototype/custom-mcp.tsx:21-27`, `src/app/prototype/custom-mcp.tsx:35-42`).
 
 ## Реализовано в alpha.8
 

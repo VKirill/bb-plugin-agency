@@ -1,4 +1,21 @@
+---
+title: Активация по событиям и уведомлениям
+type: flow
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [events, automation, notifications]
+sources:
+  - docs/automation-architecture.md
+  - docs/roadmap.md
+  - src/shared/contracts/events.ts
+  - src/server/dispatcher/engine.ts
+  - src/server/triggers/notify.ts
+---
 # Активация по событиям и уведомлениям
+
+Источники событий и правила используют типизированные схемы; приём проверяет и дедуплицирует события, а диспетчер создаёт намерения согласно режиму правила (`src/shared/contracts/events.ts:5-18`, `src/server/dispatcher/engine.ts:223-265`, `src/server/dispatcher/engine.ts:324-383`).
 
 Актуальный общий порядок — [рабочий план](roadmap.md);
 границы — [проверка готовности](implementation-readiness.md).

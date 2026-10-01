@@ -1,9 +1,27 @@
+---
+title: Рабочий план и закрытые этапы
+type: active-areas
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [roadmap, agency, runtime]
+sources:
+  - docs/implementation-readiness.md
+  - docs/automation-architecture.md
+  - docs/architecture.md
+  - src/domain/job-state.ts
+  - src/server/runtime/launch/coordinator.ts
+  - src/server/dispatcher/engine.ts
+---
 # Рабочий план и закрытые этапы
 
 Обновлён 2026-09-20. Этапы 0–1 и ручной цикл на пяти CLI (часть 2–3) закрыты в source.
 Полная файловая изоляция всех CLI остаётся. [Границы](implementation-readiness.md).
 
 ## Закрыто в source
+
+Машина состояний проверяет переходы задач, координатор запуска возвращает типизированные исходы, а тик диспетчера превращает принятые события во входящих в намерения действий (`src/domain/job-state.ts:35-79`, `src/server/runtime/launch/coordinator.ts:43-65`, `src/server/dispatcher/engine.ts:324-383`).
 
 **0. Фундамент.** Typecheck, Vitest, CI, host.ts в проверке, Node/SDK pin.
 
@@ -69,3 +87,13 @@ Registry EventDefinition, envelope, rule versions, matches/outbox, dispatcher.
 
 Приёмка UI: контрол либо пишет заявленные поля, либо заранее недоступен.
 `PROJECT.md` не заменяет Job в БД. Назначенный skill ≠ изоляция.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [События, вебхуки и автоматическая работа](automation-architecture.md)
+- [Активация по событиям и уведомлениям](events.md)
+- [Файлы, вопросы, передача работы и подключения](interaction-and-runtime.md)
+- [Агентство как рабочая организация агентов](operating-model.md)
+- [Ревью Агентства: Multica, план и интерфейс](product-review.md)
+- [Задача как рабочее пространство команды](task-interaction.md)

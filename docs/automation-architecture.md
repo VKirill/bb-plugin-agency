@@ -1,3 +1,20 @@
+---
+title: События, вебхуки и автоматическая работа
+type: architecture
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: low
+tags: [automation, events, runtime]
+sources:
+  - docs/roadmap.md
+  - docs/implementation-readiness.md
+  - docs/events.md
+  - src/server/triggers/webhook-auth.ts
+  - src/server/triggers/webhook-ingress/ingress.ts
+  - src/server/triggers/schedules.ts
+  - src/server/register.ts
+---
 # События, вебхуки и автоматическая работа
 
 Актуальный общий порядок — [рабочий план](roadmap.md);
@@ -5,7 +22,9 @@
 Ниже подробный контракт; номера локальных шагов не заменяют общий план.
 
 Статус 2026-09-20, BB 0.43 / SDK 0.4.104, плагин **0.1.0-alpha.16**.
-Расписание правила (cron, IANA) и маршрут `POST /http/notify` с HMAC работают:
+Расписание правила (cron, IANA) и маршрут `POST /http/notify` с HMAC работают
+(`src/server/triggers/schedules.ts:69-97`, `src/server/triggers/webhook-auth.ts:40-78`,
+`src/server/triggers/webhook-ingress/ingress.ts:65-115`, `src/server/register.ts:2631-2655`):
 диспетчер (30 с) превращает срабатывание в задачу руководителю и ставит её
 в очередь запуска. Spawn только через `prepareLaunch`. Notify в inbox / Telegram
 Projects не запускает агента.
@@ -284,3 +303,10 @@ Preview не проверяет подпись, дедупликацию, сет
 ID/membership и привязки BB, сохранение/revision, работу в общей папке,
 жизненный цикл назначения/ответа/повтора/остановки и сценарии первого запуска.
 Реализованные UI-исправления и оставшиеся пункты разделены в таблице всех экранов.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Активация по событиям и уведомлениям](events.md)
+- [Ревью Агентства: Multica, план и интерфейс](product-review.md)
+- [Рабочий план и закрытые этапы](roadmap.md)

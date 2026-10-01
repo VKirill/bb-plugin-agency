@@ -1,3 +1,18 @@
+---
+title: Инструкции разных уровней
+type: architecture
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [instructions, context, runtime]
+sources:
+  - docs/session-context-contract.md
+  - docs/context-snapshot-revise.md
+  - docs/data-model.md
+  - src/server/delegation/instructions.ts
+  - src/server/runtime/context-snapshot/compile.ts
+---
 # Инструкции разных уровней
 
 Сверено 2026-09-20. Compiler `compileContextSnapshot` (schema 2) собирает уровни
@@ -18,6 +33,8 @@
 «Порядок работы» описывает шаги. «Критерии приёмки» описывают наблюдаемый результат. В UI это разные поля, с примерами. Критерии отдела дополняются задачей; результат не считается принятым только потому, что агент написал «готово».
 
 ## Сборка контекста
+
+Инструкции сессии зависят от режима делегирования и маршрутов проекта; промпт запуска хранит проект, отдел, сотрудника, задачу и передачу в отдельных слоях (`src/server/delegation/instructions.ts:401-450`, `src/server/delegation/instructions.ts:482-498`, `src/server/runtime/context-snapshot/compile.ts:615-680`).
 
 1. По собственным ID определить задачу, проект, отдел, назначенного сотрудника. Маршрут и полномочия проверяются сервером, не из текстового поля webhook.
 2. Загрузить актуальные опубликованные версии правил, приостановки и grants.
@@ -60,3 +77,12 @@ PolicyVersion: scopeType/scopeId/version, structured constraints, instructions, 
 UI: «Правила проекта», «Как работает отдел», «Критерии приёмки», «Инструкция сотрудника» с подсказками; предпросмотр контекста после выбора задачи/отдела; конфликт показывает оба источника и маршрут решения; история изменений и откат.
 
 Приёмка: смена проекта одного сотрудника не переносит чужие материалы; запрет публикации не отменяется задачей/вебхуком; разные отделы дают разные процессы; старый Run показывает прежнюю версию; новый — новую; просроченное согласование не применяется; неразрешённый skill/MCP отсутствует в каталоге и недоступен вызову.у, чт
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [События, вебхуки и автоматическая работа](automation-architecture.md)
+- [Revise: ContextSnapshot compiler (schemaVersion 2)](context-snapshot-revise.md)
+- [Активация по событиям и уведомлениям](events.md)
+- [Собственные MCP сотрудника](mcp-import.md)
+- [Агентство как рабочая организация агентов](operating-model.md)

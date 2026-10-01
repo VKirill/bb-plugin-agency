@@ -1,3 +1,19 @@
+---
+title: Сценарии из выступления о Multica
+type: overview
+created: 2026-09-13
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [research, scenarios, agency]
+sources:
+  - docs/product-review.md
+  - docs/roadmap.md
+  - docs/implementation-readiness.md
+  - src/app/prototype/jobs.tsx
+  - src/server/dispatcher/engine.ts
+  - src/server/api/launch-rpc.ts
+---
 # Сценарии из выступления о Multica
 
 Источник: https://www.youtube.com/live/XCT7a3SoAQk , фрагмент 27:35–1:10:55.
@@ -19,6 +35,8 @@
 | 1:08:13–1:10:30 | QA проверяет кнопки/поля; UX оценка ещё планируется | Review role | P1: шаблон QA с проверяемыми сценариями, доказательствами и отдельной оценкой UX |
 
 ## Сможет ли работать обычный пользователь
+
+Связанные с этими сценариями пути в продукте включают создание задачи в интерфейсе, преобразование событий в намерения диспетчером и проверку готовности запуска для задачи (`src/app/prototype/jobs.tsx:117-130`, `src/server/dispatcher/engine.ts:324-383`, `src/server/api/launch-rpc.ts:542-590`).
 
 В записи спикер — технический пользователь, который по собственному рассказу
 тратит много времени на изучение инструментов. Это не тест доступности системы

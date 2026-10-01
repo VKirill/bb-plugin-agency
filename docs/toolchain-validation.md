@@ -1,71 +1,51 @@
-# Проверка toolchain Агентства
+---
+title: Toolchain validation
+type: deployment
+created: 2026-09-14
+updated: 2026-10-01
+status: active
+confidence: medium
+tags: [toolchain, ci, validation]
+sources:
+  - package.json
+  - package-lock.json
+  - .github/workflows/agency-check.yml
+  - src/server/register.ts
+  - src/host/file-handlers.ts
+---
+# Toolchain validation
 
-Сверено 14 сентября 2026, Mac mini, thread `thr_vawing3wxf` / AGY-2.
-Исторический прогон: тогда плагин был **0.1.0-alpha.12**. Текущий пакет —
-**0.1.0-alpha.16**; engines в `package.json` те же диапазоны. Не читать этот файл
-как «reload не делался».
+TL;DR: CI checks the plugin on Node 22.19 and builds with BB CLI 0.43.1; package engine ranges state minimum compatibility requirements but do not certify every version in those ranges.
 
-## Заявленные engines
+## Declared requirements
 
-| Поле | Значение | Откуда |
+| Field | Current value | What the evidence establishes |
 | --- | --- | --- |
-| `node` | `^22.19.0 \|\| ^24.0.0 \|\| ^26.0.0` | engines `bb-app@0.43.1` (build tool), не shell Node 26 |
-| `bb` | `>=0.43.1 <0.44` | установленный BB |
-| `bbPluginSdk` | `>=0.4.87 <0.5` | exact pin `@get-bb/plugin-sdk` 0.4.87 |
+| `node` | `^22.19.0 || ^24.0.0 || ^26.0.0` | Manifest range; CI config selects Node 22.19. (`package.json:5-9`, `.github/workflows/agency-check.yml:12-16`) |
+| `bb` | `>=0.43.1` | Manifest minimum only. (`package.json:5-9`) |
+| `bbPluginSdk` | `>=0.4.87` | Manifest minimum; dev dependency pin is exactly 0.4.87. (`package.json:5-9`, `package.json:28-30`) |
 
-`@get-bb/plugin-sdk@0.4.87` своего `engines.node` не публикует. Host entry в руководстве автора — Node 22 ESM. Vitest 4.1.11 допускает `^20 \|\| ^22 \|\| >=24`; Vitest 5 не брался.
+The previous local validation record named Node 26.3.1 and the CI configuration then in use. It is historical evidence and does not prove that all Node versions in the manifest range were run. (`.github/workflows/agency-check.yml:1-3`, `package.json:5-9`)
 
-**Локально исполнено:** только **Node 26.3.1**. **Node 22 CI ещё не исполнен.** Homebrew Node 20/22 нет; глобальный Node не ставился.
+## CI sequence
 
-## Vitest
+The workflow installs dependencies with `npm ci --include=dev`, runs `npm run typecheck` and `npm test`, checks the offline SDK pin, installs `bb-app@0.43.1` into a temporary prefix, builds the plugin, then runs production and full dependency audits. (`.github/workflows/agency-check.yml:18-59`)
 
-Было 3.2.7 (GHSA-82fw-gwwq-j7x9). Патч 3.x нет. В lock exact **4.1.11**. Запуск: `vitest run`, mocker/dev-server наружу не открывался.
+The isolated `bb-app` install is outside the plugin lockfile and dependency graph. Its audit is logged as informational with `if: always()` and `|| true`; the plugin audit steps are gates. (`.github/workflows/agency-check.yml:38-59`)
 
-## bb-app не в графе плагина
+## What the checks prove
 
-`bb-app` **нет** в `dependencies` / `devDependencies` / `package-lock.json`. Это не устраняет advisory самого launcher: они остаются у `bb-app@0.43.1` и его вложенного `npm`. Перенос в отдельный prefix только убирает ~220 MB и findings из графа плагина.
+- Typecheck and tests run against the dependency graph installed from the lockfile. (`.github/workflows/agency-check.yml:18-25`)
+- The offline pin check requires `@get-bb/plugin-sdk` package and lock versions to equal `0.4.87`, and rejects `bb-app` in either plugin dependency graph. (`.github/workflows/agency-check.yml:26-37`)
+- The build uses the isolated BB CLI package `bb-app@0.43.1`. (`.github/workflows/agency-check.yml:38-47`)
+- This workflow does not reload the plugin into a live BB host or exercise native UI, host file RPC, or a real employee launch. The runtime implementation is wired through BB's plugin registration and host file handler. (`src/server/register.ts:98-125`, `src/host/file-handlers.ts:8-53`)
 
-Отдельного npm «plugin-build-only» нет. Локально `npm run build` берёт `bb` с PATH / `BB_CLI` (на Mini: `~/.local/bin/bb` 0.43.1). В CI CLI ставится **только** на шаг сборки.
+For package roles and declared ranges, see [Dependencies and compatibility](dependencies.md). For installation and reload steps, see [Deployment](deployment.md).
 
-## CI
+<!-- lane-pilot:backlinks -->
+## Referenced by
 
-[`.github/workflows/agency-check.yml`](../.github/workflows/agency-check.yml):
-
-- `node-version: "22.19"` строкой (заявленный пол; этот job на Mini не гонялся).
-- `npm ci` / typecheck / test плагина — без `bb`.
-- SDK pin **offline**: exact `0.4.87` в package и lock. `bb plugin types --check` в чистом CI нет: ему может быть нужен live host, это не integration check.
-- Сборка: `npm install --prefix "$RUNNER_TEMP/bb-toolchain" bb-app@0.43.1`, дальше только `$RUNNER_TEMP/bb-toolchain/node_modules/.bin/bb plugin build`.
-- Кеша `~/.bb/plugins` нет (лишний runtime state).
-- Gate audit — только граф плагина. Audit prefix `bb-app` пишется в лог и **не** является gate; isolation не считается исправлением advisory.
-
-## Audit
-
-| Область | Исход 14.09.2026 |
-| --- | --- |
-| граф плагина `npm audit --omit=dev` | **0** |
-| граф плагина полный `npm audit` | **0** (после удаления `bb-app` из lock) |
-| изолированный `bb-app@0.43.1` (свой prefix + свой lock) | **6 findings** (1 low, 4 high, 1 critical): `tar`, `pacote`, `undici`, `brace-expansion`, `ip-address`, `postcss-selector-parser` — вложенный `npm` launcher. Isolation **не** убирает эти advisory. |
-| GHSA-82fw-gwwq-j7x9 | в графе плагина нет |
-
-Когда `bb-app` сидел в lock плагина, полный audit показывал 8 строк (дополнительно родители `bb-app` / `npm`). Число строк изменилось из‑за другой формы графа, не потому что уязвимости launcher исчезли.
-
-## React и shims
-
-React не в manifest. В lock плагина peer `react@19.3.0` / `react-dom@19.3.0`. После `bb plugin build` в `dist/*` нет `@license React`. Host/server без `jsx-runtime`. App — shim host, не второй bundle.
-
-## Локальные команды (Node 26.3.1)
-
-```sh
-npm ci --include=dev
-npm run typecheck
-npm test
-npm run build          # PATH bb 0.43.1
-npm audit --omit=dev
-npm audit
-```
-
-Typecheck: 0; в программе `host.ts`, `server.ts`, `app.tsx`.  
-Тесты после ci: **40 passed / 6 files** (37 исходных + параллельный AGY-3 `run-links`; тесты AGY-2 не менялись).  
-SDK pin offline: package и lock `0.4.87`. `bb plugin types --check` локально с живым CLI печатает совпадение pin/host; в CI это не gate.
-
-ACP warning `nativeSkillRoots` — среда CLI, не репозиторий Агентства.
+- [Agency documentation](README.md)
+- [Dependencies and compatibility](dependencies.md)
+- [Agency deployment](deployment.md)
+- [Готовность и границы runtime](implementation-readiness.md)

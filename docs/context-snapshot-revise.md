@@ -1,3 +1,18 @@
+---
+title: "Revise: ContextSnapshot compiler (schemaVersion 2)"
+type: architecture
+created: 2026-09-15
+updated: 2026-09-28
+status: stale
+confidence: low
+tags: [context-snapshot, runtime, instructions]
+sources:
+  - docs/session-context-contract.md
+  - docs/instruction-context.md
+  - src/server/runtime/context-snapshot/compile.ts
+  - src/server/runtime/prepare-run/prepare.ts
+  - src/server/runtime/run-store/states.ts
+---
 # Revise: ContextSnapshot compiler (schemaVersion 2)
 
 Сверено 2026-09-14 с `compile.ts` / `types.ts` и контрактом
@@ -5,7 +20,10 @@
 [data-model.md](data-model.md), [instruction-context.md](instruction-context.md).
 Это правка чистого compiler: без persist, spawn, FS, AGY-16, register/RPC.
 
-Цель снимка — **воспроизвести launch**, не только собрать красивый prompt.
+Цель снимка — **воспроизвести запуск**, не только собрать красивый промпт
+(`src/server/runtime/context-snapshot/compile.ts:594-614`,
+`src/server/runtime/prepare-run/prepare.ts:239-269`,
+`src/server/runtime/run-store/states.ts:7-19`).
 Digest должен меняться, если меняется любой вход запуска (модель, MCP, capabilities, handoff, upstream artifact).
 
 ## Вердикт по замечаниям root
@@ -106,3 +124,8 @@ MCP: каждый `agentVersion.mcpIds` → запись в `selectedMcps` с ha
 `compileContextSnapshot` по фиксированному input даёт snapshot, из которого без UI можно назвать: host/root/env, job+revision, agentVersion id+**model**+provider, обе policy id + effective capabilities, selected skills **и** MCP с hash, authorized input artifacts (включая upstream), handoff или явный none. Prompt остаётся пояснением, не единственным носителем этих полей.
 
 Реализацию держать в `src/server/runtime/context-snapshot/**` + `tests/context-snapshot.test.ts`. UI/RPC/package не трогать.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Контекст сотрудника при запуске](session-context-contract.md)

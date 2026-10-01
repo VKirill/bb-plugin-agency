@@ -1,95 +1,61 @@
-# Пакеты и совместимость
+---
+title: Dependencies and compatibility
+type: gotchas
+created: 2026-09-14
+updated: 2026-10-01
+status: active
+confidence: medium
+tags: [dependencies, compatibility, runtime]
+sources:
+  - package.json
+  - package-lock.json
+  - .github/workflows/agency-check.yml
+  - src/server/register.ts
+  - server.ts
+  - src/app/data/rpc-agency-api.ts
+  - src/host/file-handlers.ts
+  - src/server/triggers/cron/migration.ts
+---
+# Dependencies and compatibility
 
-Инвентаризация 20 сентября 2026, **0.1.0-alpha.16**. `package-lock.json` — точный граф
-установки; package.json — допустимые диапазоны. Pin SDK в package — `0.4.87`;
-живой хост BB может быть новее.
+TL;DR: The manifest declares BB and SDK minimums; the exact SDK package remains pinned at 0.4.87, while the lockfile records the installed dependency graph.
 
-## Базовая совместимость
+## Declared runtime ranges
 
-| Компонент | Проверено | Условие |
+| Component | Declaration | Evidence and limit |
 | --- | --- | --- |
-| BB | 0.43.1 | engines.bb >=0.43.1 <0.44 |
-| Plugin SDK | публичный npm `0.4.87` (compile и host production) | engines.bbPluginSdk >=0.4.87 <0.5. Spawn — public `threads.spawn` |
-| Агентство | 0.1.0-alpha.16 | path установка, running |
-| Telegram Projects | 0.5.1, optional API v1 | Наличие/версию проверять capabilities, не по названию |
-| Node в shell проверки | 26.3.1 | Не доказательство версии процесса сервера или поддержки Node 22 |
-| npm | 11.16.0 | Установка воспроизводится через npm ci с lock |
-| TypeScript target/types | ES2022 / @types/node 22.20.2 | node engines и CI baseline ещё нужно определить |
+| Node.js | `^22.19.0 || ^24.0.0 || ^26.0.0` | Package metadata; CI selects Node 22.19.0. Local verification on other Node majors is not implied. (`package.json:5-9`, `.github/workflows/agency-check.yml:12-16`) |
+| BB | `>=0.43.1` | Package metadata minimum. This range is not an end-to-end compatibility matrix. (`package.json:5-9`) |
+| BB Plugin SDK | `>=0.4.87` | Engine metadata minimum; the development dependency itself is exactly `0.4.87`. (`package.json:5-9`, `package.json:28-30`) |
+| Agency | `0.1.0-alpha.18` | Package version. (`package.json:1-3`) |
 
-## Прямые зависимости
+The expanded BB and SDK engine ranges are declarations in `package.json` and the lockfile root package metadata. They do not show which newer BB or SDK versions have passed live UI, host-file, RPC, or launch checks. (`package-lock.json:5-12`, `src/server/register.ts:1-4`, `src/host/file-handlers.ts:8-53`)
 
-Колонки lock/installed — версии в этом checkout, **не версии React/портальных
-компонентов внутри браузера BB**. Пакеты с shim предоставляет BB runtime;
-локальная dev-копия нужна для типов/разработки. Сверка SDK pin не проверяет
-по отдельности все эти runtime версии.
+## Dependency roles
 
-| Пакет | manifest | lock / installed | Раздел | Назначение |
-| --- | --- | --- | --- | --- |
-| @hugeicons/core-free-icons | ^4.1.3 | 4.3.2 | prod | Иконки, bundled |
-| @hugeicons/react | ^1.1.6 | 1.1.10 | prod | Иконки React, bundled |
-| @radix-ui/react-checkbox | ^1.3.7 | 1.3.11 | prod | Компонент, bundled |
-| @radix-ui/react-slot | ^1.3.0 | 1.3.3 | prod | Компонент, bundled |
-| @radix-ui/react-tabs | ^1.1.21 | 1.1.21 | prod | Компонент, bundled |
-| cron-parser | ^5.5.0 | 5.10.1 | prod | Вычисление cron preview и будущих occurrences |
-| zod | ^4.3.6 | 4.6.4 | prod | RPC/данные, bundled |
-| @get-bb/plugin-sdk | 0.4.87 | 0.4.87 | dev | Публичный npm-пакет; spawn — public threads.spawn |
-| @pierre/diffs | ^1.2.9 | 1.4.2 | dev | BB shim, локальная версия для разработки |
-| @radix-ui/react-alert-dialog | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
-| @radix-ui/react-context-menu | ^2.3.3 | 2.3.7 | dev | BB shim, портальный UI |
-| @radix-ui/react-dialog | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
-| @radix-ui/react-dropdown-menu | ^2.1.20 | 2.1.24 | dev | BB shim, портальный UI |
-| @radix-ui/react-hover-card | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
-| @radix-ui/react-menubar | ^1.1.20 | 1.1.24 | dev | BB shim, портальный UI |
-| @radix-ui/react-navigation-menu | ^1.2.18 | 1.2.22 | dev | BB shim, портальный UI |
-| @radix-ui/react-popover | ^1.1.19 | 1.1.23 | dev | BB shim, портальный UI |
-| @radix-ui/react-select | ^2.3.3 | 2.3.7 | dev | BB shim, портальный UI |
-| @radix-ui/react-tooltip | ^1.2.12 | 1.2.16 | dev | BB shim, портальный UI |
-| @types/better-sqlite3 | ^7.6.12 | 7.6.13 | dev | Типы разработки |
-| @types/node | ^22.0.0 | 22.20.2 | dev | Типы разработки |
-| @types/react | ^19.0.0 | 19.3.0 | dev | Типы разработки |
-| @types/react-dom | ^19.0.0 | 19.3.0 | dev | Типы разработки |
-| better-sqlite3 | ^12.0.0 | 12.11.1 | dev | Локальный SDK harness; рабочая БД через BB |
-| class-variance-authority | ^0.7.1 | 0.7.1 | dev | BB shim, variants |
-| clsx | ^2.1.1 | 2.1.1 | dev | BB shim, CSS helpers |
-| hono | ^4.11.9 | 4.13.7 | dev | Типы/инфраструктура SDK harness |
-| sonner | ^1.7.4 | 1.7.4 | dev | BB shim, уведомления |
-| tailwind-merge | ^3.4.0 | 3.7.0 | dev | BB shim, CSS helpers |
-| typescript | ^5.7.0 | 5.9.3 | dev | Typecheck |
-| vaul | ^1.1.2 | 1.1.2 | dev | BB shim, drawer |
-| vitest | 4.1.11 | 4.1.11 | dev | Тесты |
+Production dependencies include icons and UI primitives, `cron-parser`, and Zod. The application-facing API parses RPC envelopes and workspace responses; cron parsing is used by schedule handling. (`package.json:11-20`, `src/app/data/rpc-agency-api.ts:65-90`, `src/server/triggers/cron/migration.ts:1-18`)
 
-## Политика пакетов
+The SDK and TypeScript tooling are development dependencies. React, React DOM, and portal components are supplied by the BB plugin runtime and are not declared as production dependencies. The CI workflow installs the exact SDK pin from the manifest and lockfile before typecheck and tests. (`package.json:21-48`, `.github/workflows/agency-check.yml:18-36`)
 
-React/ReactDOM, портальные Radix, sonner, vaul и @pierre/diffs предоставляются
-BB. Не добавлять второй React или свою копию портального окружения в bundle.
-Предпочитать штатные SourceCode/Diff/Markdown. Checkbox/Slot/Tabs, Hugeicons,
-cron-parser и zod используют собственную сборку плагина. Zod необходим
-и на сервере, и в браузере. SQLite продукта — `bb.storage.database()`, не
-отдельное соединение better-sqlite3 поверх той же базы.
+`better-sqlite3` is a development dependency for local type and test tooling. Product storage is opened through Agency's BB-backed database registration path. (`package.json:38-40`, `src/server/register.ts:139-155`)
 
-Агентство не редактирует и не рендерит Markdown само: `.md`/`.markdown` открывает
-и редактирует отдельный плагин «Markdown PRO» (`md-editor`) через штатный file
-opener BB. TipTap/`@tiptap/*` и `yaml` были удалены из зависимостей вместе с
-собственным Markdown-редактором и YAML-frontmatter превью — не переустанавливать
-их ради работы с `.md`. Native Markdown у остальных документов (описания задач,
-чата) включает нужные рендереры; Mermaid/KaTeX не добавлять отдельными
-зависимостями без найденного ограничения. Аналогично нет основания сейчас
-добавлять Redis, внешний scheduler или библиотеку графов для уже работающей оргсхемы.
-Новые пакеты вводить по конкретному отсутствующему контракту и с проверкой BB bundle.
+## Compatibility boundaries
 
-`bb plugin types --check` безопасен для сверки; `bb plugin types` может менять
-пины/декларации, его запуск — часть отдельного контролируемого обновления.
-Перед изменением minor BB/SDK повторить native UI/host/RPC/file preview проверки.
-Для версии с рабочими данными lock обязателен, runtime совместимость не расширять
-в engines без проверки. Проверку host.ts добавить в tsconfig на этапе 0.
+- The locked versions describe this checkout's npm dependency graph, not the copies of runtime shims supplied by BB. (`package-lock.json:1-24`, `package.json:11-20`)
+- The engine fields are package-manager metadata. CI checks the plugin on Node 22.19 and builds with a separately installed `bb-app@0.43.1`; it does not test every version allowed by the ranges. (`.github/workflows/agency-check.yml:12-16`, `.github/workflows/agency-check.yml:38-47`)
+- Plugin API calls depend on BB's runtime contracts, including RPC, host file operations, and thread APIs. A successful TypeScript build alone does not establish runtime compatibility. (`server.ts:1-6`, `src/server/register.ts:98-125`, `src/host/file-handlers.ts:8-53`)
 
-## Audit и запланированное обновление
+## Package changes
 
-Проверено 2026-09-14 04:01 +02:00: `npm audit --omit=dev` — **0 findings**.
-Markdown-редактор на TipTap (и его `@tiptap/*`/`yaml` зависимости) удалён из
-плагина: `.md`/`.markdown` теперь открывает плагин «Markdown PRO» (`md-editor`),
-GHSA-cp6q-959q-f8rh больше не относится к этому плагину.
+Run `npm ci --include=dev` to install from the lockfile. Update package declarations and lockfile together; CI verifies the SDK pin and that `bb-app` is absent from the plugin dependency graph. (`.github/workflows/agency-check.yml:18-37`)
 
-Vitest в lock — 4.1.11. Полный `npm audit` (с dev) не обещает 0: смотреть
-актуальный отчёт, не эту строку. Сохранённый audit — дата проверки, не вечная
-гарантия.
+`npm run build` delegates to `bb plugin build`; it uses the BB CLI available on `PATH` unless the environment selects another CLI. (`package.json:49-54`)
+
+See [Toolchain validation](toolchain-validation.md) for the dated validation record and [Gotchas](gotchas.md) for runtime boundaries.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Agency documentation](README.md)
+- [Agency deployment](deployment.md)
+- [Toolchain validation](toolchain-validation.md)

@@ -1,108 +1,92 @@
-# Проверенные контракты BB
+---
+title: BB API and Agency routes
+type: capabilities
+created: 2026-09-13
+updated: 2026-10-01
+status: active
+confidence: high
+tags: [api, rpc, routes]
+sources:
+  - src/server/register.ts
+  - host.ts
+  - src/server/api/auth.ts
+  - src/server/api/domain-rpc.ts
+  - src/server/api/dispatcher-rpc.ts
+  - src/server/api/launch-rpc.ts
+  - src/server/api/dashboard-usage-rpc.ts
+  - src/server/api/bound-files.ts
+  - src/server/api/project-access.ts
+  - src/server/api/project-rules.ts
+  - src/server/api/resolve-preview.ts
+  - src/server/api/catalog.ts
+  - src/server/api/bb-catalog.ts
+  - src/server/api/capability-catalog.ts
+  - src/server/api/caller.ts
+  - src/server/api/executing-activity-rpc.ts
+  - src/server/api/project-sections.ts
+  - src/app/data/rpc-agency-api.ts
+  - src/app/data/persist-create.ts
+  - src/host/entry-handlers.ts
+---
+# BB API and Agency routes
 
-Проверка 20 сентября 2026: плагин **0.1.0-alpha.16**, BB ≥0.43.1, pin SDK `0.4.87`
-(хост может быть новее — `bb plugin types` обновляет pin). Это проверка версии
-SDK, не доказательство совместимости каждого CLI и всех runtime UI-пакетов.
-Точные сигнатуры: `node_modules/@get-bb/plugin-sdk/bundled-types/` — файлы
-`bb-plugin-sdk.d.ts`, `bb-plugin-sdk-app.d.ts`, `bb-plugin-sdk-host.d.ts`.
-Использовать публичный SDK и native shims; не импортировать приватное ядро BB.
+TL;DR: Agency registers one typed plugin RPC contract, a CLI, a host-file contract, and a signed webhook ingress; API modules are implementation boundaries, not separate HTTP route registrations.
 
-| Возможность | API / контракт | Используется в alpha.16 | Что ещё требуется |
-| --- | --- | --- | --- |
-| Backend | bb.server, factory(BbPluginApi), rpc.register | Да | Сервисы рабочих сущностей вместо демосостояния |
-| UI | definePluginApp, slots.navPanel, native компоненты/тема | Да | RPC данные, состояния загрузки/ошибки/конфликта |
-| Файлы на host | bb.host, experimental_defineHostEntry, hosts.experimental_client | Да, materialize preview | Привязка к host заказа, версии, очистка и восстановление |
-| Чтение рядом | slots.fileOpener, experimental_openFilePreview | Да, закрываемая вкладка по клику | Сохраняемый registry артефактов; Original для остальных файлов |
-| Форматирование | Markdown, SourceCode | Да; YAML разбирает пакет yaml | Проверки набора поддерживаемой разметки после обновления BB |
-| База | storage.database(), migrate; storage.kv | Inbox + настройки | Полная модель, revision, backup и миграции |
-| UI invalidation | realtime.publish | Inbox | Не очередь, после сигнала перечитать RPC |
-| Машины/CLI | sdk.hosts.list/get, providerCliStatus, sdk.providers.list | Да | Авторизация/квота/модель/изоляция проверяются отдельно |
-| Выбор исполнения | experimental_ProviderModelPicker, PermissionModePicker | Да, профиль в примере | Версионирование выбранного запуска и server validation |
-| Треды | sdk.threads.spawn/send/wait/output/stop/archive | Нет вызовов исполнения | Запуск, binding, stop acknowledgement и reconcile |
-| Вопросы | threads.interactions.list/get/resolve; plugin-owned respond | Только UI-пример | Сопоставление реального interaction/version, race/expiry; secure secret handler |
-| События | bb.events.on | Каталог UI, подписки не зарегистрированы | Нормализация, inbox и восстановление пропущенных callbacks |
-| Фоновая работа | background.service | Нет | AbortSignal, backoff и восстановление сохранённой очереди |
-| Расписание | background.schedule | Нет; cron-parser считает preview | Собственные UTC occurrences, timezone/DST, пропуски и дедупликация |
-| Webhook | http.route | Нет | Source auth, raw-body signature, schema, лимиты и durable ack |
-| Связь плагинов | sdk.plugins.list/callRpc | Optional Telegram adapter | Интеграция с intent/outbox и receipt reconciliation |
-| Ограничение инструментов | agents.configure | Не решает требование | Настраивает свои tools/skills плагина, не чужой каталог |
+## Registered transports
 
-## События SDK
+`registerAgency` creates the domain, launch, dispatcher, and executing-activity handlers and registers the typed `rpcContract` with BB. It registers Agency CLI operations separately. (`src/server/register.ts:98-125`, `src/server/register.ts:2959-2965`)
 
-В `ThreadEventPayloads` проверены 14 ключей. Пользователь видит русское название,
-рядом системное имя серым меньшим шрифтом. Не все события являются завершением
-работы агента; payload и происхождение сохраняются.
+The only direct HTTP route registered in `registerAgency` is `POST /notify`. It has BB session auth disabled because the webhook source authenticates via HMAC over timestamp and raw body. Ingress validation, rate limiting, durable event receipt, and response codes are delegated to webhook ingress ports. (`src/server/register.ts:2630-2657`)
 
-| Название | Системный ключ |
-| --- | --- |
-| Чат создан | thread.created |
-| Агент работает | thread.active |
-| Ход агента завершён | thread.idle |
-| Работа чата завершилась ошибкой | thread.failed |
-| Чат архивирован | thread.archived |
-| Чат восстановлен из архива | thread.unarchived |
-| Чат удалён | thread.deleted |
-| Требуется ответ или подтверждение | interaction.pending |
-| Сообщение поставлено в очередь | message.queued |
-| Сообщение передано агенту | message.dispatched |
-| Сообщение отменено | message.cancelled |
-| Ход завершился ошибкой | turn.failed |
-| История чата обновилась | experimental_thread.events |
-| Пользователь ввёл данные в терминал | experimental_terminal.input |
+The host contract is separate from plugin RPC. It exposes document materialization and guarded file operations to the host process. (`host.ts:1-8`, `src/host/entry-handlers.ts:1-10`)
 
-`message.dispatch` — отдельный hook, не ещё один ключ events.on. Terminal input
-не содержит введённого текста. `workflow.completed` не подтверждён как нативный
-ключ этой версии. Для цепочек использовать своё проверенное событие этапа.
+## RPC authentication and caller scope
 
-Собственные `job.created`, `job.ready_for_review`, `review.accepted`,
-`review.rejected`, `dependencies.completed`, `research.delivered` сейчас —
-6 примеров каталога, не исполняемая событийная инфраструктура. Последний —
-прикладной пользовательский пример, не универсальный lifecycle. В первой версии
-registry разделит BB events, Agency lifecycle и события установленных адаптеров.
-Внутренний review.accepted может возникнуть только из проверенного перехода,
-а не из webhook с таким названием. Подробности — [модель данных](data-model.md).
+`SDK_RPC_AUTH` describes the BB SDK transport as `POST /api/v1/plugins/:id/rpc/:method`. The Agency does not mount `ANY /api/auth`; `auth.ts` supplies the context resolver used by RPC handlers. Handler inputs contain no caller actor, origin is not secret, and a missing origin is allowed. `resolveRpcAccess` sets the actor to `system`, includes stored Agency bindings, and associates the current BB thread with an Agency attempt when one resolves. (`src/server/api/auth.ts:11-31`, `src/server/api/auth.ts:54-65`, `src/server/register.ts:2959`)
 
-## Главный неподтверждённый контракт: изоляция
+A worker's project access is checked by `projectAccessAllowed`: owner calls and calls without a project pass; otherwise the requested BB project must match the project of the caller's job. This helper is applied in the registered handler wiring, not mounted as `ANY /api/project-access`. (`src/server/api/project-access.ts:9-19`, `src/server/register.ts:1155`)
 
-ThreadSpawnArgs/CreateThreadRequest позволяют выбрать провайдер/модель,
-reasoning, permission mode, service tier, среду/машину, visibility и metadata.
-В проверенной декларации нет per-thread `mcpIds`/`skillIds` allowlist.
-`executionInputSources` описывает происхождение выбора исполнения, не права.
-Hidden скрывает служебный чат, но не ограничивает доступ.
+## API modules
 
-Host SDK имеет экспериментальные helpers для native roots, включая
-`experimental_filterResolvedNativeRoots`. Их наличие не доказывает возможность
-полностью отсечь глобальные/native skills и MCP конкретного агента. До spike
-нельзя обещать изоляцию посредством cwd, собственного mcp.json или промпта.
+| Module | Role | Evidence |
+| --- | --- | --- |
+| `auth` | Resolves the installation-owner RPC context, binds a calling thread to its Agency attempt when possible, and verifies BB project/environment/host/root placement during binding creation. It is not an `ANY /api/auth` route. | `src/server/api/auth.ts:19-31`, `src/server/api/auth.ts:54-82` |
+| `bb-catalog` | Reads BB project, host, environment and policy catalog data; validates binding placement against environment metadata. | `src/server/api/bb-catalog.ts:1-28`, `src/server/api/auth.ts:61-79` |
+| `bound-files` | Resolves file operations against a verified project binding and delegates to the host file port; not exposed on plugin RPC. | `src/server/api/bound-files.ts:1-23` |
+| `caller` | Tracks the SDK calling thread and resolves an Agency attempt associated with it. | `src/server/api/caller.ts:1-28` |
+| `capability-catalog` | Returns skill/MCP catalog data together with explicit discovery and isolation flags. | `src/server/api/capability-catalog.ts:1-24` |
+| `catalog` | Reads stored agents, departments, bindings, memberships, jobs, policies, and versions for API handlers. | `src/server/api/catalog.ts:1-28` |
+| `dashboard-usage-rpc` | Reads usage events for exact Agency-bound threads and provides the usage collector ports. | `src/server/api/dashboard-usage-rpc.ts:1-34` |
+| `dispatcher-rpc` | Builds shared-contract handlers for event definitions and sources, rule versions, inbox ingestion, dispatch ticks, and action intents. Mutating methods resolve RPC access; list methods read through the dispatcher engine. It is not an `ANY /api/dispatcher-rpc` route. | `src/server/api/dispatcher-rpc.ts:21-58` |
+| `domain-rpc` | Builds shared-contract handlers for workspace, entity, job, artifact, question, project-rule, and acceptance operations. Mutations resolve RPC access and call `onChanged` after a successful result. It is not an `ANY /api/domain-rpc` route. | `src/server/api/domain-rpc.ts:59-110`, `src/server/api/domain-rpc.ts:168-177` |
+| `executing-activity-rpc` | Counts executing jobs by looking up threads for Agency-bound candidates. | `src/server/api/executing-activity-rpc.ts:1-22` |
+| `launch-rpc` | Implements readiness, prepare, reconcile, completion, and attempt-list operations for coordinated launches. | `src/server/api/launch-rpc.ts:1-24` |
+| `project-access` | Checks a requested BB project against the project bound to the caller job, while allowing owner calls and requests without a project. It is a helper, not an `ANY /api/project-access` route. | `src/server/api/project-access.ts:9-19` |
+| `project-rules` | Reads and saves the binding's `.bb/AGENTS.md` under the defined path and size contract. | `src/server/api/project-rules.ts:1-27` |
+| `project-sections` | Reads BB project-folder sections used for binding labels. | `src/server/api/project-sections.ts:1-28` |
+| `resolve-preview` | Resolves stored artifact metadata and an eligible project-bound preview path. | `src/server/api/resolve-preview.ts:1-30` |
 
-Проверка отдельно покрывает BB tools, deferred tool search, MCP gateway,
-нативные настройки CLI, shell/файлы/сеть и административные команды BB.
-Матрица провайдер×host получает verified/unavailable/unknown, доказательство и
-версию адаптера. После обновления провайдера проверка повторяется. Если SDK
-недостаточен, результат этапа — конкретный контракт изменения core/адаптера;
-запуск остаётся недоступным, автономия не включается.
+## Project binding creation
 
-## Фон и восстановление
+`persistCreateBinding` resolves the policy in this order: use the selected policy ID, reuse an existing policy matching the standard binding policy for the selected host, or create that standard policy. A policy-resolution failure returns before the binding request. On success, the client sends a new request ID with the BB project, environment, host, canonical root, policy ID, and a null section ID. (`src/app/data/persist-create.ts:51-63`, `src/app/data/persist-create.ts:66-81`)
 
-`background.service(name,{start(signal)})` запускается после factory; остановка
-передаёт abort, сбои приводят к backoff. Жизнь службы ограничена жизнью BB.
-`background.schedule` создаёт/обновляет durable row по pluginId/name при загрузке,
-использует пять полей cron и локальное время сервера, работает только при loaded.
-CAS next_run_at не является гарантией выполнения бизнес-задачи или внешнего эффекта.
+The domain RPC verifies the environment's project, host, and canonical root against BB catalog metadata before storing the binding. A mismatch returns the placement failure; successful verification proceeds to the domain store. (`src/server/api/domain-rpc.ts:387-391`, `src/server/api/auth.ts:61-82`)
 
-Один минутный tick выбирает due occurrences собственных правил в SQLite;
-cron-parser вычисляет даты в IANA timezone. Сохраняются scheduledAtUTC, правило
-обработки пропусков и уникальный occurrence. Событийные действия не ждут cron;
-сверка по времени лишь восстанавливает пропущенную работу.
+The named modules `auth.ts`, `dispatcher-rpc.ts`, `domain-rpc.ts`, and `project-access.ts` are not independently mounted `ANY /api/...` HTTP routes. BB receives the combined handlers when `registerAgency` calls `bb.rpc.register(rpcContract, rpcHandlers)`; `SDK_RPC_AUTH.httpRoute` identifies the SDK's RPC transport route. (`src/server/register.ts:2959-2965`, `src/server/api/auth.ts:19-31`)
 
-## Optional Telegram
+## Client adapter
 
-Проверен установленный telegram-projects 0.5.1 и контракт API v1:
-`agencyCapabilities`, `agencyConfigure`, `agencyEnqueue`, `agencyDeliveryStatus`.
-Действия notify/question_link, подтверждение доставки через receipt polling.
-В Agency enqueue ещё не подключён к диспетчеру. Нет подтверждённой универсальной
-подписки на все события Telegram и нет структурированного ответа в чате первой
-версии: вопрос ведёт в форму BB. Наличие старого/отсутствующего плагина не мешает
-остальным функциям. Нет нового getUpdates loop и произвольного chatId из webhook.
-Личный bridge требует проверки переносимости OWNER_ID/BOT_ID перед обещанием
-работы у любого владельца. [Подробный контракт](interaction-and-runtime.md).
+`createRpcAgencyApi` calls named methods in the shared RPC contract, validates response envelopes, normalizes catalog values, and preserves unavailable/error outcomes for the app. (`src/app/data/rpc-agency-api.ts:65-124`)
+
+See [Architecture](architecture.md) for request flow and [Gotchas](gotchas.md) for identity and file constraints.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Agency documentation](README.md)
+- [Agency architecture](architecture.md)
+- [Agency gotchas](gotchas.md)
+- [Файлы, вопросы, передача работы и подключения](interaction-and-runtime.md)
+- [Собственные MCP сотрудника](mcp-import.md)
+- [Agency overview](overview.md)
+- [Ревью Агентства: Multica, план и интерфейс](product-review.md)

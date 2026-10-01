@@ -1,3 +1,19 @@
+---
+title: Готовность и границы runtime
+type: gotchas
+created: 2026-09-14
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [runtime, readiness, launch]
+sources:
+  - docs/toolchain-validation.md
+  - docs/architecture.md
+  - docs/bb-api.md
+  - src/server/api/launch-rpc.ts
+  - src/server/runtime/prepare-run/prepare.ts
+  - src/server/runtime/launch/coordinator.ts
+---
 # Готовность и границы runtime
 
 20 сентября 2026 · source **0.1.0-alpha.16** · Mac mini. Введение установки —
@@ -5,6 +21,8 @@
 14 сентября оставлен внизу и не является текущим статусом.
 
 ## Что можно обещать из source
+
+Проверка готовности с `jobId` ограничена задачей; prepare проверяет состояние задачи и привязки до сборки снимка; статус координатора объявляет исполнение и автоматический повтор spawn недоступными (`src/server/api/launch-rpc.ts:542-590`, `src/server/runtime/prepare-run/prepare.ts:104-149`, `src/server/runtime/launch/coordinator.ts:58-66`).
 
 | Область | Сейчас | Граница |
 | --- | --- | --- |
@@ -41,3 +59,13 @@ OpenCode и Antigravity; это доставка профиля через BB, �
 - AGY-17: installation-owner RPC, не caller context SDK 0.4.87.
 
 Подробности toolchain: [проверки](toolchain-validation.md).
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [События, вебхуки и автоматическая работа](automation-architecture.md)
+- [Активация по событиям и уведомлениям](events.md)
+- [Файлы, вопросы, передача работы и подключения](interaction-and-runtime.md)
+- [Агентство как рабочая организация агентов](operating-model.md)
+- [Рабочий план и закрытые этапы](roadmap.md)
+- [Задача как рабочее пространство команды](task-interaction.md)

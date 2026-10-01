@@ -1,3 +1,19 @@
+---
+title: Контекст сотрудника при запуске
+type: architecture
+created: 2026-09-15
+updated: 2026-09-28
+status: stale
+confidence: medium
+tags: [context-snapshot, launch, runtime]
+sources:
+  - docs/context-snapshot-revise.md
+  - docs/instruction-context.md
+  - docs/data-model.md
+  - src/server/runtime/context-snapshot/compile.ts
+  - src/server/runtime/prepare-run/prepare.ts
+  - src/server/api/launch-rpc.ts
+---
 # Контекст сотрудника при запуске
 
 Статус: compiler schema 2 и persist snapshot+attempt в source. Spawn — native
@@ -18,6 +34,8 @@
 Инструкции проекта сотруднику нужны в части его работы. Копирайтеру не нужна история разработки интерфейса или инструкции сборки, если он не меняет код. Но назначенная папка, запреты на публикацию/секреты, правила результата и применимые AGENTS обязательны. Нельзя просто отключать существующие проектные инструкции ради компактности: сначала владелец проекта оформляет отдельный краткий контракт исполнителя; полный источник остаётся доступен для проверки.
 
 ## Компоновка
+
+Prepare загружает контекст назначенной задачи, собирает снимок из привязки, задачи, версий сотрудника/процесса, политик и сохранённых входов; launch RPC предоставляет методы подготовки и проверки готовности (`src/server/runtime/prepare-run/prepare.ts:104-149`, `src/server/runtime/prepare-run/prepare.ts:239-269`, `src/server/api/launch-rpc.ts:70-80`, `src/server/api/launch-rpc.ts:542-590`).
 
 До запуска фиксируются IDs/revisions/hash всех источников. В стартовый контекст встраивается компактное ядро agency и применимые правила; agency-artifacts добавляется для создания/проверки файлов; model-task-prompts — диспетчеру и роли, которая ставит или передаёт работу. Профильные методы вроде telegram-ads-method назначаются только нужному сотруднику. Каталог методов не является набором инструкций для каждого запуска.
 
@@ -44,3 +62,9 @@
 5. Проверяющий работает без истории автора и ловит добавленные условия.
 6. Блокировки разрешений, лишние skills/MCP и ручное вмешательство отражены в отчёте.
 7. BB baseline spawn не выдаётся за завершённый Agency Run.
+
+<!-- lane-pilot:backlinks -->
+## Referenced by
+
+- [Revise: ContextSnapshot compiler (schemaVersion 2)](context-snapshot-revise.md)
+- [Основной навык плагина и справочный каталог](skills-integration.md)

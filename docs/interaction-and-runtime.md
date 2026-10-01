@@ -1,3 +1,23 @@
+---
+title: Файлы, вопросы, передача работы и подключения
+type: flow
+created: 2026-09-14
+updated: 2026-10-01
+status: stale
+confidence: medium
+tags: [files, needs-input, runtime]
+sources:
+  - docs/roadmap.md
+  - docs/implementation-readiness.md
+  - docs/session-context-contract.md
+  - src/server/runtime/needs-input/report.ts
+  - src/server/runtime/needs-input/answer.ts
+  - src/host/file-handlers.ts
+  - src/host/file-contract.ts
+  - src/host/guarded-fs.ts
+  - src/host/safe-path.ts
+  - src/host/entry-handlers.ts
+---
 # Файлы, вопросы, передача работы и подключения
 
 Актуальный общий порядок — [рабочий план](roadmap.md);
@@ -5,6 +25,8 @@
 Ниже контракт взаимодействий. Статус продукта: **0.1.0-alpha.16**.
 
 ## Что работает сейчас
+
+Рабочий путь вопроса проверяет задачу, попытку, квитанцию запуска, тред и ревизии до записи; ответы применяются отдельной службой продолжения, а операции с файлами на хосте используют защищённое чтение и запись (`src/server/runtime/needs-input/report.ts:131-175`, `src/server/runtime/needs-input/answer.ts:660-706`, `src/host/file-handlers.ts:8-42`).
 
 - Вложение открывается только по клику через `experimental_openFilePreview`.
   Это закрываемая файловая вкладка BB, а не автоматически открываемая fixed tab.
@@ -30,6 +52,37 @@
   и квот в этот API не входит. Политика enabled/reserve/disabled сохраняется
   в KV Агентства отдельно для hostId/providerId. Она не меняет настройки BB.
   Резерв пока не используется, поскольку диспетчер отсутствует.
+
+## Host file operation handler
+
+### Trigger
+
+The host RPC contract dispatches `fileOp` to `handleHostFileOp`. Its input schema accepts `writeAtomic`, `replace`, `read`, `stat`, or `remove`; requires a nonempty `canonicalRoot` (up to 1,024 characters) and `relativePath` (up to 512); caps `bytesBase64` at 8 MiB of string characters; and accepts an optional null or 64-character lowercase hexadecimal `expectedHash`. The root is a server-supplied path jail, not an access grant. (`src/host/entry-handlers.ts:6-10`, `src/host/file-contract.ts:4-13`, `src/host/file-contract.ts:15-27`, `src/host/file-contract.ts:30-37`)
+
+### How it works
+
+1. The handler branches on the operation and calls the corresponding guarded filesystem function with `canonicalRoot` and `relativePath`. Path resolution rejects lexical escapes and existing paths or symlinks that leave the root. (`src/host/file-handlers.ts:8-52`, `src/host/guarded-fs.ts:30-78`, `src/host/safe-path.ts:9-18`)
+2. `writeAtomic` requires `bytesBase64`, decodes it and creates an immutable file atomically; success returns size and SHA-256 hash. An existing target returns `artifact_immutable`. (`src/host/file-handlers.ts:9-19`, `src/host/guarded-fs.ts:123-165`)
+3. `replace` requires content and `expectedHash`; the guarded operation compares the current hash (or null if absent) before atomically replacing the file. A changed hash returns `file_changed`; success returns size and hash. (`src/host/file-handlers.ts:21-32`, `src/host/file-contract.ts:10-11`, `src/host/guarded-fs.ts:90-120`)
+4. `read` returns byte size, SHA-256 and base64 content. `stat` returns size and hash or `{ missing: true }` when absent. `remove` unlinks the guarded path and treats an absent file as success. (`src/host/file-handlers.ts:34-52`, `src/host/guarded-fs.ts:167-211`)
+
+### Modes
+
+| Operation | Required branch inputs | Success | Failure |
+| --- | --- | --- | --- |
+| `writeAtomic` | `bytesBase64` | Size and hash | Missing content → `invalid_file_op`; guarded path or write errors preserve the error code. (`src/host/file-handlers.ts:9-19`) |
+| `replace` | `bytesBase64`, `expectedHash` | Size and new hash | Missing fields → `invalid_file_op`; stale hash → `file_changed`; other guarded errors preserve their code. (`src/host/file-handlers.ts:21-32`) |
+| `read` | Path | Size, hash and base64 bytes | Missing file → `artifact_file_missing`; path/read errors return their code. (`src/host/file-handlers.ts:34-42`, `src/host/guarded-fs.ts:167-180`) |
+| `stat` | Path | Size/hash or `missing: true` | Path or filesystem errors return their code. (`src/host/file-handlers.ts:44-48`, `src/host/guarded-fs.ts:183-196`) |
+| `remove` | Path | `{ ok: true }`, including an absent file | Path or unlink errors return their code. (`src/host/file-handlers.ts:50-52`, `src/host/guarded-fs.ts:198-211`) |
+
+### Failures and compensation
+
+Expected filesystem failures return typed error codes. Atomic create and replace clean up their temporary file on write/link/rename failure; replace checks the expected hash before replacing. `remove` has no restore step. `handleHostFileOp` has no catch around awaited guarded calls, so an unexpected thrown exception propagates from the host handler rather than becoming an `{ ok: false }` response. (`src/host/guarded-fs.ts:90-120`, `src/host/guarded-fs.ts:123-165`, `src/host/guarded-fs.ts:198-211`, `src/host/file-handlers.ts:8-52`)
+
+### Related pages
+
+The input and output types are defined in [file-contract.ts](../src/host/file-contract.ts). Host RPC registration is described in [BB API and Agency routes](bb-api.md#registered-transports); related job files and needs-input behavior remain in this page's earlier sections.
 
 ## Обязательный контракт реального вопроса
 
